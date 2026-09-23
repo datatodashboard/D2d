@@ -3,15 +3,76 @@ import {EMPTY, readProgress, saveProgress, mergeProgress, nextTimestamp, workFin
 import {createCloudSync} from './cloud.js';
 import {renderSchemaCards} from './schema.js';
 import {escapeHtml} from './util.js';
-import {SqlEvaluator,loadBrowserPGlite} from './sql-evaluator.js';
+import {SqlEngineManager, loadBrowserPGlite} from './sql-evaluator.js?v=4';
 
 const $ = id => document.getElementById(id);
 let data, scenarios=[], ids=new Set(), state=EMPTY(), current=null, user=null;
 let selectedDomain=null, selectedLevel=null, client=null, deferredPrompt=null, syncTimer=null;
 let authNotice='';
-let sqlEvaluator=null,sqlEvaluationRunning=false;
 let storage;
 try { storage=window.localStorage; } catch { storage={getItem(){return null;},setItem(){throw Error('Storage unavailable');}}; }
+
+// Centralized SQL Engine Manager instance
+const sqlEngineManager = new SqlEngineManager({ loadPGlite: loadBrowserPGlite, timeoutMs: 4000 });
+
+sqlEngineManager.onStateChange((engineState, details) => {
+  const isBusy = sqlEngineManager.isBusy();
+  const runBtn = $('checkSqlButton');
+  const runLabel = $('checkSqlBtnLabel');
+  const resetBtn = $('resetSqlButton');
+  const resetIdeBtn = $('resetSqlIdeBtn');
+  const resetLabel = $('resetSqlBtnLabel');
+
+  if (resetBtn) resetBtn.disabled = isBusy;
+  if (resetIdeBtn) resetIdeBtn.disabled = isBusy;
+
+  switch (engineState) {
+    case 'initializing':
+      updateSqlEditorStatus('PostgreSQL • Initializing database...', 'initializing');
+      if (runBtn) runBtn.disabled = true;
+      if (runLabel) runLabel.textContent = 'Initializing...';
+      if (resetLabel) resetLabel.textContent = 'Reset SQL';
+      break;
+    case 'ready':
+      updateSqlEditorStatus('PostgreSQL • Ready', 'ready');
+      if (runLabel) runLabel.textContent = 'Check / Run SQL';
+      if (resetLabel) resetLabel.textContent = 'Reset SQL';
+      updateGates();
+      break;
+    case 'running':
+      updateSqlEditorStatus('PostgreSQL • Running query...', 'running');
+      if (runBtn) runBtn.disabled = true;
+      if (runLabel) runLabel.textContent = 'Checking query…';
+      break;
+    case 'completed':
+      if (details?.passed) {
+        updateSqlEditorStatus('PostgreSQL • Query verified ✓', 'verified');
+      } else {
+        updateSqlEditorStatus('PostgreSQL • Query error', 'error');
+      }
+      if (runLabel) runLabel.textContent = 'Check / Run SQL';
+      if (resetLabel) resetLabel.textContent = 'Reset SQL';
+      updateGates();
+      break;
+    case 'error':
+      updateSqlEditorStatus('PostgreSQL • Engine error', 'error');
+      if (runLabel) runLabel.textContent = 'Check / Run SQL';
+      if (resetLabel) resetLabel.textContent = 'Reset SQL';
+      updateGates();
+      break;
+    case 'resetting':
+      updateSqlEditorStatus('PostgreSQL • Resetting database...', 'resetting');
+      if (runBtn) runBtn.disabled = true;
+      if (runLabel) runLabel.textContent = 'Resetting...';
+      if (resetLabel) resetLabel.textContent = 'Resetting...';
+      break;
+    default:
+      updateSqlEditorStatus('PostgreSQL • Ready', 'ready');
+      if (runLabel) runLabel.textContent = 'Check / Run SQL';
+      updateGates();
+      break;
+  }
+});
 const labels={not_started:'Not started',thinking:'Thinking in progress',answer_viewed:'Earlier answer viewed — thinking not assessed',thinking_ready:'Thinking ready',sql_written:'SQL draft saved',fiddle_opened:'SQL draft saved',verified:'SQL verified'};
 const cloud=createCloudSync({
   client: {rpc(...args){return client.rpc(...args);}},
@@ -167,14 +228,20 @@ function renderAssessment(result) {
 }
 function updateGates() {
   const e = entry(), ready = current && thinkingIsReady(current, e), hasSql = !!e.sql?.trim();
+  const isBusy = sqlEngineManager.isBusy();
   if ($('sqlSection')) $('sqlSection').hidden = false;
-  if ($('checkSqlButton')) $('checkSqlButton').disabled = !hasSql || sqlEvaluationRunning;
+  if ($('checkSqlButton')) $('checkSqlButton').disabled = !hasSql || isBusy;
   if ($('checkSqlBtnLabel')) {
-    $('checkSqlBtnLabel').textContent = sqlEvaluationRunning ? 'Checking query…' : 'Check / Run SQL';
+    $('checkSqlBtnLabel').textContent = isBusy ? (sqlEngineManager.state === 'running' ? 'Checking query…' : (sqlEngineManager.state === 'initializing' ? 'Initializing…' : 'Resetting…')) : 'Check / Run SQL';
   }
+  if ($('resetSqlButton')) $('resetSqlButton').disabled = isBusy;
+  if ($('resetSqlIdeBtn')) $('resetSqlIdeBtn').disabled = isBusy;
   if ($('sqlGate')) {
     if (!hasSql) {
       $('sqlGate').textContent = 'Write your PostgreSQL query or click "⚡ Generate SQL" to load the query.';
+      $('sqlGate').style.color = 'var(--muted)';
+    } else if (isBusy) {
+      $('sqlGate').textContent = sqlEngineManager.state === 'initializing' ? 'Initializing isolated PostgreSQL session...' : (sqlEngineManager.state === 'resetting' ? 'Resetting scenario database session...' : 'Executing query in PostgreSQL sandbox engine…');
       $('sqlGate').style.color = 'var(--muted)';
     } else {
       $('sqlGate').textContent = 'Ready: Click "Check / Run SQL" (or Ctrl + Enter) to test your query against PostgreSQL.';
@@ -339,6 +406,37 @@ function clearLearnerSql() {
   textarea.focus();
 }
 
+function renderResultTable(result) {
+  if (!result || !Array.isArray(result.columns) || !result.columns.length || !Array.isArray(result.rows) || !result.rows.length) {
+    return '';
+  }
+  const total = result.actualRows || result.rows.length;
+  const displayRows = result.rows.slice(0, 25);
+  const rowsNote = total === 1 ? '1 row' : `${total} rows`;
+  const truncation = total > displayRows.length ? ` (showing first ${displayRows.length})` : '';
+
+  return `
+    <div class="sql-result-wrap">
+      <div class="sql-result-meta">
+        <span>Query Output: <strong>${escapeHtml(rowsNote)}</strong>${escapeHtml(truncation)}</span>
+        <span class="muted small">${result.columns.length} column${result.columns.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="table-scroll" style="max-height: 220px; background: #ffffff;">
+        <table class="sample-table">
+          <thead>
+            <tr>${result.columns.map(c => `<th>${escapeHtml(String(c))}</th>`).join('')}</tr>
+          </thead>
+          <tbody>
+            ${displayRows.map(row => `
+              <tr>${row.map(val => `<td>${escapeHtml(val === null ? 'NULL' : String(val))}</td>`).join('')}</tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 function renderSqlEvaluation(result) {
   const box = $('sqlEvaluation');
   if (!box) return;
@@ -352,6 +450,7 @@ function renderSqlEvaluation(result) {
   box.hidden = false;
   const preview = Array.isArray(result.preview) && result.preview.length ? result.preview : null;
   const previewText = preview ? 'Result preview:\n' + preview.map(row => row.map(val => val === null ? 'NULL' : val).join(' | ')).join('\n') : '';
+  const tableHtml = renderResultTable(result);
 
   if (result.passed) {
     updateSqlEditorStatus('PostgreSQL • Query verified ✓', 'verified');
@@ -363,26 +462,62 @@ function renderSqlEvaluation(result) {
         <span class="sql-verified-tag">Passed</span>
       </div>
       <div class="sql-verified-msg" id="sqlEvaluationMessage">${escapeHtml(result.message || 'Your query produced the expected result!')}</div>
-      ${preview ? `<pre id="sqlPreview" class="sql-preview-table">${escapeHtml(previewText)}</pre>` : '<pre id="sqlPreview" hidden></pre>'}
+      ${tableHtml || (preview ? `<pre id="sqlPreview" class="sql-preview-table">${escapeHtml(previewText)}</pre>` : '<pre id="sqlPreview" hidden></pre>')}
     `;
   } else {
     updateSqlEditorStatus('PostgreSQL • Query error', 'error');
     box.className = 'sql-error-card';
-    let guidance = 'Check the column name and try again.';
+    let guidance = 'Check your query logic, filters, and column expressions.';
     if (/relation .* does not exist/i.test(result.message || '')) {
-      guidance = 'Check the table name and try again.';
+      guidance = 'Check the table name in FROM / JOIN and verify schema tabs.';
+    } else if (/column .* does not exist/i.test(result.message || '')) {
+      guidance = 'Check the column name in SELECT, WHERE, or GROUP BY and try again.';
     } else if (/syntax error/i.test(result.message || '')) {
-      guidance = 'Check your SQL syntax and try again.';
+      guidance = 'Check your PostgreSQL SQL syntax, commas, and keyword spelling.';
+    } else if (/timed out|statement_timeout/i.test(result.message || '')) {
+      guidance = 'Query exceeded the 4-second timeout limit. Check for missing JOIN conditions or cartesian products.';
+    } else if (/engine|connection|could not start|failed to load/i.test(result.message || '')) {
+      guidance = 'Click "Reset SQL" or reload to restart the local PostgreSQL engine.';
+    } else if (/busy/i.test(result.message || '')) {
+      guidance = 'The database engine is currently busy. Please wait a moment.';
+    } else if (/columns but received|rows but received|values do not match/i.test(result.message || '')) {
+      guidance = 'Compare your actual query output below with the expected scenario requirements.';
     }
     box.innerHTML = `
       <div class="sql-error-title-row">
         <span class="sql-error-icon">⚠</span>
-        <span class="sql-error-label" id="sqlEvaluationTitle">SQL Error</span>
+        <span class="sql-error-label" id="sqlEvaluationTitle">${result.kind === 'result' ? 'Result Mismatch' : (result.kind === 'guard' ? 'Query Guard' : 'SQL Error')}</span>
       </div>
       <div class="sql-error-code-msg" id="sqlEvaluationMessage">${escapeHtml(result.message || 'Query execution error or mismatch.')}</div>
       <div class="sql-error-guidance">${escapeHtml(guidance)}</div>
-      <pre id="sqlPreview" hidden></pre>
+      ${tableHtml || (preview ? `<pre id="sqlPreview" class="sql-preview-table">${escapeHtml(previewText)}</pre>` : '<pre id="sqlPreview" hidden></pre>')}
     `;
+  }
+}
+
+async function resetCurrentSqlSession() {
+  if (!current || !data?.assets?.[current.domain]) return;
+  if (sqlEngineManager.isBusy()) return;
+
+  try {
+    renderSqlEvaluation(null);
+    if ($('sqlGate')) {
+      $('sqlGate').textContent = '🔄 Recreating clean scenario database...';
+      $('sqlGate').style.color = 'var(--muted)';
+    }
+    await sqlEngineManager.resetScenario(current, data.assets[current.domain]);
+    if ($('sqlGate')) {
+      $('sqlGate').textContent = '✓ Scenario database session reset to clean state.';
+      $('sqlGate').style.color = '#166534';
+    }
+    updateGates();
+  } catch (err) {
+    console.error('Reset scenario failed:', err);
+    renderSqlEvaluation({
+      passed: false,
+      kind: 'engine',
+      message: `Failed to reset scenario database: ${err.message}. Click "Reset SQL" to retry.`
+    });
   }
 }
 
@@ -405,6 +540,18 @@ function renderScenario() {
   renderSqlEvaluation(e.evaluationFingerprint===workFingerprint(e)?e.evaluationResult:null);
   updateSqlEditorView();
   updateProgress();updateGates();
+
+  // Initialize isolated SQL session for the current scenario
+  if (current && data?.assets?.[current.domain]) {
+    sqlEngineManager.initScenario(current, data.assets[current.domain]).catch(err => {
+      console.warn('Failed to initialize scenario SQL engine session:', err);
+      renderSqlEvaluation({
+        passed: false,
+        kind: 'engine',
+        message: `Local PostgreSQL engine could not start: ${err.message}. Click "Reset SQL" or reload to retry.`
+      });
+    });
+  }
 }
 function loadScenario() {
   if(!selectedDomain||!selectedLevel) return;
@@ -544,7 +691,7 @@ function generateSql() {
   updateGates();
   updateSqlEditorStatus('PostgreSQL • Ready', 'ready');
   if ($('sqlGate')) {
-    $('sqlGate').textContent = '✨ PostgreSQL query generated from plan! Review or check it locally, or copy to DB Fiddle.';
+    $('sqlGate').textContent = '✨ PostgreSQL query generated from plan! Click "Check / Run SQL" to test.';
     $('sqlGate').style.color = '#166534';
   }
   // Scroll smoothly to SQL section
@@ -981,55 +1128,41 @@ function copyAllScripts() {
   if (!current) return;
   const setup = (data.assets[current.domain]?.schema || '') + '\n\n' + (data.assets[current.domain]?.sample || '');
   const sql = ($('learnerSql')?.value || entry().sql || current.sql || '').trim();
-  const all = `-- =========================================\n-- DB FIDDLE SCHEMA + SAMPLE DATA (LEFT PANE)\n-- =========================================\n${setup}\n\n-- =========================================\n-- YOUR SQL QUERY (RIGHT PANE)\n-- =========================================\n${sql || current.sql};\n`;
+  const all = `-- =========================================\n-- POSTGRESQL SCHEMA + SAMPLE DATA\n-- =========================================\n${setup}\n\n-- =========================================\n-- YOUR SQL QUERY\n-- =========================================\n${sql || current.sql};\n`;
   void copy(all, 'All scripts (Schema + Sample data + SQL)');
 }
 
 function runDbFiddle() {
-  if (!current) return;
-  window.open('https://www.db-fiddle.com/', '_blank', 'noopener,noreferrer');
-  changeEntry({ fiddleFingerprint: workFingerprint(entry()) });
-  if ($('fiddleFallback')) $('fiddleFallback').hidden = false;
-  if ($('sqlGate')) {
-    $('sqlGate').textContent = 'DB Fiddle opened! Paste schema on the left and SQL on the right, then run.';
-    $('sqlGate').style.color = '#0369a1';
-  }
-  updateGates();
+  copyAllScripts();
 }
 
 function copySqlAndOpenFiddle() {
-  if (!current) return;
-  const sql = ($('learnerSql')?.value || entry().sql || current.sql || '').trim();
-  if (sql) {
-    try { navigator.clipboard.writeText(sql); } catch {}
-  }
-  window.open('https://www.db-fiddle.com/', '_blank', 'noopener,noreferrer');
-  changeEntry({ fiddleFingerprint: workFingerprint(entry()) });
-  if ($('fiddleFallback')) $('fiddleFallback').hidden = false;
-  if ($('sqlGate')) {
-    $('sqlGate').textContent = '✓ SQL copied to clipboard & DB Fiddle opened! Select PostgreSQL and paste in query pane.';
-    $('sqlGate').style.color = '#0369a1';
-  }
-  updateGates();
+  copyLearnerSql();
 }
 
 async function evaluateSql() {
   const e = entry();
   const sql = (e.sql || $('learnerSql')?.value || '').trim();
-  if (sqlEvaluationRunning || !current || !sql) {
-    if (!sql && $('sqlGate')) {
+  if (!current) return;
+  if (!sql) {
+    if ($('sqlGate')) {
       $('sqlGate').textContent = 'Please enter or generate a SQL query before checking.';
       $('sqlGate').style.color = 'var(--warn)';
     }
     return;
   }
-  sqlEvaluationRunning = true;
-  updateSqlEditorStatus('PostgreSQL • Checking...', 'checking');
-  renderSqlEvaluation({ passed: false, message: 'Executing query in PostgreSQL sandbox engine…' });
+  if (sqlEngineManager.isBusy()) {
+    return;
+  }
+
   updateGates();
   try {
-    if (!sqlEvaluator) sqlEvaluator = new SqlEvaluator(await loadBrowserPGlite());
-    const result = await sqlEvaluator.evaluate(current, data.assets[current.domain], sql);
+    const targetScenarioId = current.id;
+    const result = await sqlEngineManager.evaluate(current, data.assets[current.domain], sql);
+
+    // If scenario changed while awaiting, don't update entry of old scenario
+    if (!current || current.id !== targetScenarioId) return;
+
     const fingerprint = workFingerprint(entry());
     changeEntry({
       evaluationFingerprint: result.passed ? fingerprint : null,
@@ -1039,10 +1172,14 @@ async function evaluateSql() {
     });
     renderSqlEvaluation(result);
   } catch (error) {
-    renderSqlEvaluation({ passed: false, message: 'The local SQL engine could not start. Check your connection once, then retry.' });
-    console.error(error);
+    const detail = error?.message ? ` (${error.message})` : '';
+    renderSqlEvaluation({
+      passed: false,
+      kind: 'engine',
+      message: `The local SQL engine encountered an error${detail}. Click "Reset SQL" or retry.`
+    });
+    console.error('SQL Engine execution failure:', error);
   } finally {
-    sqlEvaluationRunning = false;
     updateGates();
   }
 }
@@ -1335,7 +1472,8 @@ Object.assign(window,{
   setDomainTrack,openOnboarding,closeOnboarding,toggleLandscapeMode,
   toggleProfileDropdown,closeProfileDropdown,openProfileModal,closeProfileModal,
   handleModalAuthAction,openMyProgress,handleProfileSignOut,
-  copyLearnerSql,clearLearnerSql,updateSqlEditorView
+  copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
+  sqlEngineManager
 });
 try {
   initLandscapeMode();

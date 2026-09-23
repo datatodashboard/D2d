@@ -22,6 +22,8 @@ app.use(express.static(__dirname, {
       res.setHeader('Content-Type', 'application/wasm');
     } else if (filePath.endsWith('.data')) {
       res.setHeader('Content-Type', 'application/octet-stream');
+    } else if (filePath.endsWith('.js') || filePath.endsWith('.json') || filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     }
   }
 }));

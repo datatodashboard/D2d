@@ -1,4 +1,4 @@
-const CACHE='crack-sql-verified-v7';
+const CACHE='crack-sql-verified-v9';
 const ROOT=new URL('./',self.location).href;
 const SHELL=['index.html','manifest.json','icon-512.png','icon-maskable-512.png','apple-touch-icon.png',
 'data/scenarios.json','js/app.js','js/thinking.js','js/progress.js','js/cloud.js','js/schema.js','js/sql-evaluator.js','js/util.js',
@@ -8,7 +8,13 @@ const SHELL=['index.html','manifest.json','icon-512.png','icon-maskable-512.png'
 
 self.addEventListener('install',event=>{
   self.skipWaiting();
-  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)));
+  event.waitUntil(
+    caches.open(CACHE).then(async cache => {
+      await Promise.allSettled(
+        SHELL.map(url => cache.add(url).catch(err => console.warn('PWA shell cache item failed:', url, err)))
+      );
+    })
+  );
 });
 
 self.addEventListener('activate',event=>{
@@ -22,7 +28,9 @@ self.addEventListener('fetch',event=>{
   const req=event.request,url=new URL(req.url);
   if(req.method!=='GET'||url.origin!==self.location.origin)return;
   const isNavigation=req.mode==='navigate';
-  if(!isNavigation&&!SHELL.includes(url.href))return;
+  const isCodeOrData=url.pathname.endsWith('.js')||url.pathname.endsWith('.json')||url.pathname.endsWith('.html');
+
+  if(!isNavigation&&!isCodeOrData&&!SHELL.includes(url.href))return;
 
   event.respondWith((async()=>{
     const cache=await caches.open(CACHE);
@@ -37,8 +45,32 @@ self.addEventListener('fetch',event=>{
         throw e;
       }
     }
+
+    // Network-first for code and data to prevent stale cached versions
+    if (isCodeOrData) {
+      try {
+        const netResp = await fetch(req);
+        if (netResp && netResp.ok) {
+          cache.put(req, netResp.clone());
+        }
+        return netResp;
+      } catch {
+        const cached = await cache.match(req);
+        if (cached) return cached;
+      }
+    }
+
+    // Cache-first for large static assets (WASM, data blobs, icons)
     const cached=await cache.match(req);
     if(cached)return cached;
-    return fetch(req);
+    try {
+      const netResp = await fetch(req);
+      if (netResp && netResp.ok) {
+        cache.put(req, netResp.clone());
+      }
+      return netResp;
+    } catch (e) {
+      throw e;
+    }
   })());
 });
