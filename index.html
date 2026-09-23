@@ -1,0 +1,2071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Crack SQL — Data2Dashboard (D2D)</title>
+<meta name="description" content="Practice 420 real-world PostgreSQL exercises across seven domains. Explain your reasoning, write SQL, and verify the result in the app." />
+<meta name="theme-color" content="#2563eb" />
+<link rel="canonical" href="https://thinkandcracksql.netlify.app/" />
+
+<!-- Favicon (inline SVG, no extra file needed) -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' font-family='Arial,Helvetica,sans-serif' font-size='22' font-weight='900' fill='white' text-anchor='middle'%3ESQL%3C/text%3E%3C/svg%3E" />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://thinkandcracksql.netlify.app/" />
+<meta property="og:title" content="Crack SQL — Data2Dashboard (D2D)" />
+<meta property="og:description" content="420 exercises across seven domains. Think first, write PostgreSQL, and verify the result in the app." />
+<meta property="og:image" content="https://thinkandcracksql.netlify.app/icon-512.png" />
+<meta property="og:image:width" content="512" />
+<meta property="og:image:height" content="512" />
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Crack SQL — Think Like a Data Engineer, Not Just a SQL Developer" />
+<meta name="twitter:description" content="Think first, write PostgreSQL, and verify the result across seven real-world domains." />
+<meta name="twitter:image" content="https://thinkandcracksql.netlify.app/icon-512.png" />
+
+<!-- PWA -->
+<link rel="manifest" href="./manifest.json" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Crack SQL" />
+
+<!-- Supabase (accounts + progress sync) -->
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<style>
+:root {
+  --bg:#f5f7fb;
+  --surface:#ffffff;
+  --ink:#0f172a;
+  --muted:#64748b;
+  --line:#e2e8f0;
+  --primary:#2563eb;
+  --primary2:#1d4ed8;
+  --soft:#eff6ff;
+  --good:#16a34a;
+  --warn:#d97706;
+  --code:#0b1220;
+  --codeText:#dbeafe;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+}
+.app {
+  max-width:520px;
+  min-height:100vh;
+  margin:0 auto;
+  padding:18px 16px 28px;
+  transition:max-width .2s ease;
+}
+body.landscape-layout .app {
+  max-width:1360px;
+  padding:18px 24px 84px;
+}
+@media (min-width: 860px) {
+  .app {
+    max-width:1360px;
+    padding:18px 24px 84px;
+  }
+}
+@media (orientation: landscape) and (min-width: 680px) {
+  .app {
+    max-width:1360px;
+    padding:14px 20px 84px;
+  }
+}
+.header {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  margin-bottom:20px;
+}
+h1 { margin:0; font-size:31px; letter-spacing:-.9px; }
+.sub { margin-top:4px; color:var(--muted); font-size:14px; }
+.version {
+  background:#dbeafe;
+  color:#1e40af;
+  font-size:12px;
+  font-weight:800;
+  padding:7px 10px;
+  border-radius:999px;
+}
+.screen { display:none; }
+.screen.active { display:block; }
+.label {
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.9px;
+  color:var(--muted);
+  font-weight:900;
+  margin:18px 0 10px;
+}
+.grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+.pick {
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:21px;
+  padding:17px 14px;
+  box-shadow:0 7px 20px rgba(15,23,42,.04);
+  cursor:pointer;
+}
+.pick:active { transform:scale(.98); }
+.pick.active {
+  border-color:var(--primary);
+  background:var(--soft);
+  box-shadow:0 8px 24px rgba(37,99,235,.13);
+}
+.icon { font-size:26px; margin-bottom:7px; }
+.pick-title { font-weight:900; }
+.pick-note { color:var(--muted); font-size:12px; margin-top:4px; }
+.levels { display:flex; gap:10px; flex-wrap:wrap; }
+.level {
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:12px 15px;
+  font-weight:900;
+  font-size:13px;
+  cursor:pointer;
+}
+.level.active {
+  background:var(--primary);
+  color:white;
+  border-color:var(--primary);
+}
+.hint { color:var(--muted); text-align:center; margin-top:20px; font-size:13px; }
+.topbar {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:13px;
+}
+.linkbtn {
+  border:none;
+  background:transparent;
+  padding:0;
+  color:var(--primary);
+  font-weight:900;
+  cursor:pointer;
+}
+.meta { color:var(--muted); font-size:12px; font-weight:800; }
+.card {
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:22px;
+  padding:17px;
+  margin-bottom:14px;
+  box-shadow:0 7px 20px rgba(15,23,42,.04);
+}
+.scenario-head {
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+}
+.qno {
+  color:var(--primary);
+  background:#dbeafe;
+  border-radius:999px;
+  padding:6px 9px;
+  font-size:12px;
+  font-weight:900;
+  white-space:nowrap;
+}
+h2 {
+  margin:0 0 9px;
+  font-size:22px;
+  letter-spacing:-.4px;
+  line-height:1.2;
+}
+.problem {
+  color:#334155;
+  line-height:1.55;
+  font-size:15px;
+}
+.tags { display:flex; gap:7px; flex-wrap:wrap; margin-top:12px; }
+.tag {
+  background:#f1f5f9;
+  border:1px solid var(--line);
+  color:#475569;
+  border-radius:999px;
+  padding:6px 9px;
+  font-size:12px;
+  font-weight:800;
+}
+.schema-text {
+  background:#f8fafc;
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:13px;
+  font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#334155;
+  white-space:pre-wrap;
+}
+.schema-cards { display:flex; flex-direction:column; gap:10px; }
+.schema-card {
+  background:#f8fafc;
+  border:1px solid var(--line);
+  border-radius:14px;
+  overflow:hidden;
+}
+.schema-card-head {
+  background:#0f172a;
+  color:#fff;
+  font-weight:900;
+  font-size:13px;
+  padding:9px 12px;
+  display:flex;
+  align-items:center;
+  gap:7px;
+}
+.schema-card-head .tbl-icon { font-size:13px; }
+.schema-card-body { padding:6px 0; }
+.schema-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:7px 12px;
+  font-size:13px;
+  border-top:1px solid #eef2f7;
+}
+.schema-row:first-child { border-top:none; }
+.schema-col-name {
+  font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#1e293b;
+}
+.schema-badges { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.badge-pk, .badge-fk {
+  font-size:10px;
+  font-weight:900;
+  border-radius:999px;
+  padding:3px 7px;
+  letter-spacing:.3px;
+}
+.badge-pk { background:#fef3c7; color:#92400e; border:1px solid #fde68a; }
+.badge-fk { background:#dbeafe; color:#1e40af; border:1px solid #bfdbfe; }
+.fk-ref { font-size:10.5px; color:#64748b; white-space:nowrap; }
+
+.progress-card {
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:15px 16px;
+  margin-bottom:18px;
+  box-shadow:0 7px 20px rgba(15,23,42,.04);
+}
+.progress-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+.progress-label { font-size:12px; font-weight:900; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; }
+.progress-count { font-size:13px; font-weight:900; color:var(--primary); }
+.progress-track { background:#e2e8f0; border-radius:999px; height:8px; overflow:hidden; }
+.progress-fill { background:linear-gradient(90deg,var(--primary),var(--good)); height:100%; border-radius:999px; transition:width .3s ease; }
+.progress-reset { border:none; background:transparent; color:var(--muted); font-size:11px; margin-top:8px; cursor:pointer; text-decoration:underline; padding:0; }
+
+.done-tag {
+  background:#dcfce7;
+  color:#166534;
+  border:1px solid #bbf7d0;
+  border-radius:999px;
+  padding:5px 9px;
+  font-size:11px;
+  font-weight:900;
+  white-space:nowrap;
+  display:none;
+}
+.done-tag.show { display:inline-block; }
+
+.auth-card {
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:13px 14px;
+  margin-bottom:14px;
+  box-shadow:0 7px 20px rgba(15,23,42,.04);
+}
+.auth-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.auth-row input[type="email"] {
+  flex:1;
+  min-width:150px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:10px 12px;
+  font-size:14px;
+  outline:none;
+}
+.auth-row input[type="email"]:focus { border-color:var(--primary); }
+.auth-row button.action { width:auto; }
+
+.install-banner {
+  display:none;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  background:#0f172a;
+  color:#fff;
+  border-radius:16px;
+  padding:12px 14px;
+  margin-bottom:14px;
+}
+.install-banner.show { display:flex; }
+.install-banner .txt { font-size:13px; line-height:1.4; }
+.install-banner button {
+  border:none;
+  background:var(--primary);
+  color:#fff;
+  font-weight:900;
+  font-size:12.5px;
+  padding:9px 12px;
+  border-radius:10px;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.ios-hint {
+  font-size:12px;
+  color:var(--muted);
+  text-align:center;
+  margin-bottom:14px;
+  line-height:1.5;
+}
+textarea {
+  width:100%;
+  min-height:150px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:14px;
+  resize:vertical;
+  outline:none;
+  font-size:14px;
+  line-height:1.5;
+}
+textarea:focus {
+  border-color:var(--primary);
+  box-shadow:0 0 0 3px rgba(37,99,235,.12);
+}
+.actions {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:12px;
+}
+button.action {
+  border:none;
+  border-radius:15px;
+  padding:13px 11px;
+  font-size:14px;
+  font-weight:900;
+  cursor:pointer;
+}
+.primary { background:var(--primary); color:white; }
+.secondary { background:#dcfce7; color:#166534; }
+.ghost { background:#f1f5f9; color:#334155; }
+.feedback { display:none; margin-top:13px; }
+.feedback.active { display:block; }
+.score {
+  background:#eff6ff;
+  color:#1e40af;
+  border:1px solid #bfdbfe;
+  border-radius:16px;
+  padding:13px;
+  font-weight:900;
+  margin-bottom:10px;
+}
+.improve {
+  background:#fffbeb;
+  color:#92400e;
+  border:1px solid #fde68a;
+  border-radius:16px;
+  padding:13px;
+  line-height:1.5;
+  margin-bottom:10px;
+  font-size:14px;
+}
+.pseudo {
+  background:#f0fdf4;
+  color:#14532d;
+  border:1px solid #bbf7d0;
+  border-radius:16px;
+  padding:13px;
+  line-height:1.5;
+  margin-bottom:10px;
+  font-size:14px;
+}
+pre {
+  background:var(--code);
+  color:var(--codeText);
+  border-radius:16px;
+  padding:15px;
+  overflow:auto;
+  white-space:pre-wrap;
+  font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+.runbox {
+  background:#f8fafc;
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:13px;
+  color:#334155;
+  font-size:13px;
+  line-height:1.5;
+  margin-top:10px;
+}
+.small { font-size:12px; color:var(--muted); line-height:1.45; }
+.footer {
+  color:var(--muted);
+  text-align:center;
+  font-size:12px;
+  margin-top:20px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+}
+@media (max-width:380px) {
+  .actions { grid-template-columns:1fr; }
+  .grid { grid-template-columns:1fr; }
+}
+</style>
+<style>
+[hidden] { display:none !important; }
+label { display:block; font-weight:650; margin:16px 0 6px; }
+textarea { min-height:100px; }
+#learnerSql, #copyText { min-height:180px; font-family:monospace; }
+button:disabled { opacity:.5; cursor:not-allowed; }
+#improve { padding-left:22px; line-height:1.8; }
+#improve li.pass-item { color: #166534; }
+#syncStatus { font-size:13px; }
+.evaluation { margin:12px 0; padding:12px; border-radius:14px; background:#f8fafc; border:1px solid var(--line); }
+.evaluation.pass { background:#f0fdf4; border-color:#86efac; color:#166534; }
+.evaluation.fail { background:#fff7ed; border-color:#fdba74; color:#9a3412; }
+.evaluation pre { max-height:220px; overflow:auto; white-space:pre-wrap; }
+.pick:focus-visible,.level:focus-visible { outline:3px solid #2563eb; }
+
+/* Splash Screen */
+.splash-screen {
+  position: fixed; inset: 0; z-index: 9999;
+  background: radial-gradient(circle at 50% 30%, #1e293b, #0f172a);
+  display: flex; align-items: center; justify-content: center; text-align: center; color: white;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+.splash-screen.hide { opacity: 0; visibility: hidden; pointer-events: none; }
+.splash-logo {
+  width: 76px; height: 76px; background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-radius: 22px; display: flex; align-items: center; justify-content: center;
+  font-size: 28px; font-weight: 900; color: white; margin: 0 auto 18px;
+  box-shadow: 0 10px 30px rgba(37, 99, 235, 0.4); animation: pulse 1.8s infinite;
+}
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+.splash-watermark {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #38bdf8;
+  opacity: 0.9;
+  margin-bottom: 6px;
+}
+.splash-title { font-size: 26px; font-weight: 900; letter-spacing: -0.5px; margin-bottom: 6px; }
+.splash-tagline { font-size: 13px; color: #94a3b8; max-width: 280px; margin: 0 auto 24px; line-height: 1.4; }
+.splash-spinner {
+  width: 28px; height: 28px; border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: #38bdf8; border-radius: 50%; margin: 0 auto; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Modals */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.modal-dialog {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 24px;
+  max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 22px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.2); position: relative;
+}
+.modal-large { max-width: 620px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.modal-badge {
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px;
+  background: #eff6ff; color: #1e40af; padding: 4px 10px; border-radius: 999px;
+}
+.modal-close-btn {
+  background: transparent; border: none; font-size: 18px; font-weight: 700;
+  color: var(--muted); cursor: pointer; padding: 4px 8px; border-radius: 8px;
+}
+.modal-close-btn:hover { background: #f1f5f9; color: var(--ink); }
+.onboard-step { display: flex; gap: 14px; margin-bottom: 14px; align-items: flex-start; }
+.onboard-num {
+  width: 32px; height: 32px; border-radius: 50%; background: var(--soft);
+  color: var(--primary); font-weight: 900; font-size: 14px; display: flex;
+  align-items: center; justify-content: center; flex-shrink: 0;
+}
+.onboard-title { font-weight: 800; font-size: 14px; margin-bottom: 2px; }
+.onboard-desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
+
+/* Compare Modal */
+.compare-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+@media (max-width: 520px) { .compare-columns { grid-template-columns: 1fr; } }
+.compare-card { border-radius: 16px; padding: 12px; border: 1px solid var(--line); }
+.compare-card.user-plan { background: #faf5ff; border-color: #e9d5ff; }
+.compare-card.expert-plan { background: #eff6ff; border-color: #bfdbfe; }
+.compare-col-header { font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
+.compare-content { font-size: 13px; line-height: 1.5; white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
+.compare-checklist-grid { display: grid; gap: 8px; }
+.compare-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; background: #f8fafc; border: 1px solid var(--line); }
+.compare-item.passed { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.compare-icon { font-weight: 900; font-size: 14px; }
+.compare-tag { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Step SQL Modal */
+.step-sql-container { display: flex; flex-direction: column; gap: 12px; }
+.step-card { background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 12px; }
+.step-title { font-size: 13px; font-weight: 800; color: var(--primary2); margin-bottom: 6px; }
+.step-code { margin: 0; background: var(--code); color: var(--codeText); border-radius: 12px; padding: 10px 12px; font-size: 12px; overflow-x: auto; }
+
+/* Score Ring & Actions */
+.score-ring-container {
+  display: flex; gap: 16px; align-items: center; background: #f8fafc;
+  border: 1px solid var(--line); border-radius: 20px; padding: 14px; margin: 12px 0;
+}
+.score-ring {
+  width: 76px; height: 76px; border-radius: 50%;
+  background: conic-gradient(var(--primary) 0deg, var(--line) 0deg);
+  display: grid; place-items: center; flex-shrink: 0; transition: background 0.4s ease;
+}
+.score-ring-inner {
+  width: 58px; height: 58px; border-radius: 50%; background: var(--surface);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  box-shadow: inset 0 2px 5px rgba(0,0,0,0.05);
+}
+.score-number { font-size: 18px; font-weight: 900; line-height: 1; }
+.score-denom { font-size: 10px; font-weight: 700; color: var(--muted); }
+.score-details { flex: 1; min-width: 0; }
+.score-headline { font-size: 13px; font-weight: 800; margin-bottom: 6px; }
+.score-chips-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.score-chip { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: #f1f5f9; color: var(--muted); }
+.score-chip.pass { background: #dcfce7; color: #166534; }
+.score-chip.fail { background: #fee2e2; color: #991b1b; }
+.score-actions-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.tool-btn {
+  background: var(--surface); border: 1px solid var(--line); color: var(--ink);
+  font-size: 12px; font-weight: 700; border-radius: 10px; padding: 6px 10px;
+  cursor: pointer; transition: all 0.15s;
+}
+.tool-btn:hover { background: var(--soft); border-color: var(--primary); color: var(--primary); }
+.tool-btn:active { transform: scale(0.97); }
+.tool-btn.accent { background: var(--primary); color: #fff; border-color: var(--primary); }
+.tool-btn.accent:hover { filter: brightness(1.1); color: #fff; }
+.tool-btn.highlight { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.tool-btn.highlight:hover { background: #dbeafe; }
+
+.track-pills { display: flex; gap: 6px; }
+.track-pill {
+  padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer;
+  transition: all .2s;
+}
+.track-pill:hover { border-color: var(--primary); color: var(--primary); }
+.track-pill.active {
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
+
+.how-to-think-card {
+  background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 14px;
+  padding: 16px; margin-top: 14px;
+}
+
+/* Schema & Sample Data Tabs */
+.tab-header { display: flex; gap: 8px; border-bottom: 1px solid var(--line); margin-bottom: 12px; padding-bottom: 8px; }
+.tab-btn {
+  border: none; background: transparent; font-size: 13px; font-weight: 800;
+  color: var(--muted); padding: 6px 12px; border-radius: 10px; cursor: pointer;
+}
+.tab-btn.active { background: var(--soft); color: var(--primary); }
+.sample-table-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 10px; }
+.sample-tab {
+  background: #f1f5f9; border: 1px solid var(--line); border-radius: 8px;
+  font-size: 12px; font-weight: 700; padding: 4px 10px; cursor: pointer; white-space: nowrap;
+}
+.sample-tab.active { background: var(--primary); color: white; border-color: var(--primary); }
+.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; max-height: 240px; overflow-y: auto; }
+.sample-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+.sample-table th {
+  background: #f8fafc; padding: 8px 12px; border-bottom: 1px solid var(--line);
+  font-weight: 800; position: sticky; top: 0; z-index: 1;
+}
+.sample-table td { padding: 7px 12px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
+.sample-table tr:hover td { background: #f8fafc; }
+
+/* Home Search & Catalog */
+.search-box { margin: 14px 0 6px; }
+.search-input {
+  width: 100%; padding: 12px 16px; border-radius: 16px; border: 1px solid var(--line);
+  background: var(--surface); font-size: 13px; outline: none; box-shadow: 0 4px 14px rgba(15,23,42,0.03);
+}
+.search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+.catalog-grid { display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; padding-right: 4px; }
+.catalog-item {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  padding: 12px 14px; cursor: pointer; transition: all 0.15s;
+}
+.catalog-item:hover { border-color: var(--primary); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,99,235,0.08); }
+.catalog-item.active { border-color: var(--primary); background: var(--soft); }
+.catalog-item-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.catalog-id { font-weight: 900; font-size: 13px; color: var(--ink); }
+.catalog-domain-tag { font-size: 11px; color: var(--muted); font-weight: 600; flex: 1; }
+.catalog-question {
+  font-size: 13px; color: #334155; line-height: 1.4; overflow: hidden;
+  text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.status-pill { font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.status-pill.verified { background: #dcfce7; color: #166534; }
+.status-pill.thinking { background: #e0e7ff; color: #3730a3; }
+.status-pill.draft { background: #fef3c7; color: #92400e; }
+.status-pill.not-started { background: #f1f5f9; color: #64748b; }
+
+/* Dedicated Progress Screen */
+.progress-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+.stat-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+  padding: 14px; box-shadow: 0 4px 14px rgba(15,23,42,0.03);
+}
+.stat-val { font-size: 22px; font-weight: 900; color: var(--ink); }
+.stat-sub { font-size: 12px; color: var(--muted); margin-top: 2px; font-weight: 700; }
+.domain-stat-cards { display: grid; gap: 10px; margin-bottom: 20px; }
+.domain-stat-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+  padding: 14px; box-shadow: 0 4px 14px rgba(15,23,42,0.03);
+}
+.domain-stat-head { display: flex; align-items: center; gap: 12px; }
+.domain-stat-icon { font-size: 24px; }
+.domain-stat-title { font-weight: 900; font-size: 14px; }
+.domain-stat-sub { font-size: 11px; color: var(--muted); }
+.domain-stat-count { font-size: 12px; color: var(--muted); }
+.domain-stat-levels {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px; color: var(--muted); font-weight: 700; margin-top: 6px;
+}
+.ghost-btn-sm {
+  background: #f1f5f9; border: 1px solid var(--line); color: var(--ink);
+  font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+}
+.ghost-btn-sm:hover { background: var(--soft); border-color: var(--primary); color: var(--primary); }
+.filter-pills { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; }
+.filter-pill {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  padding: 5px 12px; font-size: 12px; font-weight: 800; color: var(--muted); cursor: pointer; white-space: nowrap;
+}
+.filter-pill.active { background: var(--primary); color: white; border-color: var(--primary); }
+.progress-table-box {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+  padding: 14px; overflow-x: auto; box-shadow: 0 4px 14px rgba(15,23,42,0.03);
+}
+
+/* Bottom Nav & FAB */
+.bottom-nav {
+  position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+  width: min(480px, calc(100vw - 24px)); background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 24px;
+  box-shadow: 0 10px 30px rgba(15,23,42,0.1); display: flex; justify-content: space-around;
+  padding: 6px 12px; z-index: 1000;
+}
+.nav-item {
+  border: none; background: transparent; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px; padding: 6px 16px;
+  border-radius: 16px; cursor: pointer; color: var(--muted); transition: all 0.15s;
+}
+.nav-item.active { color: var(--primary); background: var(--soft); }
+.nav-icon { font-size: 18px; line-height: 1; }
+.nav-label { font-size: 11px; font-weight: 800; }
+.fab-practice {
+  position: fixed; bottom: 76px; right: max(16px, calc(50vw - 230px));
+  width: 48px; height: 48px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--primary2));
+  color: white; border: none; font-size: 20px; cursor: pointer;
+  box-shadow: 0 6px 20px rgba(37,99,235,0.35); display: flex; align-items: center; justify-content: center;
+  z-index: 900; transition: transform 0.2s;
+}
+.fab-practice:hover { transform: scale(1.08); }
+.app { padding-bottom: 84px !important; }
+
+/* Landscape Mode Responsive Rules */
+.practice-landscape-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.practice-col-left, .practice-col-right {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+body.landscape-layout .practice-landscape-grid,
+@media (min-width: 860px), (orientation: landscape) and (min-width: 680px) {
+  .practice-landscape-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .practice-col-right {
+    position: sticky;
+    top: 14px;
+  }
+  #coreDomainsGrid {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+  #extraDomainsWrapper .grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+  .catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    max-height: 480px;
+  }
+  .progress-stat-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .domain-stat-cards {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  .fab-practice {
+    right: max(20px, calc(50vw - 640px));
+  }
+  .bottom-nav {
+    width: min(520px, calc(100vw - 32px));
+  }
+  #learnerSql {
+    min-height: 240px;
+  }
+}
+
+.btn-landscape-toggle {
+  display: none !important;
+}
+
+/* Circular Profile Button & Dropdown */
+.profile-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.profile-avatar-btn {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.profile-avatar-btn:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+  transform: translateY(-1px) scale(1.04);
+}
+
+.profile-avatar-btn:active {
+  transform: scale(0.96);
+}
+
+.profile-avatar-btn:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.4);
+}
+
+.profile-avatar-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
+
+.profile-avatar-initial {
+  font-size: 16px;
+  font-weight: 900;
+  color: #1e40af;
+  background: #eff6ff;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+}
+
+/* Modern Profile Dropdown Card */
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 250px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.04);
+  padding: 8px;
+  z-index: 2500;
+  transform-origin: top right;
+  animation: dropdownFadeIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.profile-dropdown-user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  margin-bottom: 6px;
+}
+
+.dropdown-user-avatar {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #eff6ff;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 16px;
+}
+
+.dropdown-user-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.dropdown-user-name {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.dropdown-user-email {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.profile-dropdown-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profile-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.profile-dropdown-btn:hover {
+  background: #f1f5f9;
+  color: var(--primary);
+  transform: translateX(2px);
+}
+
+.profile-dropdown-btn:active {
+  transform: scale(0.98);
+}
+
+.profile-dropdown-btn.danger:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.profile-btn-icon {
+  font-size: 16px;
+  width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Static Brand Text — Data To Dashboard (Non-clickable, pure company branding) */
+.d2d-header-brand {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #475569;
+  cursor: default;
+  pointer-events: none;
+  user-select: none;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 4px 6px;
+}
+
+.d2d-company-kicker {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0284c7;
+  cursor: default;
+  pointer-events: none;
+  user-select: none;
+  line-height: 1.2;
+  margin-bottom: 3px;
+}
+
+/* Premium Subtle Watermark — Powered by D2D */
+.d2d-watermark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+  pointer-events: none;
+  cursor: default;
+  line-height: 1;
+}
+.d2d-watermark .wm-powered {
+  font-size: 11px;
+  font-weight: 400;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+.d2d-watermark .wm-brand {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #1e293b;
+}
+
+/* Discreet Persistent Floating Watermark (Bottom-Right on desktop, zero mobile overlap) */
+.d2d-floating-watermark {
+  position: fixed;
+  bottom: 16px;
+  right: 20px;
+  z-index: 50;
+  pointer-events: none;
+  user-select: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4.5px;
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 9999px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+.d2d-floating-watermark .wm-powered {
+  font-size: 10px;
+  font-weight: 450;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+.d2d-floating-watermark .wm-brand {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #0f172a;
+}
+
+@media (max-width: 859px) {
+  .d2d-floating-watermark {
+    display: none !important; /* Ensure zero overlap with bottom navigation on mobile */
+  }
+}
+
+/* Modern SQL IDE Workbench */
+.sql-workbench-card {
+  padding: 16px !important;
+}
+
+.sql-ide-container {
+  background: #0b1120;
+  border: 1.5px solid #1e293b;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08);
+  margin-top: 8px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sql-ide-container:focus-within {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.22), 0 12px 32px rgba(15, 23, 42, 0.2);
+}
+
+/* IDE Window Title Bar */
+.sql-ide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #080d1a;
+  padding: 9px 14px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.sql-ide-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ide-file-icon {
+  font-size: 15px;
+}
+
+.ide-title-text {
+  font-size: 13px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: 0.2px;
+}
+
+.ide-file-tab {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.sql-dialect-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #94a3b8;
+  background: #1e293b;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  user-select: none;
+}
+
+.dialect-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+/* IDE Secondary Toolbar */
+.sql-ide-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0f172a;
+  padding: 8px 12px;
+  border-bottom: 1px solid #1e293b;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sql-ide-tools-left,
+.sql-ide-tools-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ide-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.ide-tool-btn:hover {
+  background: #334155;
+  color: #ffffff;
+  border-color: #475569;
+  transform: translateY(-1px);
+}
+
+.ide-tool-btn:active {
+  transform: scale(0.97);
+}
+
+.ide-tool-btn.primary {
+  background: linear-gradient(135deg, #1d4ed8, #0284c7);
+  border-color: #3b82f6;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+}
+
+.ide-tool-btn.primary:hover {
+  filter: brightness(1.12);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.38);
+}
+
+.ide-tool-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: #94a3b8;
+}
+
+.ide-tool-btn.ghost:hover {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
+}
+
+/* IDE Code Area */
+.sql-ide-editor-wrap {
+  display: flex;
+  position: relative;
+  background: #080d1a;
+  min-height: 220px;
+  max-height: 480px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13.5px;
+  line-height: 22px;
+}
+
+.sql-ide-gutter {
+  width: 44px;
+  min-width: 44px;
+  background: #060913;
+  border-right: 1px solid #1e293b;
+  padding: 12px 8px 12px 0;
+  text-align: right;
+  color: #475569;
+  font-size: 12px;
+  line-height: 22px;
+  user-select: none;
+  overflow: hidden;
+}
+
+.sql-line-num {
+  height: 22px;
+  line-height: 22px;
+}
+
+.sql-ide-code-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: #080d1a;
+  overflow: hidden;
+}
+
+.sql-ide-highlight,
+#learnerSql {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  margin: 0;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 22px;
+  tab-size: 2;
+  white-space: pre;
+  word-wrap: normal;
+  box-sizing: border-box;
+}
+
+.sql-ide-highlight {
+  pointer-events: none;
+  color: #f1f5f9;
+  background: transparent;
+  overflow: hidden;
+  z-index: 1;
+}
+
+#learnerSql {
+  z-index: 2;
+  color: transparent;
+  background: transparent;
+  caret-color: #38bdf8;
+  resize: vertical;
+  overflow: auto;
+}
+
+#learnerSql::placeholder {
+  color: #475569;
+}
+
+#learnerSql::selection {
+  background: rgba(56, 189, 248, 0.32);
+}
+
+/* Syntax Highlighting Tokens */
+.tok-kw { color: #f472b6; font-weight: 700; }
+.tok-fn { color: #38bdf8; font-weight: 700; }
+.tok-str { color: #4ade80; }
+.tok-cmt { color: #64748b; font-style: italic; }
+.tok-num { color: #fb923c; }
+
+/* IDE Status Bar */
+.sql-ide-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #060913;
+  padding: 6px 14px;
+  border-top: 1px solid #1e293b;
+  font-size: 11.5px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  user-select: none;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sql-statusbar-left,
+.sql-statusbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sql-status-indicator {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sql-status-indicator.ready { color: #10b981; }
+.sql-status-indicator.checking { color: #38bdf8; animation: pulse 1s infinite; }
+.sql-status-indicator.verified { color: #10b981; }
+.sql-status-indicator.error { color: #ef4444; }
+
+.sql-status-label {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.status-sep {
+  opacity: 0.3;
+}
+
+.sql-shortcut-badge {
+  color: #64748b;
+  font-size: 10.5px;
+  background: #1e293b;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #334155;
+}
+
+/* Main SQL Actions Bar */
+.sql-actions-bar {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0 10px;
+}
+
+.sql-run-btn {
+  flex: 1.3;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  color: #ffffff !important;
+  border: none;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sql-run-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1e40af, #1d4ed8);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45);
+  transform: translateY(-1px);
+}
+
+.sql-run-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.sql-run-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.sql-next-btn {
+  flex: 1;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sql-next-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--soft);
+  transform: translateY(-1px);
+}
+
+.sql-next-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.sql-next-btn:not(:disabled) {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #166534;
+  font-weight: 800;
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.22);
+}
+
+/* Modern Inline Error Panel */
+.sql-error-card {
+  background: #fef2f2;
+  border: 1.5px solid #fecaca;
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-top: 12px;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.06);
+}
+
+.sql-error-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sql-error-icon {
+  font-size: 16px;
+  color: #dc2626;
+}
+
+.sql-error-label {
+  font-size: 13.5px;
+  font-weight: 900;
+  color: #991b1b;
+  letter-spacing: 0.3px;
+}
+
+.sql-error-code-msg {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #b91c1c;
+  background: #ffffff;
+  border: 1px solid #fee2e2;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.sql-error-guidance {
+  font-size: 12px;
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+/* Modern Inline Verified Panel */
+.sql-verified-card {
+  background: #f0fdf4;
+  border: 1.5px solid #bbf7d0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-top: 12px;
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.08);
+}
+
+.sql-verified-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.sql-verified-icon {
+  font-size: 16px;
+  color: #16a34a;
+  font-weight: 900;
+}
+
+.sql-verified-label {
+  font-size: 14px;
+  font-weight: 900;
+  color: #166534;
+}
+
+.sql-verified-tag {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #15803d;
+  margin-left: auto;
+}
+
+.sql-verified-msg {
+  font-size: 13px;
+  color: #166534;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.sql-preview-table {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #dcfce7;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre;
+}
+
+@media (max-width: 520px) {
+  .sql-actions-bar {
+    flex-direction: column;
+  }
+}
+</style>
+<script type="module" src="./js/app.js?v=3"></script>
+</head>
+<body>
+
+<!-- Splash Screen -->
+<div id="splashScreen" class="splash-screen">
+  <div class="splash-content">
+    <div class="splash-logo">SQL</div>
+    <div class="splash-watermark">Data To Dashboard</div>
+    <div class="splash-title">Crack SQL</div>
+    <div class="splash-tagline">Think Like a Data Engineer, Not Just a SQL Developer</div>
+    <div class="splash-spinner"></div>
+    <div style="margin-top: 20px; font-size: 11.5px; opacity: 0.75; letter-spacing: 0.04em;">
+      <span style="font-weight: 400; color: #94a3b8;">Powered by</span> <strong style="font-weight: 800; color: #f8fafc;">D2D</strong>
+    </div>
+  </div>
+</div>
+
+<!-- Onboarding Modal -->
+<div id="onboarding" class="modal-backdrop" style="display:none;">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <div class="modal-badge">Data Engineering Framework</div>
+      <button class="modal-close-btn" onclick="closeOnboarding()">✕</button>
+    </div>
+    <h2 style="margin: 8px 0 12px; font-size: 22px;">How to Crack Any SQL Problem</h2>
+    <p class="small" style="font-size: 13px; margin-bottom: 16px;">Most learners jump straight into SELECT statements and get stuck in syntax errors. Crack SQL enforces the 4-step thinking method used by senior data engineers:</p>
+    <div class="onboard-step">
+      <div class="onboard-num">1</div>
+      <div>
+        <div class="onboard-title">Target Goal</div>
+        <div class="onboard-desc">Clarify what output metric or business entity is requested.</div>
+      </div>
+    </div>
+    <div class="onboard-step">
+      <div class="onboard-num">2</div>
+      <div>
+        <div class="onboard-title">Data Sources & Joins</div>
+        <div class="onboard-desc">Identify which tables hold the data and how foreign keys connect.</div>
+      </div>
+    </div>
+    <div class="onboard-step">
+      <div class="onboard-num">3</div>
+      <div>
+        <div class="onboard-title">Logic Steps & Transformations</div>
+        <div class="onboard-desc">Outline filters (WHERE), aggregations (GROUP BY), CTEs, or window functions.</div>
+      </div>
+    </div>
+    <div class="onboard-step">
+      <div class="onboard-num">4</div>
+      <div>
+        <div class="onboard-title">Sanity Check</div>
+        <div class="onboard-desc">Verify edge cases: nulls, grain duplicates, zero counts, and sorting.</div>
+      </div>
+    </div>
+    <div style="margin-top: 20px;">
+      <button class="action primary" style="width: 100%; padding: 14px; font-size: 15px;" onclick="closeOnboarding()">Start Practicing</button>
+    </div>
+  </div>
+</div>
+
+<!-- Compare with Expert Modal -->
+<div id="compareModal" class="modal-backdrop" hidden>
+  <div class="modal-dialog modal-large">
+    <div class="modal-header">
+      <div class="modal-badge">Reasoning Comparison</div>
+      <button class="modal-close-btn" onclick="closeCompare()">✕</button>
+    </div>
+    <h2 style="margin: 8px 0 16px; font-size: 20px;">Your Thinking vs. Expert Data Engineer</h2>
+    
+    <div class="compare-columns">
+      <div class="compare-card user-plan">
+        <div class="compare-col-header">👤 Your Plan</div>
+        <div id="userThinkingCompare" class="compare-content"></div>
+      </div>
+      <div class="compare-card expert-plan">
+        <div class="compare-col-header">💡 Expert Data Engineer Reasoning</div>
+        <div id="expertThinkingCompare" class="compare-content"></div>
+      </div>
+    </div>
+    
+    <div style="margin-top: 14px;">
+      <div style="font-weight: 800; font-size: 12px; margin-bottom: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;">Business Logic Checklist</div>
+      <div id="compareChecklist" class="compare-checklist-grid"></div>
+    </div>
+    
+    <div style="margin-top: 16px;">
+      <div style="font-weight: 800; font-size: 12px; margin-bottom: 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;">Scenario Solution Logic</div>
+      <div id="expertPseudoCompare" class="pseudo" style="max-height: 140px; overflow-y: auto;"></div>
+    </div>
+    
+    <div style="margin-top: 18px; text-align: right;">
+      <button class="action primary" onclick="closeCompare()">Done Reviewing</button>
+    </div>
+  </div>
+</div>
+
+<!-- Step SQL Modal -->
+<div id="stepSqlModal" class="modal-backdrop" hidden>
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <div class="modal-badge">Step-by-Step SQL Hint</div>
+      <button class="modal-close-btn" onclick="closeStepSql()">✕</button>
+    </div>
+    <h2 style="margin: 8px 0 12px; font-size: 20px;">SQL Clause Breakdown</h2>
+    <p class="small" style="margin-bottom: 14px;">Build your query step-by-step from source tables to final output projections.</p>
+    <div id="stepSqlList" class="step-sql-container"></div>
+    <div style="margin-top: 18px; text-align: right;">
+      <button class="action primary" onclick="closeStepSql()">Got It</button>
+    </div>
+  </div>
+</div>
+
+<!-- Profile Details Modal -->
+<div id="profileModal" class="modal-backdrop" hidden>
+  <div class="modal-dialog" style="max-width: 440px;">
+    <div class="modal-header">
+      <div class="modal-badge">User Profile</div>
+      <button class="modal-close-btn" onclick="closeProfileModal()">✕</button>
+    </div>
+    
+    <div style="text-align: center; padding: 14px 0 16px;">
+      <div id="modalProfileAvatar" class="dropdown-user-avatar" style="width: 72px; height: 72px; font-size: 28px; margin: 0 auto 12px; box-shadow: 0 4px 14px rgba(37,99,235,0.18);">
+        👤
+      </div>
+      <h2 id="modalProfileName" style="margin: 0 0 4px; font-size: 20px;">Guest Learner</h2>
+      <div id="modalProfileEmail" style="color: var(--muted); font-size: 13px;">Practicing on this device</div>
+      <div id="modalProfileStatus" style="margin-top: 10px; display: inline-block; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 999px; background: #eff6ff; color: #1e40af;">
+        Local Guest Mode
+      </div>
+    </div>
+
+    <div style="background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 16px;">
+      <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); margin-bottom: 10px;">Practice Overview</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div style="background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px;">
+          <div style="font-size: 11px; color: var(--muted); font-weight: 700;">Verified SQLs</div>
+          <div id="modalProfileSolved" style="font-size: 20px; font-weight: 900; color: var(--ink); margin-top: 2px;">0 / 240</div>
+        </div>
+        <div style="background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px;">
+          <div style="font-size: 11px; color: var(--muted); font-weight: 700;">Account Status</div>
+          <div id="modalProfileSync" style="font-size: 12px; font-weight: 800; color: #166534; margin-top: 6px;">Saved Locally</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px;">
+      <button class="action secondary" id="modalAuthActionBtn" onclick="handleModalAuthAction()" style="flex: 1; padding: 11px; font-size: 13.5px;"></button>
+      <button class="action primary" onclick="closeProfileModal()" style="flex: 1; padding: 11px; font-size: 13.5px;">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="app">
+
+<section id="home" class="screen active">
+  <div class="header">
+    <div>
+      <div class="d2d-company-kicker">Data To Dashboard</div>
+      <h1>Crack SQL</h1>
+      <div class="sub">Think like a Data Engineer • Plan in English • Crack the SQL</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span class="d2d-header-brand">Data To Dashboard</span>
+      <button class="ghost-btn-sm" onclick="openOnboarding()">How it works</button>
+
+      <!-- Circular Profile Button & Dropdown in top-right corner -->
+      <div class="profile-container" id="profileContainer">
+        <button id="profileBtn" class="profile-avatar-btn" onclick="toggleProfileDropdown(event)" aria-haspopup="true" aria-expanded="false" title="User Profile">
+          <span id="profileAvatarContent" class="profile-avatar-content">👤</span>
+        </button>
+
+        <div id="profileDropdown" class="profile-dropdown" hidden>
+          <div class="profile-dropdown-user-card">
+            <div class="dropdown-user-avatar" id="dropdownAvatar">👤</div>
+            <div class="dropdown-user-meta">
+              <div class="dropdown-user-name" id="dropdownName">Guest Learner</div>
+              <div class="dropdown-user-email" id="dropdownEmail">Practicing on this device</div>
+            </div>
+          </div>
+          
+          <div class="profile-dropdown-items">
+            <button class="profile-dropdown-btn" onclick="openProfileModal()">
+              <span class="profile-btn-icon">👤</span>
+              <span>Profile</span>
+            </button>
+            <button class="profile-dropdown-btn" onclick="openMyProgress()">
+              <span class="profile-btn-icon">📊</span>
+              <span>My Progress</span>
+            </button>
+            <button class="profile-dropdown-btn danger" id="profileSignOutBtn" onclick="handleProfileSignOut()">
+              <span class="profile-btn-icon">🚪</span>
+              <span id="profileSignOutLabel">Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="install-banner" id="installBanner">
+    <div class="txt">📲 Install Think and Crack SQL as an app for quick access & offline practice.</div>
+    <button onclick="installApp()">Install</button>
+  </div>
+  <div class="ios-hint" id="iosHint" style="display:none">On iPhone: tap the Share icon, then "Add to Home Screen" to install.</div>
+
+  <div class="auth-card" id="authBox"></div>
+
+  <div class="progress-card">
+    <div class="progress-top">
+      <div class="progress-label" id="progressTrackLabel">Verified SQL Progress (4 Core Domains)</div>
+      <div class="progress-count" id="progressCount">0 / 240</div>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    <p id="progressStages" class="small"></p>
+    <p class="small">Progress is recorded only when your query matches the expected PostgreSQL result.</p>
+    <p id="syncStatus" role="status" aria-live="polite"></p>
+    <button class="progress-reset" onclick="resetProgress()">Reset my progress</button>
+    <button class="progress-reset" onclick="retrySync()">Retry sync</button>
+    <button class="progress-reset" onclick="importOldHistory()">Import earlier device history</button>
+    <button class="progress-reset" id="importGuest" hidden onclick="importGuestProgress()">Import guest practice</button>
+    <button class="progress-reset" id="importCloud" hidden onclick="importCloudHistory()">Import earlier account history</button>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 8px;flex-wrap:wrap;gap:8px;">
+    <div class="label" style="margin:0;">Choose Domain</div>
+    <div class="track-pills">
+      <button class="track-pill active" id="trackCoreBtn" onclick="setDomainTrack('core')">★ 4 Core Domains (240)</button>
+      <button class="track-pill" id="trackAllBtn" onclick="setDomainTrack('all')">All Domains (420)</button>
+    </div>
+  </div>
+
+  <div class="grid" id="coreDomainsGrid">
+    <div class="pick domain" onclick="selectDomain('Banking',this)"><div class="icon">🏦</div><div class="pick-title">Banking</div><div class="pick-note">Accounts & transactions (60)</div></div>
+    <div class="pick domain" onclick="selectDomain('Healthcare',this)"><div class="icon">🏥</div><div class="pick-title">Healthcare</div><div class="pick-note">Patients & visits (60)</div></div>
+    <div class="pick domain" onclick="selectDomain('Insurance',this)"><div class="icon">🛡️</div><div class="pick-title">Insurance</div><div class="pick-note">Policies & claims (60)</div></div>
+    <div class="pick domain" onclick="selectDomain('Retail',this)"><div class="icon">🛒</div><div class="pick-title">Retail</div><div class="pick-note">Orders & products (60)</div></div>
+  </div>
+
+  <div id="extraDomainsWrapper" hidden style="margin-top:12px;">
+    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;">Additional Industry Domains</div>
+    <div class="grid">
+      <div class="pick domain" onclick="selectDomain('Capital Markets',this)"><div class="icon">📈</div><div class="pick-title">Capital Markets</div><div class="pick-note">Investors & trades (60)</div></div>
+      <div class="pick domain" onclick="selectDomain('Semiconductor',this)"><div class="icon">🔬</div><div class="pick-title">Semiconductor</div><div class="pick-note">Batches & chip tests (60)</div></div>
+      <div class="pick domain" onclick="selectDomain('Education',this)"><div class="icon">🎓</div><div class="pick-title">Education</div><div class="pick-note">Students & assessments (60)</div></div>
+    </div>
+  </div>
+
+  <div class="label">Choose Level</div>
+  <div class="levels">
+    <div class="level" onclick="selectLevel('Beginner',this)">Beginner</div>
+    <div class="level" onclick="selectLevel('Intermediate',this)">Intermediate</div>
+    <div class="level" onclick="selectLevel('Expert',this)">Expert</div>
+  </div>
+
+  <div class="hint" style="margin-top:28px;">Select a domain and level above to open the scenario.</div>
+</section>
+
+<section id="practice" class="screen">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="linkbtn" onclick="goHome()">← Change</button>
+    </div>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <div class="practice-landscape-grid">
+    <div class="practice-col-left">
+      <div class="card">
+        <div class="scenario-head">
+          <div>
+            <h2 id="title"></h2>
+            <div class="problem" id="question"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+            <div class="qno" id="qno"></div>
+            <div class="done-tag" id="doneTag"></div>
+          </div>
+        </div>
+        <div class="tags" id="tags"></div><p id="learningStage" class="small"></p>
+      </div>
+
+      <div class="card">
+        <div class="tab-header">
+          <button class="tab-btn active" id="tabSchema" onclick="setSchemaTab('schema')">Schema Overview</button>
+          <button class="tab-btn" id="tabSample" onclick="setSchemaTab('sample')">Sample Data Preview</button>
+        </div>
+        <div id="schemaOverview">
+          <div class="schema-cards" id="schema"></div>
+        </div>
+        <div id="sampleDataView" hidden></div>
+      </div>
+
+      <div class="card">
+        <h2>1. Think through the problem</h2>
+        <p>Think like you would explain the solution to another person. SQL comes after your reasoning.</p>
+        
+        <label for="thinking" style="margin-top:12px;">How would you solve this problem?</label>
+        <textarea id="thinking" maxlength="8000" placeholder="In your own words: what result is needed, which data would you use, what steps would you follow, and how would you check the answer?"></textarea>
+        <div class="actions">
+          <button class="action primary" onclick="evaluatePlan()">Check my thinking</button>
+          <button class="action secondary" onclick="generateSql()">⚡ Generate SQL from Plan</button>
+        </div>
+        <p class="small">Explain your approach naturally in your own words. Think through what data you need and how to get the desired result.</p>
+        <div id="feedback" class="feedback" role="status" aria-live="polite">
+          <div class="score" id="score"></div><p id="assessmentMessage"></p>
+          <ul id="improve"></ul>
+        </div>
+        <div id="howToThinkBox" hidden></div>
+      </div>
+    </div>
+
+    <div class="practice-col-right">
+      <div class="card sql-workbench-card" id="sqlSection">
+        <h2 style="margin-top: 0; margin-bottom: 8px;">2. SQL Query Editor & Engine</h2>
+        
+        <!-- Modern SQL IDE Workbench -->
+        <div class="sql-ide-container" id="sqlIdeContainer">
+          
+          <!-- IDE Window Header -->
+          <div class="sql-ide-header">
+            <div class="sql-ide-header-left">
+              <span class="ide-file-icon">🗄</span>
+              <span class="ide-title-text">SQL Editor</span>
+              <span class="ide-file-tab">solution.sql</span>
+            </div>
+            <div class="sql-ide-header-right">
+              <div class="sql-dialect-badge" title="Target Engine: PostgreSQL 16+">
+                <span class="dialect-dot"></span>
+                <span class="dialect-name">PostgreSQL ▾</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- IDE Secondary Toolbar -->
+          <div class="sql-ide-toolbar">
+            <div class="sql-ide-tools-left">
+              <button class="ide-tool-btn primary" onclick="generateSql()" title="Generate complete PostgreSQL query from the scenario plan">
+                <span class="ide-btn-icon">⚡</span>
+                <span>Generate SQL</span>
+              </button>
+              <button class="ide-tool-btn" onclick="useStarterSql()" title="Insert starter boilerplate query">
+                <span class="ide-btn-icon">📋</span>
+                <span>Starter Query</span>
+              </button>
+              <button class="ide-tool-btn" onclick="showStepSql()" title="Step-by-step SQL clause hints">
+                <span class="ide-btn-icon">💡</span>
+                <span>Step-by-Step Hint</span>
+              </button>
+            </div>
+            <div class="sql-ide-tools-right">
+              <button class="ide-tool-btn ghost" id="copySqlBtn" onclick="copyLearnerSql()" title="Copy current SQL to clipboard">
+                <span class="ide-btn-icon">📋</span>
+                <span>Copy</span>
+              </button>
+              <button class="ide-tool-btn ghost" onclick="clearLearnerSql()" title="Clear editor content">
+                <span class="ide-btn-icon">🗑️</span>
+                <span>Clear</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- IDE Code Workspace: Line Numbers + Syntax Highlight Overlay + Textarea -->
+          <div class="sql-ide-editor-wrap" id="sqlEditorWrap">
+            <div class="sql-ide-gutter" id="sqlGutter" aria-hidden="true">
+              <div class="sql-line-num">1</div>
+            </div>
+            <div class="sql-ide-code-area">
+              <pre class="sql-ide-highlight" id="sqlHighlightPre" aria-hidden="true"><code id="sqlHighlightCode"></code></pre>
+              <textarea id="learnerSql" maxlength="20000" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-- Write or generate your PostgreSQL query here...&#10;SELECT *&#10;FROM table;&#10;-- Press Ctrl+Enter to check SQL"></textarea>
+            </div>
+          </div>
+
+          <!-- IDE Status Bar -->
+          <div class="sql-ide-statusbar">
+            <div class="sql-statusbar-left">
+              <span class="sql-status-indicator ready" id="sqlStatusDot">●</span>
+              <span id="sqlStatusText" class="sql-status-label">PostgreSQL • Ready</span>
+            </div>
+            <div class="sql-statusbar-right">
+              <span id="sqlLineCount">Lines: 1</span>
+              <span class="status-sep">|</span>
+              <span id="sqlCharCount">Chars: 0</span>
+              <span class="status-sep">|</span>
+              <span class="sql-shortcut-badge" title="Run query shortcut">Ctrl + Enter ↵</span>
+            </div>
+          </div>
+
+        </div>
+
+        <p id="sqlGate" class="small" style="margin: 8px 0 10px;"></p>
+
+        <!-- Redesigned Main SQL Actions: Run / Check and Next Scenario -->
+        <div class="sql-actions-bar">
+          <button class="action primary sql-run-btn" id="checkSqlButton" onclick="evaluateSql()">
+            <span class="btn-icon">▶</span>
+            <span id="checkSqlBtnLabel">Check / Run SQL</span>
+          </button>
+          <button class="action secondary sql-next-btn" id="nextButton" onclick="nextScenario()" disabled>
+            <span>Next Scenario</span>
+            <span class="btn-icon">→</span>
+          </button>
+        </div>
+
+        <!-- Modern Inline Error / Verified Panel -->
+        <div id="sqlEvaluation" class="evaluation" hidden role="status" aria-live="polite">
+          <strong id="sqlEvaluationTitle"></strong>
+          <p id="sqlEvaluationMessage"></p>
+          <pre id="sqlPreview" hidden></pre>
+        </div>
+
+        <p id="practiceStatus" role="status"></p>
+        <details id="solutionHelp" hidden><summary>Review suggested reasoning and reference SQL</summary>
+          <p class="small">This is one reference approach. Other correct SQL solutions are possible.</p>
+          <div id="pseudo"></div><pre id="referenceSql"></pre>
+        </details>
+      </div>
+
+      <div class="card" id="manualCopy" hidden>
+        <label for="copyText">Clipboard unavailable: select and copy this text</label>
+        <textarea id="copyText" readonly></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="footer">
+    <div>Crack SQL • 420 exercises • Think → Write → Verify</div>
+    <div class="d2d-watermark" aria-label="Powered by D2D">
+      <span class="wm-powered">Powered by</span>
+      <span class="wm-brand">D2D</span>
+    </div>
+  </div>
+</section>
+
+<!-- Dedicated Progress Screen -->
+<section id="progressScreen" class="screen">
+  <div class="header">
+    <div>
+      <h1>Learning Analytics</h1>
+      <div class="sub">Your SQL Mastery & Domain Progress</div>
+    </div>
+    <button class="linkbtn" onclick="showScreen('home')">← Home</button>
+  </div>
+
+  <div class="progress-stat-grid">
+    <div class="stat-card">
+      <div class="stat-val" id="progressScreenCount">0 / 420</div>
+      <div class="stat-sub">Verified SQLs</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" id="progressScreenPct">0%</div>
+      <div class="stat-sub">Mastery Rate</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" id="progressScreenAvg">0.0 / 10</div>
+      <div class="stat-sub">Avg Thinking Score</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" id="progressScreenStarted">0</div>
+      <div class="stat-sub">Exercises Started</div>
+    </div>
+  </div>
+
+  <div class="label">Domain Breakdown</div>
+  <div class="domain-stat-cards" id="progressDomainCards"></div>
+
+  <div class="label" style="margin-top:24px;">Scenario Library & Status</div>
+  <div class="filter-pills">
+    <button class="filter-pill p-dom-btn active" onclick="filterProgressDomain('All')">All Domains</button>
+    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Banking')">Banking</button>
+    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Healthcare')">Healthcare</button>
+    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Insurance')">Insurance</button>
+    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Capital Markets')">Capital Markets</button>
+    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Semiconductor')">Semiconductor</button>
+    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Education')">Education</button>
+    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Retail')">Retail</button>
+  </div>
+  <div class="filter-pills" style="margin-top:-6px;">
+    <button class="filter-pill p-status-btn active" data-status="All" onclick="filterProgressStatus('All')">All Status</button>
+    <button class="filter-pill p-status-btn" data-status="verified" onclick="filterProgressStatus('verified')">✓ Verified</button>
+    <button class="filter-pill p-status-btn" data-status="started" onclick="filterProgressStatus('started')">In Progress</button>
+    <button class="filter-pill p-status-btn" data-status="not_started" onclick="filterProgressStatus('not_started')">Not Started</button>
+  </div>
+  <div class="search-box">
+    <input type="text" class="search-input" placeholder="Filter scenario list..." oninput="filterProgressSearch(this.value)" />
+  </div>
+  <div id="progressResultCount" class="small muted" style="margin-bottom:8px;"></div>
+  <div class="progress-table-box">
+    <table class="sample-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Domain</th>
+          <th>Level</th>
+          <th>Score</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="progressTableBody"></tbody>
+    </table>
+  </div>
+  <div class="footer">
+    <div>Crack SQL • 420 exercises • Think → Write → Verify</div>
+    <div class="d2d-watermark" aria-label="Powered by D2D">
+      <span class="wm-powered">Powered by</span>
+      <span class="wm-brand">D2D</span>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<!-- Bottom Floating Navigation -->
+<nav class="bottom-nav">
+  <button class="nav-item active" id="navHome" onclick="showScreen('home')">
+    <span class="nav-icon">🧭</span>
+    <span class="nav-label">Explore</span>
+  </button>
+  <button class="nav-item" id="navPractice" onclick="showScreen('practice')">
+    <span class="nav-icon">⚡</span>
+    <span class="nav-label">Practice</span>
+  </button>
+  <button class="nav-item" id="navProgress" onclick="showScreen('progress')">
+    <span class="nav-icon">📊</span>
+    <span class="nav-label">Progress</span>
+  </button>
+</nav>
+
+<!-- Floating Action Button for quick return to active problem -->
+<button class="fab-practice" id="fabPractice" onclick="showScreen('practice')" title="Jump to active exercise">
+  ⚡
+</button>
+
+<!-- Subtle Floating Watermark — Powered by D2D (Bottom-Right, non-blocking on desktop, hidden on mobile) -->
+<div class="d2d-floating-watermark" aria-hidden="true">
+  <span class="wm-powered">Powered by</span>
+  <span class="wm-brand">D2D</span>
+</div>
+</div>
+
+</body>
+</html>

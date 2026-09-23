@@ -1,0 +1,19 @@
+{
+  "name": "think-and-crack-sql",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "build": "node copy-vendor.js",
+    "start": "node server.js",
+    "lint": "node --check server.js copy-vendor.js js/*.js sw.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

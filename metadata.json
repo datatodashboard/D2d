@@ -1,0 +1,6 @@
+{
+  "name": "Crack SQL — Data2Dashboard (D2D)",
+  "description": "Practice 420 real-world PostgreSQL exercises across seven domains. Explain your reasoning, write SQL, and verify the result in the app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
