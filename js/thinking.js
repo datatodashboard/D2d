@@ -18,7 +18,8 @@ const STOP_WORDS = new Set([
   'details', 'result', 'results', 'output', 'information', 'here', 'where', 'each',
   'all', 'only', 'both', 'table', 'tables', 'scratch', 'above', 'below', 'it', 'them',
   'my', 'our', 'what', 'which', 'to', 'for', 'with', 'by', 'as', 'and', 'or', 'in', 'on',
-  'filter', 'select', 'need', 'want', 'should', 'have', 'from', 'into', 'join', 'like', 'keep', 'using'
+  'filter', 'select', 'need', 'want', 'should', 'have', 'from', 'into', 'join', 'like', 'keep', 'using',
+  'one', 'two', 'three', 'four', 'five', 'multiple', 'several', 'different', 'related', 'these', 'those', 'given', 'either', 'such', 'other', 'another', 'same'
 ]);
 
 export function normalize(text) {
