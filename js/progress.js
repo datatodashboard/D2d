@@ -11,6 +11,8 @@ export function sanitize(value, ids) {
     // Keep earlier four-box answers readable after upgrading to the single-box UI.
     for(const k of ['goal','sources','steps','check'])thinking[k]=String(entry.thinking?.[k]||'').slice(0,4000);
     result.entries[id] = {thinking, sql:String(entry.sql || '').slice(0,20000),
+      variantIndex: Number.isFinite(entry.variantIndex) ? entry.variantIndex : null,
+      skill: typeof entry.skill === 'string' ? entry.skill : null,
       assessment: entry.assessment && typeof entry.assessment === 'object' ? entry.assessment : null,
       fiddleFingerprint: typeof entry.fiddleFingerprint === 'string' ? entry.fiddleFingerprint : null,
       evaluationFingerprint: typeof entry.evaluationFingerprint === 'string' ? entry.evaluationFingerprint : null,
@@ -20,6 +22,9 @@ export function sanitize(value, ids) {
       validationNotes:String(entry.validationNotes || '').slice(0,4000),
       answerViewed:!!entry.answerViewed, legacyViewed:!!entry.legacyViewed,
       updatedAt:entry.updatedAt};
+  }
+  if (value.skills && typeof value.skills === 'object') {
+    result.skills = value.skills;
   }
   return result;
 }

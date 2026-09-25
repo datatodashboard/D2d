@@ -1,4 +1,6 @@
 // Think and Crack SQL — Admin Dashboard Controller
+// Reads existing Supabase learner data from public.profiles and public.learning_progress
+import { stage } from './progress.js';
 import { escapeHtml } from './util.js';
 
 const SUPABASE_URL = 'https://qklnaqfspvmnlequqagf.supabase.co';
@@ -7,7 +9,9 @@ const SUPABASE_ANON_KEY = 'sb_publishable_dthVX8zmvd1HvWaYWBaojA_2YbvHWe1';
 let client = null;
 let currentUser = null;
 let isAdminUser = false;
+
 let totalScenariosCount = 420;
+const scenariosMap = new Map();
 
 let learnersData = [];
 let sortField = 'solved';
@@ -18,12 +22,12 @@ const $ = id => document.getElementById(id);
 
 window.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
-  loadScenarioBankCount().catch(err => console.warn('Scenario count load:', err));
+  await loadScenarioBank();
   await initSupabase();
 });
 
-// Load scenario count using deployment-safe URL for GitHub Pages
-async function loadScenarioBankCount() {
+// Load scenario bank using deployment-safe relative URL
+async function loadScenarioBank() {
   try {
     const url = new URL('../data/scenarios.json', import.meta.url).href;
     const res = await fetch(url);
@@ -31,12 +35,14 @@ async function loadScenarioBankCount() {
       const data = await res.json();
       if (data && Array.isArray(data.scenarios)) {
         totalScenariosCount = data.scenarios.length;
+        scenariosMap.clear();
+        data.scenarios.forEach(s => scenariosMap.set(s.id, s));
         const note = $('scenarioBankNote');
         if (note) note.textContent = `(of ${totalScenariosCount})`;
       }
     }
   } catch (err) {
-    console.warn('Relative scenario fetch failed, using fallback count:', err);
+    console.warn('Relative scenarios.json fetch failed, using fallback scenario map:', err);
   }
 }
 
@@ -138,9 +144,13 @@ async function evaluateAdminStatus() {
       }
     }
 
-    // 4. Check user app metadata
+    // 4. Check user app metadata or known admin email
     if (!isAuthorized) {
-      if (currentUser.app_metadata?.is_admin === true || currentUser.user_metadata?.is_admin === true) {
+      if (
+        currentUser.app_metadata?.is_admin === true ||
+        currentUser.user_metadata?.is_admin === true ||
+        currentUser.email === 'datatodashboard2@gmail.com'
+      ) {
         isAuthorized = true;
       }
     }
@@ -310,99 +320,148 @@ async function signOut() {
   }
 }
 
-// Load and Render Admin Data
+// Main Data Fetch: Reads existing Supabase tables (public.profiles and public.learning_progress)
 async function loadDashboardData() {
-  updateStatus('Fetching latest learner records…');
+  updateStatus('Reading existing learner records from public.profiles & public.learning_progress…');
 
   try {
-    // 1. Fetch RPC stats if present
-    let rpcStats = null;
-    try {
-      const { data, error } = await client.rpc('get_admin_dashboard_stats');
-      if (!error && data) rpcStats = data;
-    } catch (e) {
-      console.warn('RPC dashboard stats not available:', e);
-    }
-
-    // 2. Fetch Profiles, Progress, and Challenge Attempts
-    const [profilesRes, progressRes, attemptsRes] = await Promise.all([
-      client.from('profiles').select('*').order('created_at', { ascending: false }).limit(500),
-      client.from('progress').select('user_id, scenario_id, completed_at').limit(3000),
-      client.from('sql_challenge_attempts').select('user_id, scenario_id, domain, created_at, is_verified').limit(3000)
+    // Fetch directly from the two source-of-truth tables used by the application
+    const [profilesRes, progressRes] = await Promise.all([
+      client.from('profiles').select('*').order('created_at', { ascending: false }).limit(2000),
+      client.from('learning_progress').select('user_id, state, updated_at').limit(2000)
     ]);
 
+    if (profilesRes.error) {
+      console.warn('Profiles query notice:', profilesRes.error);
+    }
+    if (progressRes.error) {
+      console.warn('Learning progress query notice:', progressRes.error);
+    }
+
     const profiles = profilesRes.data || [];
-    const progress = progressRes.data || [];
-    const attempts = attemptsRes.data || [];
+    const learningRows = progressRes.data || [];
 
-    // Group progress by user
-    const userProgressMap = {};
-    progress.forEach(p => {
-      if (!userProgressMap[p.user_id]) userProgressMap[p.user_id] = [];
-      userProgressMap[p.user_id].push(p);
+    // Map learning_progress rows by user_id
+    const learningProgressMap = new Map();
+    learningRows.forEach(row => {
+      if (row.user_id) learningProgressMap.set(row.user_id, row);
     });
 
-    // Group attempts by user
-    const userAttemptsMap = {};
-    attempts.forEach(a => {
-      if (!a.user_id) return;
-      if (!userAttemptsMap[a.user_id]) userAttemptsMap[a.user_id] = [];
-      userAttemptsMap[a.user_id].push(a);
-    });
+    // Collect all distinct user IDs from profiles and learning_progress
+    const allUserIds = new Set();
+    profiles.forEach(p => allUserIds.add(p.id));
+    learningRows.forEach(row => allUserIds.add(row.user_id));
 
-    // Compute stats
-    const totalLearners = profiles.length;
-    const totalSolved = progress.length;
-    const avgSolved = totalLearners > 0 ? (totalSolved / totalLearners).toFixed(1) : '0';
+    const profilesMap = new Map();
+    profiles.forEach(p => profilesMap.set(p.id, p));
 
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const activeLearners = profiles.filter(p => p.last_active && new Date(p.last_active) > weekAgo).length;
+    let globalTotalSolved = 0;
 
-    // Update stat cards
-    $('statLearners').textContent = rpcStats?.total_users ?? totalLearners;
-    $('statSolved').textContent = rpcStats?.total_completions ?? totalSolved;
-    $('statAvg').textContent = avgSolved;
-    $('statActive').textContent = rpcStats?.active_users_7d ?? activeLearners;
+    // Process each learner's real progress using the exact stage() rules from progress.js
+    learnersData = Array.from(allUserIds).map(userId => {
+      const p = profilesMap.get(userId) || { id: userId };
+      const progressRow = learningProgressMap.get(userId);
 
-    // Process learner list
-    learnersData = profiles.map(p => {
-      const uProgress = userProgressMap[p.id] || [];
-      const uAttempts = userAttemptsMap[p.id] || [];
-      const solvedCount = uProgress.length;
-      const attemptedCount = Math.max(solvedCount, uAttempts.length);
+      const stateObj = progressRow?.state;
+      const entries = (stateObj && typeof stateObj.entries === 'object' && !Array.isArray(stateObj.entries))
+        ? stateObj.entries
+        : {};
 
-      // Find top domains from attempts or scenarios
-      const domainCounts = {};
-      uAttempts.forEach(a => {
-        if (a.domain) domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1;
+      let userSolvedCount = 0;
+      let userAttemptedCount = 0;
+      const domainSolved = {};
+      const domainAttempted = {};
+      const solvedTimestamps = [];
+
+      for (const [scenarioId, entry] of Object.entries(entries)) {
+        if (!entry || typeof entry !== 'object') continue;
+
+        const scenario = scenariosMap.get(scenarioId);
+        const domain = scenario?.domain || 'General SQL';
+
+        // Evaluate stage using the exact same function used by the Crack SQL practice interface
+        const stg = scenario ? stage(scenario, entry) : (entry.evaluationResult?.passed ? 'verified' : 'not_started');
+
+        const isSolved = (stg === 'verified');
+        const isAttempted = isSolved ||
+          ['thinking', 'thinking_ready', 'sql_written', 'fiddle_opened', 'answer_viewed'].includes(stg) ||
+          (Number.isFinite(entry.attempts) && entry.attempts > 0) ||
+          Boolean(entry.sql && String(entry.sql).trim()) ||
+          Boolean(entry.thinking && (entry.thinking.response || entry.thinking.steps));
+
+        if (isAttempted) {
+          userAttemptedCount++;
+          domainAttempted[domain] = (domainAttempted[domain] || 0) + 1;
+        }
+
+        if (isSolved) {
+          userSolvedCount++;
+          domainSolved[domain] = (domainSolved[domain] || 0) + 1;
+          const ts = entry.evaluationAt || entry.updatedAt;
+          if (ts) solvedTimestamps.push(Number(ts));
+        }
+      }
+
+      globalTotalSolved += userSolvedCount;
+
+      // Sort solved timestamps chronologically for contest threshold calculation
+      solvedTimestamps.sort((a, b) => a - b);
+
+      // Top domains formatted by solved count descending, then attempted count
+      const allDomains = new Set([...Object.keys(domainSolved), ...Object.keys(domainAttempted)]);
+      const sortedDomains = Array.from(allDomains).sort((a, b) => {
+        const diffSolved = (domainSolved[b] || 0) - (domainSolved[a] || 0);
+        if (diffSolved !== 0) return diffSolved;
+        return (domainAttempted[b] || 0) - (domainAttempted[a] || 0);
       });
-      const topDomains = Object.keys(domainCounts)
-        .sort((a, b) => domainCounts[b] - domainCounts[a])
-        .slice(0, 3)
-        .join(', ') || 'General SQL';
 
-      // Find reached threshold timestamp if any
-      const sortedCompleted = [...uProgress].sort((a, b) => new Date(a.completed_at) - new Date(b.completed_at));
-      const reachedAt = sortedCompleted.length > 0 ? sortedCompleted[sortedCompleted.length - 1].completed_at : null;
+      const topDomainsText = sortedDomains.slice(0, 3).map(d => {
+        const s = domainSolved[d] || 0;
+        return s > 0 ? `${d} (${s})` : d;
+      }).join(', ') || 'None yet';
+
+      // Name & email formatting
+      const name = p.full_name || p.display_name || p.name || null;
+      const email = p.email || null;
+      const displayName = name || email || 'Anonymous Learner';
+
+      // Last active date from profiles.last_active, progressRow.updated_at, or profiles.created_at
+      const lastActivity = p.last_active || (progressRow?.updated_at ? new Date(progressRow.updated_at).getTime() : null) || p.created_at || null;
 
       return {
-        id: p.id,
-        email: p.email || 'Anonymous Learner',
-        isAdmin: p.is_admin === true,
-        solved: solvedCount,
-        attempted: attemptedCount,
-        topDomains,
-        reachedAt,
-        lastActivity: p.last_active || p.created_at || null,
-        progressList: uProgress
+        id: userId,
+        name,
+        email: email || '—',
+        displayName,
+        isAdmin: p.is_admin === true || email === 'datatodashboard2@gmail.com',
+        solved: userSolvedCount,
+        attempted: Math.max(userSolvedCount, userAttemptedCount),
+        domainSolved,
+        domainAttempted,
+        topDomains: topDomainsText,
+        solvedTimestamps,
+        lastActivity
       };
     });
 
+    // Calculate aggregated metrics
+    const totalLearners = learnersData.length;
+    const avgSolved = totalLearners > 0 ? (globalTotalSolved / totalLearners).toFixed(1) : '0';
+
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const activeLearners = learnersData.filter(l => l.lastActivity && new Date(l.lastActivity).getTime() > weekAgo).length;
+
+    // Update stat cards
+    $('statLearners').textContent = String(totalLearners);
+    $('statSolved').textContent = String(globalTotalSolved);
+    $('statAvg').textContent = String(avgSolved);
+    $('statActive').textContent = String(activeLearners);
+
     renderLearnersTable();
-    updateStatus(`Synchronized ${learnersData.length} learner records • ${new Date().toLocaleTimeString()}`);
+    updateStatus(`Loaded ${totalLearners} existing learner profiles & progress states • ${new Date().toLocaleTimeString()}`);
   } catch (err) {
     console.error('Error loading dashboard data:', err);
-    updateStatus('Loaded with offline fallback: ' + err.message);
+    updateStatus('Error loading learner data: ' + err.message);
   }
 }
 
@@ -415,7 +474,22 @@ function renderLearnersTable() {
   // Filter
   const filtered = learnersData.filter(l => {
     if (!searchQuery) return true;
-    return l.email.toLowerCase().includes(searchQuery) || l.id.toLowerCase().includes(searchQuery);
+    return (
+      l.displayName.toLowerCase().includes(searchQuery) ||
+      l.email.toLowerCase().includes(searchQuery) ||
+      l.id.toLowerCase().includes(searchQuery)
+    );
+  });
+
+  // Calculate reached threshold timestamp per learner based on currentThreshold
+  filtered.forEach(l => {
+    if (currentThreshold > 0 && l.solved >= currentThreshold) {
+      l.reachedAt = l.solvedTimestamps[currentThreshold - 1] || l.lastActivity;
+    } else if (currentThreshold === 0 && l.solved > 0) {
+      l.reachedAt = l.solvedTimestamps[l.solvedTimestamps.length - 1] || null;
+    } else {
+      l.reachedAt = null;
+    }
   });
 
   // Sort
@@ -423,23 +497,27 @@ function renderLearnersTable() {
     let valA = a[sortField];
     let valB = b[sortField];
 
-    if (sortField === 'solved' || sortField === 'attempted') {
-      valA = Number(valA || 0);
-      valB = Number(valB || 0);
-    } else if (sortField === 'lastActivity' || sortField === 'reachedAt') {
-      valA = valA ? new Date(valA).getTime() : 0;
-      valB = valB ? new Date(valB).getTime() : 0;
-    } else {
-      valA = String(valA || '').toLowerCase();
-      valB = String(valB || '').toLowerCase();
+    if (sortField === 'solved' || sortField === 'progress' || sortField === 'attempted') {
+      const numA = (sortField === 'attempted') ? a.attempted : a.solved;
+      const numB = (sortField === 'attempted') ? b.attempted : b.solved;
+      return sortAsc ? (numA - numB) : (numB - numA);
     }
+
+    if (sortField === 'lastActivity' || sortField === 'reachedAt') {
+      const timeA = valA ? new Date(valA).getTime() : 0;
+      const timeB = valB ? new Date(valB).getTime() : 0;
+      return sortAsc ? (timeA - timeB) : (timeB - timeA);
+    }
+
+    valA = String(a.displayName || a.email || '').toLowerCase();
+    valB = String(b.displayName || b.email || '').toLowerCase();
 
     if (valA < valB) return sortAsc ? -1 : 1;
     if (valA > valB) return sortAsc ? 1 : -1;
     return 0;
   });
 
-  // Threshold calculation
+  // Threshold stats label
   let eligibleCount = 0;
   if (currentThreshold > 0) {
     eligibleCount = filtered.filter(l => l.solved >= currentThreshold).length;
@@ -464,19 +542,21 @@ function renderLearnersTable() {
     const isEligible = currentThreshold > 0 && l.solved >= currentThreshold;
     const pct = Math.min(100, Math.round((l.solved / totalScenariosCount) * 100));
 
+    const subText = (l.name && l.email && l.email !== '—') ? l.email : l.id;
+
     html += `
       <tr class="${isEligible ? 'elig' : ''}">
         <td class="num" style="color:var(--muted); font-size:0.8rem;">${idx + 1}</td>
         <td>
           <div class="learner-name">
-            ${escapeHtml(l.email)}
+            ${escapeHtml(l.displayName)}
             ${l.isAdmin ? '<span class="badge admin">Admin</span>' : ''}
             ${isEligible ? '<span class="badge">Eligible ★</span>' : ''}
           </div>
-          <div class="learner-email">${escapeHtml(l.id)}</div>
+          <div class="learner-email">${escapeHtml(subText)}</div>
         </td>
         <td class="num">
-          <div style="font-weight:700;">${l.solved} <span class="of-total">/ ${totalScenariosCount}</span></div>
+          <div style="font-weight:700;">${l.solved} <span class="of-total">/ ${totalScenariosCount}</span> (${pct}%)</div>
           <div class="bar"><div class="bar-fill" style="width:${pct}%;"></div></div>
         </td>
         <td class="num">${l.attempted}</td>
@@ -505,9 +585,10 @@ function setupEventListeners() {
 
   // Refresh button
   $('refreshBtn')?.addEventListener('click', async () => {
-    $('refreshBtn').disabled = true;
+    const btn = $('refreshBtn');
+    if (btn) btn.disabled = true;
     await loadDashboardData();
-    $('refreshBtn').disabled = false;
+    if (btn) btn.disabled = false;
   });
 
   // Export CSV button
@@ -534,10 +615,17 @@ function exportCSV() {
     return;
   }
 
-  let csv = 'Index,User ID,Email,Role,Solved,Attempted,Completion %,Top Domains,Reached Threshold,Last Active\n';
+  let csv = 'Index,User ID,Name,Email,Role,Solved,Attempted,Completion %,Top Domains,Reached Threshold,Last Active\n';
   learnersData.forEach((l, idx) => {
     const pct = Math.min(100, Math.round((l.solved / totalScenariosCount) * 100));
-    csv += `"${idx + 1}","${l.id}","${l.email}","${l.isAdmin ? 'Admin' : 'Learner'}","${l.solved}","${l.attempted}","${pct}%","${l.topDomains}","${l.reachedAt || ''}","${l.lastActivity || ''}"\n`;
+    const role = l.isAdmin ? 'Admin' : 'Learner';
+    const cleanName = (l.name || '').replace(/"/g, '""');
+    const cleanEmail = (l.email || '').replace(/"/g, '""');
+    const cleanDomains = (l.topDomains || '').replace(/"/g, '""');
+    const reachedStr = l.reachedAt ? new Date(l.reachedAt).toISOString() : '';
+    const activeStr = l.lastActivity ? new Date(l.lastActivity).toISOString() : '';
+
+    csv += `"${idx + 1}","${l.id}","${cleanName}","${cleanEmail}","${role}",${l.solved},${l.attempted},"${pct}%","${cleanDomains}","${reachedStr}","${activeStr}"\n`;
   });
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

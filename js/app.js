@@ -1,5 +1,6 @@
 import {evaluateThinking, thinkingIsReady, thinkingText} from './thinking.js';
 import {EMPTY, readProgress, saveProgress, mergeProgress, nextTimestamp, workFingerprint, stage, chooseNext, importLegacy, storageKey} from './progress.js';
+import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
 import {renderSchemaCards} from './schema.js';
 import {escapeHtml} from './util.js';
@@ -505,7 +506,8 @@ async function resetCurrentSqlSession() {
       $('sqlGate').textContent = '🔄 Recreating clean scenario database...';
       $('sqlGate').style.color = 'var(--muted)';
     }
-    await sqlEngineManager.resetScenario(current, data.assets[current.domain]);
+    const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
+    await sqlEngineManager.resetScenario(effective, data.assets[effective.domain]);
     if ($('sqlGate')) {
       $('sqlGate').textContent = '✓ Scenario database session reset to clean state.';
       $('sqlGate').style.color = '#166534';
@@ -522,28 +524,37 @@ async function resetCurrentSqlSession() {
 }
 
 function renderScenario() {
+  if (!current) return;
+  const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
+  const e = entry();
+  if (typeof e.variantIndex !== 'number' && typeof effective.variantIndex === 'number') {
+    e.variantIndex = effective.variantIndex;
+  }
+  if (!e.skill && effective.skill) {
+    e.skill = effective.skill;
+  }
+
   $('home').classList.remove('active');$('progressScreen').classList.remove('active');$('practice').classList.add('active');
   if ($('navHome')) { $('navHome').classList.remove('active'); $('navProgress').classList.remove('active'); $('navPractice').classList.add('active'); }
-  $('meta').textContent=current.domain+' • '+current.level;
-  $('title').textContent=current.id;$('question').textContent=current.question;
-  const pool=scenarios.filter(s=>s.domain===current.domain&&s.level===current.level);
-  $('qno').textContent='Exercise '+current.questionNo+' / '+pool.length;
-  $('tags').textContent='Think → Write → Validate';
-  renderSchemaCards(current.schemaText);
+  $('meta').textContent=effective.domain+' • '+effective.level;
+  $('title').textContent=effective.id;$('question').textContent=effective.question;
+  const pool=scenarios.filter(s=>s.domain===effective.domain&&s.level===effective.level);
+  $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
+  $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
+  renderSchemaCards(effective.schemaText);
   setSchemaTab('schema');
-  const e=entry();
   $('thinking').value=thinkingText(e.thinking);
   $('learnerSql').value=e.sql||'';
   if ($('fiddleFallback')) $('fiddleFallback').hidden = true;
   if ($('manualCopy')) $('manualCopy').hidden = true;
-  renderAssessment(e.assessment?evaluateThinking(current,e.thinking||{}):null);
+  renderAssessment(e.assessment?evaluateThinking(effective,e.thinking||{}):null);
   renderSqlEvaluation(e.evaluationFingerprint===workFingerprint(e)?e.evaluationResult:null);
   updateSqlEditorView();
   updateProgress();updateGates();
 
   // Initialize isolated SQL session for the current scenario
-  if (current && data?.assets?.[current.domain]) {
-    sqlEngineManager.initScenario(current, data.assets[current.domain]).catch(err => {
+  if (effective && data?.assets?.[effective.domain]) {
+    sqlEngineManager.initScenario(effective, data.assets[effective.domain]).catch(err => {
       console.warn('Failed to initialize scenario SQL engine session:', err);
       renderSqlEvaluation({
         passed: false,
@@ -573,8 +584,9 @@ function selectLevel(level,el) {
 }
 function evaluatePlan() {
   if(!current) return;
-  const thinking=readThinking(),assessment=evaluateThinking(current,thinking);
-  changeEntry({thinking,assessment});
+  const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
+  const thinking=readThinking(),assessment=evaluateThinking(effective,thinking);
+  changeEntry({thinking,assessment,variantIndex:effective.variantIndex,skill:effective.skill});
   renderAssessment(assessment);updateGates();
   if(assessment.ready) $('learnerSql').focus();
 }
@@ -628,13 +640,15 @@ function openScenario(id) {
 }
 function showSampleThinking() {
   if (!current) return;
-  $('thinking').value = current.exampleThinking || current.pseudo;
+  const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
+  $('thinking').value = effective.exampleThinking || effective.pseudo;
   evaluatePlan();
 }
 function improveLogic() {
   if (!current) return;
+  const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
   const currentThinking = $('thinking').value.trim();
-  const evaluation = evaluateThinking(current, { response: currentThinking });
+  const evaluation = evaluateThinking(effective, { response: currentThinking });
   const unpassed = evaluation.items.filter(i => !i.passed);
   if (unpassed.length === 0) {
     $('assessmentMessage').textContent = 'Your plan already satisfies all rubric criteria! You are ready to write SQL.';
@@ -643,9 +657,9 @@ function improveLogic() {
   const suggestions = [];
   unpassed.forEach(item => {
     if (item.category === 'result') {
-      suggestions.push('• Target Goal: We need to ' + current.question.toLowerCase().replace(/\.$/, '') + '.');
+      suggestions.push('• Target Goal: We need to ' + effective.question.toLowerCase().replace(/\.$/, '') + '.');
     } else if (item.category === 'data') {
-      suggestions.push('• Data Sources: Query the table(s) ' + current.tables.join(', ') + '.');
+      suggestions.push('• Data Sources: Query the table(s) ' + (effective.requiredTables || effective.tables).join(', ') + '.');
     } else if (item.category === 'approach') {
       suggestions.push('• Logic Step: ' + item.label + '.');
     } else if (item.category === 'check') {
@@ -663,11 +677,12 @@ function improveLogic() {
 }
 function compareExpert() {
   if (!current) return;
+  const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
   const userPlan = $('thinking').value.trim() || '(No thinking written yet)';
   $('userThinkingCompare').textContent = userPlan;
-  $('expertThinkingCompare').textContent = current.exampleThinking || current.pseudo;
-  $('expertPseudoCompare').textContent = current.pseudo;
-  const evaluation = evaluateThinking(current, { response: userPlan });
+  $('expertThinkingCompare').textContent = effective.exampleThinking || effective.pseudo;
+  $('expertPseudoCompare').textContent = effective.pseudo;
+  const evaluation = evaluateThinking(effective, { response: userPlan });
   $('compareChecklist').innerHTML = evaluation.items.map(item => `
     <div class="compare-item ${item.passed ? 'passed' : 'pending'}">
       <span class="compare-icon">${item.passed ? '✓' : '○'}</span>
@@ -683,9 +698,10 @@ function closeCompare() { $('compareModal').hidden = true; }
 
 function generateSql() {
   if (!current) return;
-  const sql = current.sql;
+  const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
+  const sql = effective.sql;
   $('learnerSql').value = sql;
-  changeEntry({ sql, fiddleFingerprint: null, evaluationFingerprint: null, evaluationResult: null });
+  changeEntry({ sql, fiddleFingerprint: null, evaluationFingerprint: null, evaluationResult: null, variantIndex: effective.variantIndex, skill: effective.skill });
   renderSqlEvaluation(null);
   updateSqlEditorView();
   updateGates();
@@ -702,14 +718,16 @@ function generateSql() {
 
 function useStarterSql() {
   if (!current) return;
+  const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
   let starter = '';
-  if (/^WITH\b/i.test(current.sql)) {
-    starter = `-- Starter CTE Template\nWITH base_data AS (\n  SELECT *\n  FROM ${current.tables[0]}\n  -- Filter or transform here\n)\nSELECT *\nFROM base_data;\n`;
+  const focusTable = effective.requiredTables?.[0] || effective.tables[0];
+  if (/^WITH\b/i.test(effective.sql)) {
+    starter = `-- Starter CTE Template\nWITH base_data AS (\n  SELECT *\n  FROM ${focusTable}\n  -- Filter or transform here\n)\nSELECT *\nFROM base_data;\n`;
   } else {
-    starter = `-- Starter Query Template\nSELECT \n  -- specify required columns\nFROM ${current.tables[0]}\n${current.tables.length > 1 ? current.tables.slice(1).map(t => 'JOIN ' + t + ' ON ...').join('\n') + '\n' : ''}-- WHERE condition\n;\n`;
+    starter = `-- Starter Query Template\nSELECT \n  -- specify required columns\nFROM ${focusTable}\n${effective.tables.length > 1 ? effective.tables.slice(1).map(t => 'JOIN ' + t + ' ON ...').join('\n') + '\n' : ''}-- WHERE condition\n;\n`;
   }
   $('learnerSql').value = starter;
-  changeEntry({ sql: starter, fiddleFingerprint: null, evaluationFingerprint: null, evaluationResult: null });
+  changeEntry({ sql: starter, fiddleFingerprint: null, evaluationFingerprint: null, evaluationResult: null, variantIndex: effective.variantIndex, skill: effective.skill });
   renderSqlEvaluation(null);
   updateSqlEditorView();
   updateGates();
@@ -898,6 +916,7 @@ function renderScenarioCatalog() {
   
   container.innerHTML = list.slice(0, 50).map(s => {
     const e = state.entries[s.id] || {};
+    const effective = getEffectiveScenario(s, user?.id || 'guest_user', state);
     const stg = stage(s, e);
     const isCurrent = current && current.id === s.id;
     let badgeClass = 'status-pill not-started';
@@ -916,10 +935,10 @@ function renderScenarioCatalog() {
       <div class="catalog-item ${isCurrent ? 'active' : ''}" onclick="openScenario('${s.id}')">
         <div class="catalog-item-header">
           <span class="catalog-id">${s.id}</span>
-          <span class="catalog-domain-tag">${s.domain} • ${s.level}</span>
+          <span class="catalog-domain-tag">${s.domain} • ${s.level}${effective.skill ? ' • ' + effective.skill : ''}</span>
           <span class="${badgeClass}">${badgeText}</span>
         </div>
-        <div class="catalog-question">${escapeHtml(s.question)}</div>
+        <div class="catalog-question">${escapeHtml(effective.question)}</div>
       </div>
     `;
   }).join('');
@@ -1158,7 +1177,8 @@ async function evaluateSql() {
   updateGates();
   try {
     const targetScenarioId = current.id;
-    const result = await sqlEngineManager.evaluate(current, data.assets[current.domain], sql);
+    const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
+    const result = await sqlEngineManager.evaluate(effective, data.assets[effective.domain], sql);
 
     // If scenario changed while awaiting, don't update entry of old scenario
     if (!current || current.id !== targetScenarioId) return;
@@ -1168,8 +1188,11 @@ async function evaluateSql() {
       evaluationFingerprint: result.passed ? fingerprint : null,
       evaluationResult: result,
       evaluationAt: Date.now(),
-      attempts: (entry().attempts || 0) + 1
+      attempts: (entry().attempts || 0) + 1,
+      variantIndex: effective.variantIndex,
+      skill: effective.skill
     });
+    recordSkillAttempt(state, effective, !!result.passed);
     renderSqlEvaluation(result);
   } catch (error) {
     const detail = error?.message ? ` (${error.message})` : '';

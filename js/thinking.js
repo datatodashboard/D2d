@@ -178,7 +178,7 @@ export function evaluateThinking(scenario, input) {
     allSchemaColumns.add(c.toLowerCase().replaceAll('_', ' '));
   }));
 
-  const requiredTables = (scenario?.tables || []).map(t => t.toLowerCase());
+  const requiredTables = (scenario?.requiredTables || scenario?.tables || []).map(t => t.toLowerCase());
   const requiredColumns = new Set();
   requiredTables.forEach(t => {
     (schemaTables[t] || []).forEach(c => {
@@ -187,9 +187,17 @@ export function evaluateThinking(scenario, input) {
     });
   });
 
-  // Extract columns and values from scenario SQL
+  // Extract columns and values from scenario SQL and metadata
   const sqlColumns = new Set();
   const sqlValues = new Set();
+  if (Array.isArray(scenario?.relevantColumns)) {
+    scenario.relevantColumns.forEach(c => {
+      const colNorm = c.toLowerCase().replaceAll(' ', '_');
+      sqlColumns.add(colNorm);
+      requiredColumns.add(c.toLowerCase());
+      requiredColumns.add(colNorm);
+    });
+  }
   if (scenario?.sql) {
     const valMatches = scenario.sql.match(/'([^']+)'/g);
     if (valMatches) valMatches.forEach(v => sqlValues.add(v.replace(/'/g, '').toLowerCase()));
