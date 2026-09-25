@@ -1864,26 +1864,34 @@ body.landscape-layout .practice-landscape-grid,
       </div>
 
       <div class="card">
-        <h2>1. Think through the problem</h2>
-        <p>Think like you would explain the solution to another person. SQL comes after your reasoning.</p>
+        <h2>1. Think Through the Problem</h2>
+        <p class="small" style="color:var(--muted);margin-top:-4px;margin-bottom:12px;">Explain your plan in simple English: which table to use, what to do, and the expected result.</p>
         
-        <label for="thinking" style="margin-top:12px;">How would you solve this problem?</label>
-        <textarea id="thinking" maxlength="8000" placeholder="In your own words: what result is needed, which data would you use, what steps would you follow, and how would you check the answer?"></textarea>
-        <div class="actions" style="grid-template-columns: 1fr;">
+        <label for="thinking" style="margin-top:8px;">How would you solve this problem?</label>
+        <textarea id="thinking" maxlength="8000" placeholder="In simple words: Table to use → What to do (filter/join/aggregate) → Expected result"></textarea>
+        <div class="actions" style="grid-template-columns: 1fr; margin-top: 10px;">
           <button class="action primary" id="checkThinkingBtn" onclick="evaluatePlan()">Check My Thinking</button>
         </div>
-        <p class="small">Explain your approach naturally in your own words. Think through what data you need and how to get the desired result.</p>
         <div id="feedback" class="feedback" role="status" aria-live="polite">
-          <div class="score" id="score"></div><p id="assessmentMessage"></p>
-          <ul id="improve"></ul>
+          <div class="score" id="score"></div>
+          <p id="assessmentMessage" style="font-size:13.5px;margin:6px 0 0;line-height:1.5;"></p>
         </div>
         <div id="howToThinkBox" hidden></div>
+
+        <!-- Next Scenario Button directly below Thinking Score / How to Think section -->
+        <div id="nextScenarioContainer" style="margin-top: 16px; text-align: center;">
+          <button class="action secondary sql-next-btn" id="nextButton" onclick="nextScenario()" disabled style="width: 100%; height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; font-weight: 800; border-radius: 12px;">
+            <span>Next Scenario</span>
+            <span class="btn-icon">→</span>
+          </button>
+        </div>
       </div>
     </div>
 
     <div class="practice-col-right">
       <div class="card sql-workbench-card" id="sqlSection">
-        <h2 style="margin-top: 0; margin-bottom: 8px;">2. SQL Query Editor & Engine</h2>
+        <h2 style="margin-top: 0; margin-bottom: 4px;">2. SQL Query Editor (Optional)</h2>
+        <p class="small" style="color:var(--muted);margin-top:0;margin-bottom:12px;font-size:13px;line-height:1.4;">If you want to try SQL, you can use the editor below. Otherwise, continue to the next scenario.</p>
         
         <!-- Modern SQL IDE Workbench -->
         <div class="sql-ide-container" id="sqlIdeContainer">
@@ -1920,7 +1928,7 @@ body.landscape-layout .practice-landscape-grid,
             </div>
             <div class="sql-ide-code-area">
               <pre class="sql-ide-highlight" id="sqlHighlightPre" aria-hidden="true"><code id="sqlHighlightCode"></code></pre>
-              <textarea id="learnerSql" maxlength="20000" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-- Write your PostgreSQL query here...&#10;SELECT *&#10;FROM table;&#10;-- Press Ctrl+Enter to check SQL"></textarea>
+              <textarea id="learnerSql" maxlength="20000" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-- Optional: Write your PostgreSQL query here...&#10;SELECT *&#10;FROM table;&#10;-- Press Ctrl+Enter to check SQL"></textarea>
             </div>
           </div>
 
@@ -1943,15 +1951,11 @@ body.landscape-layout .practice-landscape-grid,
 
         <p id="sqlGate" class="small" style="margin: 8px 0 10px;"></p>
 
-        <!-- Main SQL Actions: Run / Check and Next Scenario -->
-        <div class="sql-actions-bar">
-          <button class="action primary sql-run-btn" id="checkSqlButton" onclick="evaluateSql()">
+        <!-- Main SQL Actions: Run / Check -->
+        <div class="sql-actions-bar" style="display:flex;">
+          <button class="action primary sql-run-btn" id="checkSqlButton" onclick="evaluateSql()" style="flex:1;">
             <span class="btn-icon">▶</span>
             <span id="checkSqlBtnLabel">Check / Run SQL</span>
-          </button>
-          <button class="action secondary sql-next-btn" id="nextButton" onclick="nextScenario()" disabled>
-            <span>Next Scenario</span>
-            <span class="btn-icon">→</span>
           </button>
         </div>
 
@@ -2078,13 +2082,6 @@ body.landscape-layout .practice-landscape-grid,
     <span class="nav-label">Progress</span>
   </button>
 </nav>
-
-<!-- Subtle Floating Watermark — Powered by D2D (Bottom-Right, non-blocking on desktop, hidden on mobile) -->
-<div class="d2d-floating-watermark" aria-hidden="true">
-  <span class="wm-powered">Powered by</span>
-  <span class="wm-brand">D2D</span>
-</div>
-</div>
 
 </body>
 </html>

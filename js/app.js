@@ -177,46 +177,23 @@ function renderAssessment(result) {
       : `Thinking Score: ${score}/10 — Review how a data engineer thinks below.`;
   }
   
-  $('score').textContent = `Thinking Score: ${score} / 10 points`;
-  $('assessmentMessage').textContent = result.message;
+  if ($('score')) $('score').textContent = `Thinking Score: ${score}/10`;
+  if ($('assessmentMessage')) $('assessmentMessage').textContent = result.message;
   
-  const sourcePassed = result.items.some(i => i.category === 'data' && i.passed);
-  const actionPassed = result.items.some(i => i.category === 'approach' && i.passed);
-  const resultPassed = result.items.some(i => i.category === 'result' && i.passed);
-  
-  const updateChip = (id, name, passed, weight) => {
-    const el = $(id);
-    if (!el) return;
-    el.className = 'score-chip ' + (passed ? 'pass' : 'fail');
-    el.textContent = (passed ? '✓ ' : '○ ') + name + ` (${weight})`;
-  };
-  updateChip('chipSources', 'Sources', sourcePassed, '3 pts');
-  updateChip('chipSteps', 'Logic / Action', actionPassed, '4 pts');
-  updateChip('chipGoal', 'Expected Output', resultPassed, '3 pts');
-  const chipCheck = $('chipCheck');
-  if (chipCheck) chipCheck.style.display = 'none';
-  
-  $('improve').replaceChildren(...result.items.map(item => {
-    const li = document.createElement('li');
-    const pts = item.weight || (item.category === 'approach' ? 4 : 3);
-    li.textContent = (item.passed ? `✓ [${item.name} +${pts} pts]: ` : `○ [${item.name} missing]: `) + item.label;
-    if (item.passed) li.classList.add('pass-item');
-    return li;
-  }));
+  if ($('improve')) $('improve').innerHTML = '';
 
-  // Decode and show: "This is how you have to think"
+  // Decode and show: "How to Think Like a Data Engineer"
   if (howToThinkBox && current) {
     howToThinkBox.hidden = false;
     howToThinkBox.innerHTML = `
-      <div class="how-to-think-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-          <strong style="color:#0369a1;font-size:14px;">💡 How to Think Like a Data Engineer (Decoded):</strong>
-          <span style="font-size:11px;background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:12px;font-weight:700;">Human Thought Flow</span>
+      <div class="how-to-think-card" style="margin-top:12px;padding:12px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;">
+        <div style="margin-bottom:8px;">
+          <strong style="color:#0369a1;font-size:14px;">💡 How to Think Like a Data Engineer:</strong>
         </div>
         <div style="font-size:13px;line-height:1.6;color:var(--ink);">
-          <div style="margin-bottom:6px;"><strong>1. Data Source:</strong> From the <code>${current.tables.join(', ')}</code> table${current.tables.length > 1 ? 's' : ''}, where this data lives.</div>
-          <div style="margin-bottom:6px;"><strong>2. Core Action / Logic:</strong> ${escapeHtml(current.pseudo || 'Apply the required filter, join, or aggregation logic to isolate the target rows.')}</div>
-          <div><strong>3. Desired Result:</strong> Show the requested details in the final output.</div>
+          <div style="margin-bottom:6px;"><strong>1. Table:</strong> From the <code>${current.tables.join(', ')}</code> table${current.tables.length > 1 ? 's' : ''}, where this data lives.</div>
+          <div style="margin-bottom:6px;"><strong>2. What to do:</strong> ${escapeHtml(current.pseudo || 'Apply the required filter, join, or aggregation logic to isolate the target rows.')}</div>
+          <div><strong>3. Expected result:</strong> Show the requested details in the final output.</div>
         </div>
       </div>
     `;
