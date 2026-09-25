@@ -23,4 +23,24 @@ test.describe('Crack SQL Web Application E2E', () => {
     expect(data.scenarios).toBeInstanceOf(Array);
     expect(data.scenarios.length).toBeGreaterThan(0);
   });
+
+  test('admin dashboard loads cleanly and handles unauthenticated state', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await page.goto('/admin.html');
+
+    // Verify title
+    await expect(page).toHaveTitle(/Admin/);
+
+    // Verify gate screen is displayed
+    const gate = page.locator('#gate');
+    await expect(gate).toBeVisible();
+
+    // Verify dashboard is initially hidden
+    await expect(page.locator('#dashboard')).toBeHidden();
+
+    // Verify no uncaught JavaScript exceptions during startup
+    expect(pageErrors).toEqual([]);
+  });
 });
