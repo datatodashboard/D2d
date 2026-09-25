@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin — Think and Crack SQL</title>
+<meta name="robots" content="noindex, nofollow" />
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root{
+  --bg:#f5f7fb; --surface:#ffffff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0;
+  --primary:#2563eb; --primary2:#1d4ed8; --soft:#eff6ff; --good:#16a34a; --warn:#d97706;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 20px 60px;}
+header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;}
+h1{font-size:1.4rem;margin:0;}
+.subtitle{color:var(--muted);font-size:0.9rem;margin-top:2px;}
+.action{border:none;border-radius:8px;padding:10px 16px;font-weight:600;font-size:0.9rem;cursor:pointer;}
+.action.primary{background:var(--primary);color:#fff;}
+.action.primary:hover{background:var(--primary2);}
+.linkbtn{background:none;border:none;color:var(--primary);cursor:pointer;font-size:0.85rem;text-decoration:underline;padding:0;}
+#gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:40px 24px;text-align:center;color:var(--muted);}
+#dashboard[hidden],#gate[hidden]{display:none;}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;}
+.stat .num{font-size:1.6rem;font-weight:800;}
+.stat .label{color:var(--muted);font-size:0.8rem;margin-top:2px;}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;}
+.controls input[type="text"],.controls input[type="number"]{
+  border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:0.9rem;
+}
+.controls label{font-size:0.85rem;color:var(--muted);display:flex;align-items:center;gap:6px;}
+#threshLabel{font-size:0.85rem;color:var(--muted);margin-top:8px;}
+#status{font-size:0.8rem;color:var(--muted);margin-top:8px;}
+
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:0.88rem;vertical-align:top;}
+th{background:var(--soft);color:var(--muted);font-weight:700;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer;user-select:none;}
+th:hover{color:var(--primary);}
+td.num{text-align:right;white-space:nowrap;}
+tr.elig{background:#fffbeb;}
+.learner-name{font-weight:600;}
+.learner-email{color:var(--muted);font-size:0.78rem;}
+.badge{display:inline-block;background:#fef3c7;color:#92400e;border-radius:999px;padding:1px 8px;font-size:0.72rem;font-weight:700;}
+.of-total{color:var(--muted);font-size:0.8rem;}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:4px;overflow:hidden;}
+.bar-fill{height:100%;background:var(--primary);}
+.domains{color:var(--muted);font-size:0.8rem;}
+.empty{text-align:center;color:var(--muted);padding:24px;}
+.tablewrap{overflow-x:auto;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Think and Crack SQL — Admin</h1>
+      <div class="subtitle">Learner progress &amp; contest eligibility</div>
+    </div>
+    <div id="authBox"></div>
+  </header>
+
+  <div id="gate">
+    <p id="gateMsg">Loading…</p>
+  </div>
+
+  <div id="dashboard" hidden>
+    <div class="stats">
+      <div class="stat"><div class="num" id="statLearners">0</div><div class="label">Signed-up learners</div></div>
+      <div class="stat"><div class="num" id="statSolved">0</div><div class="label">Scenarios solved <span id="scenarioBankNote"></span></div></div>
+      <div class="stat"><div class="num" id="statAvg">0</div><div class="label">Avg. solved / learner</div></div>
+      <div class="stat"><div class="num" id="statActive">0</div><div class="label">Active in last 7 days</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="controls">
+        <input type="text" id="search" placeholder="Search by name or email…" />
+        <label>Contest threshold: solved
+          <input type="number" id="threshold" min="0" placeholder="e.g. 50" style="width:80px" />
+          scenarios
+        </label>
+        <button class="action primary" id="refreshBtn">Refresh</button>
+        <button class="action" id="exportBtn" style="background:var(--soft);color:var(--primary);">Export CSV</button>
+      </div>
+      <div id="threshLabel">Set a scenario count to mark contest-eligible learners.</div>
+      <div id="status"></div>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">#</th>
+            <th data-sort="email">Learner</th>
+            <th class="num" data-sort="solved">Solved</th>
+            <th class="num" data-sort="attempted">Attempted</th>
+            <th>Top domains</th>
+            <th data-sort="reachedAt">Reached threshold</th>
+            <th data-sort="lastActivity">Last active</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script type="module" src="./js/admin.js"></script>
+</body>
+</html>
