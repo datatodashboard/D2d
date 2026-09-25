@@ -379,11 +379,11 @@ export function evaluateThinking(scenario, input) {
   } else if (explicitWrongColumns.length > 0) {
     feedback = `Check your column references: \`${explicitWrongColumns[0]}\` does not exist in the target schema.`;
   } else if (rawSql) {
-    feedback = 'Explain your plan in simple words, or click "⚡ Click here to generate the proper SQL" below.';
+    feedback = 'Explain your plan in simple words rather than raw SQL.';
   } else if (ready) {
-    feedback = `✓ Great human intuition! Score: ${finalScore}/10. Click below to generate the proper SQL.`;
+    feedback = `✓ Great human intuition! Score: ${finalScore}/10.`;
   } else {
-    feedback = `Thinking score: ${finalScore}/10. Review how to think like a data engineer below, or click "⚡ Click here to generate the proper SQL".`;
+    feedback = `Thinking score: ${finalScore}/10. Review how to think like a data engineer below.`;
   }
 
   const items = [

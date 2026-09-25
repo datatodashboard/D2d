@@ -218,11 +218,6 @@ function renderAssessment(result) {
           <div style="margin-bottom:6px;"><strong>2. Core Action / Logic:</strong> ${escapeHtml(current.pseudo || 'Apply the required filter, join, or aggregation logic to isolate the target rows.')}</div>
           <div><strong>3. Desired Result:</strong> Show the requested details in the final output.</div>
         </div>
-        <div style="margin-top:14px;">
-          <button class="action primary" onclick="generateSql()" style="font-size:14px;padding:10px 20px;background:var(--primary);color:#fff;font-weight:800;border-radius:10px;cursor:pointer;border:none;">
-            ⚡ Click here to generate the proper SQL
-          </button>
-        </div>
       </div>
     `;
   }
@@ -239,7 +234,7 @@ function updateGates() {
   if ($('resetSqlIdeBtn')) $('resetSqlIdeBtn').disabled = isBusy;
   if ($('sqlGate')) {
     if (!hasSql) {
-      $('sqlGate').textContent = 'Write your PostgreSQL query or click "⚡ Generate SQL" to load the query.';
+      $('sqlGate').textContent = 'Write your PostgreSQL query to test against PostgreSQL.';
       $('sqlGate').style.color = 'var(--muted)';
     } else if (isBusy) {
       $('sqlGate').textContent = sqlEngineManager.state === 'initializing' ? 'Initializing isolated PostgreSQL session...' : (sqlEngineManager.state === 'resetting' ? 'Resetting scenario database session...' : 'Executing query in PostgreSQL sandbox engine…');
@@ -250,8 +245,9 @@ function updateGates() {
     }
   }
   if ($('practiceStatus')) $('practiceStatus').textContent = current ? labels[stage(current, e)] : '';
+  const thinkingScore = typeof e.assessment?.score === 'number' ? e.assessment.score : 0;
+  if ($('nextButton')) $('nextButton').disabled = thinkingScore < 7;
   const verified = current && stage(current, e) === 'verified';
-  if ($('nextButton')) $('nextButton').disabled = !verified;
   if ($('solutionHelp')) $('solutionHelp').hidden = !verified;
   if (!verified && $('solutionHelp')) {
     $('solutionHelp').open = false;
@@ -591,7 +587,11 @@ function evaluatePlan() {
   if(assessment.ready) $('learnerSql').focus();
 }
 function nextScenario() {
-  if(!current || stage(current,entry())!=='verified') {alert('Finish your thinking and pass the SQL result check before continuing.');return;}
+  const e = entry();
+  const thinkingScore = typeof e.assessment?.score === 'number' ? e.assessment.score : 0;
+  if (!current || thinkingScore < 7) {
+    return;
+  }
   const pool=scenarios.filter(s=>s.domain===selectedDomain&&s.level===selectedLevel);
   const next=chooseNext(pool,state,current.id);
   if(!next) {
@@ -1135,7 +1135,7 @@ function copyQuery() {
   const sql = ($('learnerSql')?.value || entry().sql || current.sql || '').trim();
   if (!sql) {
     if ($('sqlGate')) {
-      $('sqlGate').textContent = 'No SQL query found. Type a query or click "⚡ Click here to generate the proper SQL".';
+      $('sqlGate').textContent = 'No SQL query found. Type your query first.';
       $('sqlGate').style.color = 'var(--warn)';
     }
     return;

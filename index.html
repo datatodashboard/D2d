@@ -1869,9 +1869,8 @@ body.landscape-layout .practice-landscape-grid,
         
         <label for="thinking" style="margin-top:12px;">How would you solve this problem?</label>
         <textarea id="thinking" maxlength="8000" placeholder="In your own words: what result is needed, which data would you use, what steps would you follow, and how would you check the answer?"></textarea>
-        <div class="actions">
-          <button class="action primary" onclick="evaluatePlan()">Check my thinking</button>
-          <button class="action secondary" onclick="generateSql()">⚡ Generate SQL from Plan</button>
+        <div class="actions" style="grid-template-columns: 1fr;">
+          <button class="action primary" id="checkThinkingBtn" onclick="evaluatePlan()">Check My Thinking</button>
         </div>
         <p class="small">Explain your approach naturally in your own words. Think through what data you need and how to get the desired result.</p>
         <div id="feedback" class="feedback" role="status" aria-live="polite">
@@ -1904,34 +1903,12 @@ body.landscape-layout .practice-landscape-grid,
             </div>
           </div>
 
-          <!-- IDE Secondary Toolbar -->
-          <div class="sql-ide-toolbar">
-            <div class="sql-ide-tools-left">
-              <button class="ide-tool-btn primary" onclick="generateSql()" title="Generate complete PostgreSQL query from the scenario plan">
-                <span class="ide-btn-icon">⚡</span>
-                <span>Generate SQL</span>
-              </button>
-              <button class="ide-tool-btn" onclick="useStarterSql()" title="Insert starter boilerplate query">
-                <span class="ide-btn-icon">📋</span>
-                <span>Starter Query</span>
-              </button>
-              <button class="ide-tool-btn" onclick="showStepSql()" title="Step-by-step SQL clause hints">
-                <span class="ide-btn-icon">💡</span>
-                <span>Step-by-Step Hint</span>
-              </button>
-            </div>
+          <!-- IDE Toolbar -->
+          <div class="sql-ide-toolbar" style="justify-content: flex-end;">
             <div class="sql-ide-tools-right">
-              <button class="ide-tool-btn ghost" id="resetSqlIdeBtn" onclick="resetCurrentSqlSession()" title="Reset scenario database to clean state">
-                <span class="ide-btn-icon">🔄</span>
-                <span>Reset SQL</span>
-              </button>
               <button class="ide-tool-btn ghost" id="copySqlBtn" onclick="copyLearnerSql()" title="Copy current SQL to clipboard">
                 <span class="ide-btn-icon">📋</span>
                 <span>Copy</span>
-              </button>
-              <button class="ide-tool-btn ghost" onclick="clearLearnerSql()" title="Clear editor content">
-                <span class="ide-btn-icon">🗑️</span>
-                <span>Clear</span>
               </button>
             </div>
           </div>
@@ -1943,7 +1920,7 @@ body.landscape-layout .practice-landscape-grid,
             </div>
             <div class="sql-ide-code-area">
               <pre class="sql-ide-highlight" id="sqlHighlightPre" aria-hidden="true"><code id="sqlHighlightCode"></code></pre>
-              <textarea id="learnerSql" maxlength="20000" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-- Write or generate your PostgreSQL query here...&#10;SELECT *&#10;FROM table;&#10;-- Press Ctrl+Enter to check SQL"></textarea>
+              <textarea id="learnerSql" maxlength="20000" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-- Write your PostgreSQL query here...&#10;SELECT *&#10;FROM table;&#10;-- Press Ctrl+Enter to check SQL"></textarea>
             </div>
           </div>
 
@@ -1966,15 +1943,11 @@ body.landscape-layout .practice-landscape-grid,
 
         <p id="sqlGate" class="small" style="margin: 8px 0 10px;"></p>
 
-        <!-- Redesigned Main SQL Actions: Run / Check, Reset SQL, and Next Scenario -->
+        <!-- Main SQL Actions: Run / Check and Next Scenario -->
         <div class="sql-actions-bar">
           <button class="action primary sql-run-btn" id="checkSqlButton" onclick="evaluateSql()">
             <span class="btn-icon">▶</span>
             <span id="checkSqlBtnLabel">Check / Run SQL</span>
-          </button>
-          <button class="action secondary sql-reset-btn" id="resetSqlButton" onclick="resetCurrentSqlSession()" title="Recreate clean scenario database without browser refresh">
-            <span class="btn-icon">🔄</span>
-            <span id="resetSqlBtnLabel">Reset SQL</span>
           </button>
           <button class="action secondary sql-next-btn" id="nextButton" onclick="nextScenario()" disabled>
             <span>Next Scenario</span>
@@ -2105,11 +2078,6 @@ body.landscape-layout .practice-landscape-grid,
     <span class="nav-label">Progress</span>
   </button>
 </nav>
-
-<!-- Floating Action Button for quick return to active problem -->
-<button class="fab-practice" id="fabPractice" onclick="showScreen('practice')" title="Jump to active exercise">
-  ⚡
-</button>
 
 <!-- Subtle Floating Watermark — Powered by D2D (Bottom-Right, non-blocking on desktop, hidden on mobile) -->
 <div class="d2d-floating-watermark" aria-hidden="true">
