@@ -634,42 +634,99 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 .status-pill.draft { background: #fef3c7; color: #92400e; }
 .status-pill.not-started { background: #f1f5f9; color: #64748b; }
 
-/* Dedicated Progress Screen */
-.progress-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
-.stat-card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
-  padding: 14px; box-shadow: 0 4px 14px rgba(15,23,42,0.03);
+/* Dedicated Progress Screen - Simplified Clean UI */
+.progress-container {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 4px 4px 20px;
 }
-.stat-val { font-size: 22px; font-weight: 900; color: var(--ink); }
-.stat-sub { font-size: 12px; color: var(--muted); margin-top: 2px; font-weight: 700; }
-.domain-stat-cards { display: grid; gap: 10px; margin-bottom: 20px; }
-.domain-stat-card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
-  padding: 14px; box-shadow: 0 4px 14px rgba(15,23,42,0.03);
+.progress-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
 }
-.domain-stat-head { display: flex; align-items: center; gap: 12px; }
-.domain-stat-icon { font-size: 24px; }
-.domain-stat-title { font-weight: 900; font-size: 14px; }
-.domain-stat-sub { font-size: 11px; color: var(--muted); }
-.domain-stat-count { font-size: 12px; color: var(--muted); }
-.domain-stat-levels {
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: 11px; color: var(--muted); font-weight: 700; margin-top: 6px;
+@media (min-width: 580px) {
+  .progress-metrics-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
-.ghost-btn-sm {
-  background: #f1f5f9; border: 1px solid var(--line); color: var(--ink);
-  font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+.progress-metric-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px 12px;
+  text-align: center;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.03);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 98px;
 }
-.ghost-btn-sm:hover { background: var(--soft); border-color: var(--primary); color: var(--primary); }
-.filter-pills { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; }
-.filter-pill {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
-  padding: 5px 12px; font-size: 12px; font-weight: 800; color: var(--muted); cursor: pointer; white-space: nowrap;
+.progress-metric-card .metric-val {
+  font-size: 24px;
+  font-weight: 900;
+  color: var(--primary);
+  line-height: 1.1;
+  letter-spacing: -0.5px;
 }
-.filter-pill.active { background: var(--primary); color: white; border-color: var(--primary); }
-.progress-table-box {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
-  padding: 14px; overflow-x: auto; box-shadow: 0 4px 14px rgba(15,23,42,0.03);
+.progress-metric-card .metric-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-top: 8px;
+  line-height: 1.3;
+}
+.domain-summary-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 22px 18px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.04);
+}
+.domain-chart-flex {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  flex-wrap: wrap;
+  padding: 8px 4px 4px;
+}
+.domain-legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 200px;
+  flex: 1;
+  max-width: 280px;
+}
+.domain-legend-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 13.5px;
+}
+.domain-legend-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.domain-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.domain-legend-count {
+  font-weight: 800;
+  color: var(--ink);
+  font-size: 13px;
 }
 
 /* Bottom Nav & FAB */
@@ -700,30 +757,25 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 .app { padding-bottom: 84px !important; }
 
 /* Landscape Mode Responsive Rules */
-.practice-landscape-grid {
+.practice-container {
+  max-width: 680px;
+  margin: 0 auto;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
-.practice-col-left, .practice-col-right {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
+.optional-sql-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
 }
 
-body.landscape-layout .practice-landscape-grid,
+body.landscape-layout .practice-container {
+  max-width: 720px;
+}
+
 @media (min-width: 860px), (orientation: landscape) and (min-width: 680px) {
-  .practice-landscape-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
-    gap: 18px;
-    align-items: start;
-  }
-  .practice-col-right {
-    position: sticky;
-    top: 14px;
-  }
   #coreDomainsGrid {
     grid-template-columns: repeat(4, 1fr) !important;
   }
@@ -1667,22 +1719,6 @@ body.landscape-layout .practice-landscape-grid,
   </div>
 </div>
 
-<!-- Step SQL Modal -->
-<div id="stepSqlModal" class="modal-backdrop" hidden>
-  <div class="modal-dialog">
-    <div class="modal-header">
-      <div class="modal-badge">Step-by-Step SQL Hint</div>
-      <button class="modal-close-btn" onclick="closeStepSql()">✕</button>
-    </div>
-    <h2 style="margin: 8px 0 12px; font-size: 20px;">SQL Clause Breakdown</h2>
-    <p class="small" style="margin-bottom: 14px;">Build your query step-by-step from source tables to final output projections.</p>
-    <div id="stepSqlList" class="step-sql-container"></div>
-    <div style="margin-top: 18px; text-align: right;">
-      <button class="action primary" onclick="closeStepSql()">Got It</button>
-    </div>
-  </div>
-</div>
-
 <!-- Profile Details Modal -->
 <div id="profileModal" class="modal-backdrop" hidden>
   <div class="modal-dialog" style="max-width: 440px;">
@@ -1836,147 +1872,68 @@ body.landscape-layout .practice-landscape-grid,
     <div class="meta" id="meta"></div>
   </div>
 
-  <div class="practice-landscape-grid">
-    <div class="practice-col-left">
-      <div class="card">
-        <div class="scenario-head">
-          <div>
-            <h2 id="title"></h2>
-            <div class="problem" id="question"></div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-            <div class="qno" id="qno"></div>
-            <div class="done-tag" id="doneTag"></div>
-          </div>
+  <div class="practice-container">
+    <div class="card">
+      <div class="scenario-head">
+        <div>
+          <h2 id="title"></h2>
+          <div class="problem" id="question"></div>
         </div>
-        <div class="tags" id="tags"></div><p id="learningStage" class="small"></p>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+          <div class="qno" id="qno"></div>
+          <div class="done-tag" id="doneTag"></div>
+        </div>
       </div>
+      <div class="tags" id="tags"></div><p id="learningStage" class="small"></p>
+    </div>
 
-      <div class="card">
-        <div class="tab-header">
-          <button class="tab-btn active" id="tabSchema" onclick="setSchemaTab('schema')">Schema Overview</button>
-          <button class="tab-btn" id="tabSample" onclick="setSchemaTab('sample')">Sample Data Preview</button>
-        </div>
-        <div id="schemaOverview">
-          <div class="schema-cards" id="schema"></div>
-        </div>
-        <div id="sampleDataView" hidden></div>
+    <div class="card">
+      <div class="tab-header">
+        <button class="tab-btn active" id="tabSchema" onclick="setSchemaTab('schema')">Schema Overview</button>
+        <button class="tab-btn" id="tabSample" onclick="setSchemaTab('sample')">Sample Data Preview</button>
       </div>
+      <div id="schemaOverview">
+        <div class="schema-cards" id="schema"></div>
+      </div>
+      <div id="sampleDataView" hidden></div>
+    </div>
 
-      <div class="card">
-        <h2>1. Think Through the Problem</h2>
-        <p class="small" style="color:var(--muted);margin-top:-4px;margin-bottom:12px;">Explain your plan in simple English: which table to use, what to do, and the expected result.</p>
-        
-        <label for="thinking" style="margin-top:8px;">How would you solve this problem?</label>
-        <textarea id="thinking" maxlength="8000" placeholder="In simple words: Table to use → What to do (filter/join/aggregate) → Expected result"></textarea>
-        <div class="actions" style="grid-template-columns: 1fr; margin-top: 10px;">
-          <button class="action primary" id="checkThinkingBtn" onclick="evaluatePlan()">Check My Thinking</button>
-        </div>
-        <div id="feedback" class="feedback" role="status" aria-live="polite">
-          <div class="score" id="score"></div>
-          <p id="assessmentMessage" style="font-size:13.5px;margin:6px 0 0;line-height:1.5;"></p>
-        </div>
-        <div id="howToThinkBox" hidden></div>
+    <div class="card">
+      <h2>Think Through the Problem</h2>
+      <p class="small" style="color:var(--muted);margin-top:-4px;margin-bottom:12px;">Explain your plan in simple English: which table to use, what to do, and the expected result.</p>
+      
+      <label for="thinking" style="margin-top:8px;">How would you solve this problem?</label>
+      <textarea id="thinking" maxlength="8000" placeholder="In simple words: Table to use → What to do (filter/join/aggregate) → Expected result"></textarea>
+      <div class="actions" style="grid-template-columns: 1fr; margin-top: 10px;">
+        <button class="action primary" id="checkThinkingBtn" onclick="evaluatePlan()">Check My Thinking</button>
+      </div>
+      <div id="feedback" class="feedback" role="status" aria-live="polite">
+        <div class="score" id="score"></div>
+        <p id="assessmentMessage" style="font-size:13.5px;margin:6px 0 0;line-height:1.5;"></p>
+      </div>
+      <div id="howToThinkBox" hidden></div>
 
-        <!-- Next Scenario Button directly below Thinking Score / How to Think section -->
-        <div id="nextScenarioContainer" style="margin-top: 16px; text-align: center;">
-          <button class="action secondary sql-next-btn" id="nextButton" onclick="nextScenario()" disabled style="width: 100%; height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; font-weight: 800; border-radius: 12px;">
-            <span>Next Scenario</span>
-            <span class="btn-icon">→</span>
-          </button>
-        </div>
+      <!-- Next Scenario Button directly below Thinking Score / How to Think section -->
+      <div id="nextScenarioContainer" style="margin-top: 16px; text-align: center;">
+        <button class="action secondary sql-next-btn" id="nextButton" onclick="nextScenario()" disabled style="width: 100%; height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; font-weight: 800; border-radius: 12px;">
+          <span>Next Scenario</span>
+          <span class="btn-icon">→</span>
+        </button>
       </div>
     </div>
 
-    <div class="practice-col-right">
-      <div class="card sql-workbench-card" id="sqlSection">
-        <h2 style="margin-top: 0; margin-bottom: 4px;">2. SQL Query Editor (Optional)</h2>
-        <p class="small" style="color:var(--muted);margin-top:0;margin-bottom:12px;font-size:13px;line-height:1.4;">If you want to try SQL, you can use the editor below. Otherwise, continue to the next scenario.</p>
-        
-        <!-- Modern SQL IDE Workbench -->
-        <div class="sql-ide-container" id="sqlIdeContainer">
-          
-          <!-- IDE Window Header -->
-          <div class="sql-ide-header">
-            <div class="sql-ide-header-left">
-              <span class="ide-file-icon">🗄</span>
-              <span class="ide-title-text">SQL Editor</span>
-              <span class="ide-file-tab">solution.sql</span>
-            </div>
-            <div class="sql-ide-header-right">
-              <div class="sql-dialect-badge" title="Target Engine: PostgreSQL 16+">
-                <span class="dialect-dot"></span>
-                <span class="dialect-name">PostgreSQL ▾</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- IDE Toolbar -->
-          <div class="sql-ide-toolbar" style="justify-content: flex-end;">
-            <div class="sql-ide-tools-right">
-              <button class="ide-tool-btn ghost" id="copySqlBtn" onclick="copyLearnerSql()" title="Copy current SQL to clipboard">
-                <span class="ide-btn-icon">📋</span>
-                <span>Copy</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- IDE Code Workspace: Line Numbers + Syntax Highlight Overlay + Textarea -->
-          <div class="sql-ide-editor-wrap" id="sqlEditorWrap">
-            <div class="sql-ide-gutter" id="sqlGutter" aria-hidden="true">
-              <div class="sql-line-num">1</div>
-            </div>
-            <div class="sql-ide-code-area">
-              <pre class="sql-ide-highlight" id="sqlHighlightPre" aria-hidden="true"><code id="sqlHighlightCode"></code></pre>
-              <textarea id="learnerSql" maxlength="20000" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-- Optional: Write your PostgreSQL query here...&#10;SELECT *&#10;FROM table;&#10;-- Press Ctrl+Enter to check SQL"></textarea>
-            </div>
-          </div>
-
-          <!-- IDE Status Bar -->
-          <div class="sql-ide-statusbar">
-            <div class="sql-statusbar-left">
-              <span class="sql-status-indicator ready" id="sqlStatusDot">●</span>
-              <span id="sqlStatusText" class="sql-status-label">PostgreSQL • Ready</span>
-            </div>
-            <div class="sql-statusbar-right">
-              <span id="sqlLineCount">Lines: 1</span>
-              <span class="status-sep">|</span>
-              <span id="sqlCharCount">Chars: 0</span>
-              <span class="status-sep">|</span>
-              <span class="sql-shortcut-badge" title="Run query shortcut">Ctrl + Enter ↵</span>
-            </div>
-          </div>
-
-        </div>
-
-        <p id="sqlGate" class="small" style="margin: 8px 0 10px;"></p>
-
-        <!-- Main SQL Actions: Run / Check -->
-        <div class="sql-actions-bar" style="display:flex;">
-          <button class="action primary sql-run-btn" id="checkSqlButton" onclick="evaluateSql()" style="flex:1;">
-            <span class="btn-icon">▶</span>
-            <span id="checkSqlBtnLabel">Check / Run SQL</span>
-          </button>
-        </div>
-
-        <!-- Modern Inline Error / Verified Panel -->
-        <div id="sqlEvaluation" class="evaluation" hidden role="status" aria-live="polite">
-          <strong id="sqlEvaluationTitle"></strong>
-          <p id="sqlEvaluationMessage"></p>
-          <pre id="sqlPreview" hidden></pre>
-        </div>
-
-        <p id="practiceStatus" role="status"></p>
-        <details id="solutionHelp" hidden><summary>Review suggested reasoning and reference SQL</summary>
-          <p class="small">This is one reference approach. Other correct SQL solutions are possible.</p>
-          <div id="pseudo"></div><pre id="referenceSql"></pre>
-        </details>
+    <!-- Optional SQL Practice Section -->
+    <div class="card optional-sql-card" style="text-align: center; padding: 22px 18px; margin-top: 4px;">
+      <p style="font-size: 14px; color: var(--ink); margin: 0 0 14px; line-height: 1.5;">
+        Want to try the SQL yourself? You can copy the scenario setup and practice it in DB Fiddle.
+      </p>
+      <div style="display: flex; justify-content: center;">
+        <button class="action secondary" id="copyFiddleBtn" onclick="copySchemaAndOpenFiddle()" style="font-size: 14px; font-weight: 700; padding: 10px 22px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
+          <span style="font-size: 16px;">📋</span>
+          <span>Copy Schema &amp; Open DB Fiddle</span>
+        </button>
       </div>
-
-      <div class="card" id="manualCopy" hidden>
-        <label for="copyText">Clipboard unavailable: select and copy this text</label>
-        <textarea id="copyText" readonly></textarea>
-      </div>
+      <div id="fiddleCopyConfirmation" class="small" role="status" aria-live="polite" style="margin-top: 10px; color: #166534; font-weight: 700; min-height: 18px;"></div>
     </div>
   </div>
   <div class="footer">
@@ -1990,74 +1947,45 @@ body.landscape-layout .practice-landscape-grid,
 
 <!-- Dedicated Progress Screen -->
 <section id="progressScreen" class="screen">
-  <div class="header">
-    <div>
-      <h1>Learning Analytics</h1>
-      <div class="sub">Your SQL Mastery & Domain Progress</div>
+  <div class="progress-container">
+    <div class="header" style="justify-content: center; text-align: center; margin-bottom: 22px;">
+      <div>
+        <h1 style="margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.4px;">Progress</h1>
+        <div class="sub" id="progressTrackSubtitle">4 Core Domains Track</div>
+      </div>
     </div>
-    <button class="linkbtn" onclick="showScreen('home')">← Home</button>
+
+    <!-- 4 Core Metric Items -->
+    <div class="progress-metrics-grid">
+      <div class="progress-metric-card">
+        <div class="metric-val" id="progressTotalQuestions">0</div>
+        <div class="metric-label">Total Questions</div>
+      </div>
+      <div class="progress-metric-card">
+        <div class="metric-val" id="progressCompletedQuestions">0</div>
+        <div class="metric-label">Questions Completed</div>
+      </div>
+      <div class="progress-metric-card">
+        <div class="metric-val" id="progressCompletionPct">0%</div>
+        <div class="metric-label">Completion Percentage</div>
+      </div>
+      <div class="progress-metric-card">
+        <div class="metric-val" id="progressAvgThinkingScore">0.0 / 10</div>
+        <div class="metric-label">Average Thinking Score</div>
+      </div>
+    </div>
+
+    <!-- ONE Single Compact Card: Domain-Wise Completed Questions -->
+    <div class="domain-summary-card" id="progressDomainCard" style="margin-top: 14px;">
+      <h2 style="font-size: 16px; font-weight: 800; text-align: center; margin: 0 0 16px; color: var(--ink);">Domain-Wise Completed Questions</h2>
+      <div class="domain-chart-flex" id="domainChartContent">
+        <!-- Rendered dynamically via renderProgressScreen() -->
+      </div>
+    </div>
   </div>
 
-  <div class="progress-stat-grid">
-    <div class="stat-card">
-      <div class="stat-val" id="progressScreenCount">0 / 420</div>
-      <div class="stat-sub">Verified SQLs</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-val" id="progressScreenPct">0%</div>
-      <div class="stat-sub">Mastery Rate</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-val" id="progressScreenAvg">0.0 / 10</div>
-      <div class="stat-sub">Avg Thinking Score</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-val" id="progressScreenStarted">0</div>
-      <div class="stat-sub">Exercises Started</div>
-    </div>
-  </div>
-
-  <div class="label">Domain Breakdown</div>
-  <div class="domain-stat-cards" id="progressDomainCards"></div>
-
-  <div class="label" style="margin-top:24px;">Scenario Library & Status</div>
-  <div class="filter-pills">
-    <button class="filter-pill p-dom-btn active" onclick="filterProgressDomain('All')">All Domains</button>
-    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Banking')">Banking</button>
-    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Healthcare')">Healthcare</button>
-    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Insurance')">Insurance</button>
-    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Capital Markets')">Capital Markets</button>
-    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Semiconductor')">Semiconductor</button>
-    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Education')">Education</button>
-    <button class="filter-pill p-dom-btn" onclick="filterProgressDomain('Retail')">Retail</button>
-  </div>
-  <div class="filter-pills" style="margin-top:-6px;">
-    <button class="filter-pill p-status-btn active" data-status="All" onclick="filterProgressStatus('All')">All Status</button>
-    <button class="filter-pill p-status-btn" data-status="verified" onclick="filterProgressStatus('verified')">✓ Verified</button>
-    <button class="filter-pill p-status-btn" data-status="started" onclick="filterProgressStatus('started')">In Progress</button>
-    <button class="filter-pill p-status-btn" data-status="not_started" onclick="filterProgressStatus('not_started')">Not Started</button>
-  </div>
-  <div class="search-box">
-    <input type="text" class="search-input" placeholder="Filter scenario list..." oninput="filterProgressSearch(this.value)" />
-  </div>
-  <div id="progressResultCount" class="small muted" style="margin-bottom:8px;"></div>
-  <div class="progress-table-box">
-    <table class="sample-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Domain</th>
-          <th>Level</th>
-          <th>Score</th>
-          <th>Status</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="progressTableBody"></tbody>
-    </table>
-  </div>
   <div class="footer">
-    <div>Crack SQL • 420 exercises • Think → Write → Verify</div>
+    <div>Crack SQL • Think → Write → Verify</div>
     <div class="d2d-watermark" aria-label="Powered by D2D">
       <span class="wm-powered">Powered by</span>
       <span class="wm-brand">D2D</span>

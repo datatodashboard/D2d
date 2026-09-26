@@ -143,6 +143,9 @@ function updateProgress() {
       $('doneTag').textContent = 'SQL verified';
     }
   }
+  if ($('progressScreen')?.classList.contains('active')) {
+    renderProgressScreen();
+  }
 }
 function renderAssessment(result) {
   $('feedback').classList.toggle('active', !!result);
@@ -200,36 +203,55 @@ function renderAssessment(result) {
   }
 }
 function updateGates() {
-  const e = entry(), ready = current && thinkingIsReady(current, e), hasSql = !!e.sql?.trim();
-  const isBusy = sqlEngineManager.isBusy();
-  if ($('sqlSection')) $('sqlSection').hidden = false;
-  if ($('checkSqlButton')) $('checkSqlButton').disabled = !hasSql || isBusy;
-  if ($('checkSqlBtnLabel')) {
-    $('checkSqlBtnLabel').textContent = isBusy ? (sqlEngineManager.state === 'running' ? 'Checking query…' : (sqlEngineManager.state === 'initializing' ? 'Initializing…' : 'Resetting…')) : 'Check / Run SQL';
-  }
-  if ($('resetSqlButton')) $('resetSqlButton').disabled = isBusy;
-  if ($('resetSqlIdeBtn')) $('resetSqlIdeBtn').disabled = isBusy;
-  if ($('sqlGate')) {
-    if (!hasSql) {
-      $('sqlGate').textContent = 'Write your PostgreSQL query to test against PostgreSQL.';
-      $('sqlGate').style.color = 'var(--muted)';
-    } else if (isBusy) {
-      $('sqlGate').textContent = sqlEngineManager.state === 'initializing' ? 'Initializing isolated PostgreSQL session...' : (sqlEngineManager.state === 'resetting' ? 'Resetting scenario database session...' : 'Executing query in PostgreSQL sandbox engine…');
-      $('sqlGate').style.color = 'var(--muted)';
-    } else {
-      $('sqlGate').textContent = 'Ready: Click "Check / Run SQL" (or Ctrl + Enter) to test your query against PostgreSQL.';
-      $('sqlGate').style.color = 'var(--ink)';
-    }
-  }
+  const e = entry();
   if ($('practiceStatus')) $('practiceStatus').textContent = current ? labels[stage(current, e)] : '';
   const thinkingScore = typeof e.assessment?.score === 'number' ? e.assessment.score : 0;
   if ($('nextButton')) $('nextButton').disabled = thinkingScore < 7;
-  const verified = current && stage(current, e) === 'verified';
-  if ($('solutionHelp')) $('solutionHelp').hidden = !verified;
-  if (!verified && $('solutionHelp')) {
-    $('solutionHelp').open = false;
-    if ($('referenceSql')) $('referenceSql').textContent = '';
-    if ($('pseudo')) $('pseudo').textContent = '';
+}
+
+async function copySchemaAndOpenFiddle() {
+  if (!current || !data?.assets?.[current.domain]) return;
+  const asset = data.assets[current.domain];
+  const schema = (asset.schema || '').trim();
+  const sample = (asset.sample || '').trim();
+  const completeSetup = (schema + '\n\n' + sample).trim();
+
+  let copied = false;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(completeSetup);
+      copied = true;
+    }
+  } catch (err) {
+    console.warn('Clipboard writeText failed, using fallback', err);
+  }
+
+  if (!copied) {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = completeSetup;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      copied = true;
+    } catch (e) {
+      console.warn('Fallback copy failed', e);
+    }
+  }
+
+  const confirmEl = $('fiddleCopyConfirmation');
+  if (confirmEl) {
+    confirmEl.textContent = 'Schema and sample data copied. Paste it into DB Fiddle and write your SQL query.';
+  }
+
+  try {
+    window.open('https://www.db-fiddle.com/', '_blank', 'noopener,noreferrer');
+  } catch (err) {
+    console.warn('window.open blocked or failed:', err);
   }
 }
 
@@ -517,25 +539,9 @@ function renderScenario() {
   renderSchemaCards(effective.schemaText);
   setSchemaTab('schema');
   $('thinking').value=thinkingText(e.thinking);
-  $('learnerSql').value=e.sql||'';
-  if ($('fiddleFallback')) $('fiddleFallback').hidden = true;
-  if ($('manualCopy')) $('manualCopy').hidden = true;
+  if ($('fiddleCopyConfirmation')) $('fiddleCopyConfirmation').textContent = '';
   renderAssessment(e.assessment?evaluateThinking(effective,e.thinking||{}):null);
-  renderSqlEvaluation(e.evaluationFingerprint===workFingerprint(e)?e.evaluationResult:null);
-  updateSqlEditorView();
   updateProgress();updateGates();
-
-  // Initialize isolated SQL session for the current scenario
-  if (effective && data?.assets?.[effective.domain]) {
-    sqlEngineManager.initScenario(effective, data.assets[effective.domain]).catch(err => {
-      console.warn('Failed to initialize scenario SQL engine session:', err);
-      renderSqlEvaluation({
-        passed: false,
-        kind: 'engine',
-        message: `Local PostgreSQL engine could not start: ${err.message}. Click "Reset SQL" or reload to retry.`
-      });
-    });
-  }
 }
 function loadScenario() {
   if(!selectedDomain||!selectedLevel) return;
@@ -561,7 +567,9 @@ function evaluatePlan() {
   const thinking=readThinking(),assessment=evaluateThinking(effective,thinking);
   changeEntry({thinking,assessment,variantIndex:effective.variantIndex,skill:effective.skill});
   renderAssessment(assessment);updateGates();
-  if(assessment.ready) $('learnerSql').focus();
+  if (assessment.score >= 7 && $('nextButton')) {
+    $('nextButton').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 function nextScenario() {
   const e = entry();
@@ -570,21 +578,33 @@ function nextScenario() {
     return;
   }
   const pool=scenarios.filter(s=>s.domain===selectedDomain&&s.level===selectedLevel);
-  const next=chooseNext(pool,state,current.id);
-  if(!next) {
-    current=pool[(pool.findIndex(s=>s.id===current.id)+1)%pool.length];renderScenario();
-    $('practiceStatus').textContent='All exercises in this selection are verified. You are reviewing completed work.';return;
+  if (!pool.length) return;
+  const currentIndex = pool.findIndex(s=>s.id===current.id);
+  let next = null;
+  for (let i = 1; i < pool.length; i++) {
+    const candidate = pool[(currentIndex + i) % pool.length];
+    const candidateEntry = state.entries[candidate.id];
+    const candidateScore = candidateEntry?.assessment?.score || 0;
+    const candidateVerified = stage(candidate, candidateEntry) === 'verified';
+    if (!candidateVerified && candidateScore < 7) {
+      next = candidate;
+      break;
+    }
+  }
+  if (!next) {
+    next = pool[(currentIndex + 1) % pool.length];
   }
   current=next;renderScenario();
 }
 function showScreen(name) {
   $('home').classList.toggle('active', name === 'home');
   $('practice').classList.toggle('active', name === 'practice');
-  $('progressScreen').classList.toggle('active', name === 'progress');
+  const isProgress = name === 'progress' || name === 'progressScreen';
+  $('progressScreen').classList.toggle('active', isProgress);
   if ($('navHome')) $('navHome').classList.toggle('active', name === 'home');
   if ($('navPractice')) $('navPractice').classList.toggle('active', name === 'practice');
-  if ($('navProgress')) $('navProgress').classList.toggle('active', name === 'progress');
-  if (name === 'progress') {
+  if ($('navProgress')) $('navProgress').classList.toggle('active', isProgress);
+  if (isProgress) {
     renderProgressScreen();
   } else if (name === 'practice') {
     if (!current) {
@@ -923,132 +943,113 @@ function renderScenarioCatalog() {
 
 function renderProgressScreen() {
   if (!scenarios.length) return;
-  const stages = scenarios.map(s => stage(s, state.entries[s.id]));
-  const verified = stages.filter(x => x === 'verified').length;
-  const started = stages.filter(x => x !== 'not_started').length;
-  const pct = ((verified / scenarios.length) * 100).toFixed(1);
+  const trackScenarios = (currentDomainTrack === 'core')
+    ? scenarios.filter(s => CORE_DOMAINS.includes(s.domain))
+    : scenarios;
   
+  const totalQuestions = trackScenarios.length;
+  const stages = trackScenarios.map(s => stage(s, state.entries[s.id]));
+  const completedCount = stages.filter(x => x === 'verified').length;
+  const completionPct = totalQuestions > 0 ? Math.round((completedCount / totalQuestions) * 100) : 0;
+
   let totalScore = 0, countWithScore = 0;
-  for (const s of scenarios) {
+  for (const s of trackScenarios) {
     const e = state.entries[s.id];
-    if (e?.assessment?.score !== undefined) {
+    if (e?.assessment?.score !== undefined && typeof e.assessment.score === 'number') {
       totalScore += e.assessment.score;
       countWithScore++;
     }
   }
   const avgScore = countWithScore ? (totalScore / countWithScore).toFixed(1) : '0.0';
-  
-  if ($('progressScreenCount')) $('progressScreenCount').textContent = `${verified} / ${scenarios.length}`;
-  if ($('progressScreenPct')) $('progressScreenPct').textContent = `${pct}%`;
-  if ($('progressScreenAvg')) $('progressScreenAvg').textContent = `${avgScore} / 10`;
-  if ($('progressScreenStarted')) $('progressScreenStarted').textContent = `${started}`;
-  
-  const domains = ['Banking', 'Healthcare', 'Insurance', 'Capital Markets', 'Semiconductor', 'Education', 'Retail'];
-  const domainIcons = {
-    'Banking': '🏦', 'Healthcare': '🏥', 'Insurance': '🛡️',
-    'Capital Markets': '📈', 'Semiconductor': '🔬', 'Education': '🎓', 'Retail': '🛒'
-  };
-  const domainNotes = {
-    'Banking': 'Accounts & transactions', 'Healthcare': 'Patients & visits',
-    'Insurance': 'Policies & claims', 'Capital Markets': 'Investors & trades',
-    'Semiconductor': 'Batches & chip tests', 'Education': 'Students & assessments',
-    'Retail': 'Orders & products'
-  };
-  
-  if ($('progressDomainCards')) {
-    $('progressDomainCards').innerHTML = domains.map(d => {
-      const dScenarios = scenarios.filter(s => s.domain === d);
-      const dVerified = dScenarios.filter(s => stage(s, state.entries[s.id]) === 'verified').length;
-      const dPct = ((dVerified / dScenarios.length) * 100).toFixed(0);
-      const beg = dScenarios.filter(s => s.level === 'Beginner' && stage(s, state.entries[s.id]) === 'verified').length;
-      const int = dScenarios.filter(s => s.level === 'Intermediate' && stage(s, state.entries[s.id]) === 'verified').length;
-      const exp = dScenarios.filter(s => s.level === 'Expert' && stage(s, state.entries[s.id]) === 'verified').length;
-      
-      return `
-        <div class="domain-stat-card">
-          <div class="domain-stat-head">
-            <div class="domain-stat-icon">${domainIcons[d] || '📁'}</div>
-            <div style="flex:1">
-              <div class="domain-stat-title">${d}</div>
-              <div class="domain-stat-sub">${domainNotes[d] || ''}</div>
-            </div>
-            <div class="domain-stat-count"><b>${dVerified}</b> / ${dScenarios.length} (${dPct}%)</div>
-          </div>
-          <div class="progress-track" style="margin: 8px 0 6px;"><div class="progress-fill" style="width:${dPct}%"></div></div>
-          <div class="domain-stat-levels">
-            <span>Beg: ${beg}/20</span>
-            <span>Int: ${int}/20</span>
-            <span>Exp: ${exp}/20</span>
-            <button class="ghost-btn-sm" onclick="practiceDomain('${escapeHtml(d)}')">Practice Domain</button>
-          </div>
-        </div>
+
+  if ($('progressTrackSubtitle')) {
+    $('progressTrackSubtitle').textContent = currentDomainTrack === 'core' 
+      ? '4 Core Domains Track (240 questions)' 
+      : 'All Domains Track (420 questions)';
+  }
+  if ($('progressTotalQuestions')) $('progressTotalQuestions').textContent = String(totalQuestions);
+  if ($('progressCompletedQuestions')) $('progressCompletedQuestions').textContent = String(completedCount);
+  if ($('progressCompletionPct')) $('progressCompletionPct').textContent = `${completionPct}%`;
+  if ($('progressAvgThinkingScore')) $('progressAvgThinkingScore').textContent = `${avgScore} / 10`;
+
+  // Domain-wise completed questions: Banking, Healthcare, Insurance, Retail
+  const targetDomains = [
+    { name: 'Banking', icon: '🏦', color: '#2563eb' },
+    { name: 'Healthcare', icon: '🏥', color: '#059669' },
+    { name: 'Insurance', icon: '🛡️', color: '#7c3aed' },
+    { name: 'Retail', icon: '🛒', color: '#ea580c' }
+  ];
+
+  const domainCounts = targetDomains.map(d => {
+    const dScenarios = scenarios.filter(s => s.domain === d.name);
+    const count = dScenarios.filter(s => stage(s, state.entries[s.id]) === 'verified').length;
+    return { ...d, count, total: dScenarios.length };
+  });
+
+  const sumDomainCompleted = domainCounts.reduce((acc, cur) => acc + cur.count, 0);
+
+  const container = $('domainChartContent');
+  if (container) {
+    const size = 140;
+    const r = 50;
+    const cx = size / 2;
+    const cy = size / 2;
+    const circumference = 2 * Math.PI * r;
+
+    let slicesSvg = '';
+    if (sumDomainCompleted === 0) {
+      slicesSvg = `
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e2e8f0" stroke-width="16" />
+        <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="20" font-weight="900" fill="#94a3b8">0</text>
+        <text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="11" font-weight="700" fill="#94a3b8">Completed</text>
       `;
-    }).join('');
-  }
-  renderProgressTable();
-}
+    } else {
+      let accumulatedOffset = 0;
+      const paths = domainCounts.map(d => {
+        if (d.count === 0) return '';
+        const sliceLength = (d.count / sumDomainCompleted) * circumference;
+        const offset = -accumulatedOffset;
+        accumulatedOffset += sliceLength;
+        return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${d.color}" stroke-width="16" stroke-dasharray="${sliceLength.toFixed(2)} ${(circumference - sliceLength).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" />`;
+      }).filter(Boolean);
 
-let progressDomainFilter = 'All';
-let progressStatusFilter = 'All';
-let progressSearchText = '';
+      slicesSvg = `
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="16" />
+        <g transform="rotate(-90 ${cx} ${cy})">
+          ${paths.join('')}
+        </g>
+        <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="900" fill="var(--ink)">${sumDomainCompleted}</text>
+        <text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--muted)">Completed</text>
+      `;
+    }
 
-function filterProgressDomain(d) {
-  progressDomainFilter = d;
-  document.querySelectorAll('.p-dom-btn').forEach(b => b.classList.toggle('active', b.textContent.trim() === d));
-  renderProgressTable();
-}
-function filterProgressStatus(st) {
-  progressStatusFilter = st;
-  document.querySelectorAll('.p-status-btn').forEach(b => b.classList.toggle('active', b.dataset.status === st));
-  renderProgressTable();
-}
-function filterProgressSearch(q) {
-  progressSearchText = q.toLowerCase().trim();
-  renderProgressTable();
-}
+    const legendHtml = domainCounts.map(d => `
+      <div class="domain-legend-row">
+        <div class="domain-legend-left">
+          <span class="domain-color-dot" style="background:${d.color};"></span>
+          <span>${d.icon} <b>${d.name}</b></span>
+        </div>
+        <div class="domain-legend-count"><b>${d.count}</b> completed</div>
+      </div>
+    `).join('');
 
-function renderProgressTable() {
-  const container = $('progressTableBody');
-  if (!container) return;
-  let list = scenarios;
-  if (progressDomainFilter !== 'All') {
-    list = list.filter(s => s.domain === progressDomainFilter);
-  }
-  if (progressStatusFilter !== 'All') {
-    list = list.filter(s => {
-      const st = stage(s, state.entries[s.id]);
-      return progressStatusFilter === 'verified' ? st === 'verified' :
-             progressStatusFilter === 'started' ? st !== 'not_started' :
-             st === 'not_started';
-    });
-  }
-  if (progressSearchText) {
-    list = list.filter(s => s.id.toLowerCase().includes(progressSearchText) || s.question.toLowerCase().includes(progressSearchText));
-  }
-  
-  if ($('progressResultCount')) $('progressResultCount').textContent = `Showing ${Math.min(list.length, 50)} of ${list.length} exercises`;
-  
-  container.innerHTML = list.slice(0, 50).map(s => {
-    const e = state.entries[s.id] || {};
-    const stg = stage(s, e);
-    const score = e?.assessment?.score !== undefined ? e.assessment.score + '/10' : '—';
-    let statusPill = '<span class="status-pill not-started">Not started</span>';
-    if (stg === 'verified') statusPill = '<span class="status-pill verified">✓ Verified</span>';
-    else if (stg === 'thinking_ready') statusPill = '<span class="status-pill thinking">🧠 Ready</span>';
-    else if (stg === 'sql_written') statusPill = '<span class="status-pill draft">📝 Draft</span>';
-    
-    return `
-      <tr>
-        <td><b>${s.id}</b></td>
-        <td>${s.domain}</td>
-        <td>${s.level}</td>
-        <td>${score}</td>
-        <td>${statusPill}</td>
-        <td><button class="ghost-btn-sm" onclick="openScenario('${s.id}')">Open</button></td>
-      </tr>
+    container.innerHTML = `
+      <div class="donut-chart-box" style="flex-shrink:0;">
+        <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Domain completion chart">
+          ${slicesSvg}
+        </svg>
+      </div>
+      <div class="domain-legend-list">
+        ${legendHtml}
+      </div>
     `;
-  }).join('');
+  }
 }
+
+function filterProgressDomain() {}
+function filterProgressStatus() {}
+function filterProgressSearch() {}
+function renderProgressTable() {}
 
 function practiceDomain(domain) {
   selectedDomain = domain;
@@ -1472,6 +1473,7 @@ Object.assign(window,{
   setDomainTrack,openOnboarding,closeOnboarding,toggleLandscapeMode,
   toggleProfileDropdown,closeProfileDropdown,openProfileModal,closeProfileModal,
   handleModalAuthAction,openMyProgress,handleProfileSignOut,
+  copySchemaAndOpenFiddle,
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   sqlEngineManager
 });
@@ -1486,10 +1488,13 @@ try {
     el.setAttribute('role','button');el.tabIndex=0;
     el.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();el.click();}});
   });
-  $('thinking').addEventListener('input',()=>{
-    changeEntry({thinking:readThinking(),assessment:null,fiddleFingerprint:null,evaluationFingerprint:null,evaluationResult:null});
-    renderAssessment(null);renderSqlEvaluation(null);updateGates();
-  });
+  const thinkingEl = $('thinking');
+  if (thinkingEl) {
+    thinkingEl.addEventListener('input',()=>{
+      changeEntry({thinking:readThinking(),assessment:null,fiddleFingerprint:null,evaluationFingerprint:null,evaluationResult:null});
+      renderAssessment(null);if(typeof renderSqlEvaluation==='function')renderSqlEvaluation(null);updateGates();
+    });
+  }
   const sqlInput = $('learnerSql');
   if (sqlInput) {
     sqlInput.addEventListener('input', () => {
@@ -1514,11 +1519,16 @@ try {
       }
     });
   }
-  $('solutionHelp').addEventListener('toggle',()=>{
-    if($('solutionHelp').open && current && stage(current,entry())==='verified'){
-      $('pseudo').textContent=current.pseudo;$('referenceSql').textContent=current.sql;changeEntry({answerViewed:true});
-    }
-  });
+  const solutionHelpEl = $('solutionHelp');
+  if (solutionHelpEl) {
+    solutionHelpEl.addEventListener('toggle',()=>{
+      if(solutionHelpEl.open && current && stage(current,entry())==='verified'){
+        if ($('pseudo')) $('pseudo').textContent=current.pseudo;
+        if ($('referenceSql')) $('referenceSql').textContent=current.sql;
+        changeEntry({answerViewed:true});
+      }
+    });
+  }
   updateProgress();
   renderScenarioCatalog();
   initAppChrome();
