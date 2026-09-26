@@ -597,6 +597,16 @@ function nextScenario() {
   current=next;renderScenario();
 }
 function showScreen(name) {
+  if (!user) {
+    if ($('loginScreen')) $('loginScreen').hidden = false;
+    if ($('appMain')) $('appMain').hidden = true;
+    if ($('bottomNav')) $('bottomNav').hidden = true;
+    return;
+  }
+  if ($('loginScreen')) $('loginScreen').hidden = true;
+  if ($('appMain')) $('appMain').hidden = false;
+  if ($('bottomNav')) $('bottomNav').hidden = false;
+
   $('home').classList.toggle('active', name === 'home');
   $('practice').classList.toggle('active', name === 'practice');
   const isProgress = name === 'progress' || name === 'progressScreen';
@@ -1215,8 +1225,10 @@ async function importCloudHistory() {
 }
 function retrySync() {if(user&&client)cloud.request();else $('syncStatus').textContent='Sign in to sync. Guest practice is saved only on this device.';}
 function renderAuth() {
-  $('authBox').innerHTML=user?'<div class="auth-row"><span>Signed in as '+escapeHtml(user.email||'learner')+'</span><button class="linkbtn" onclick="signOut()">Sign out</button></div>':
-    client?'<div class="auth-row"><button id="googleSignIn" class="action primary" onclick="signInWithGoogle()">Continue with Google</button></div><p class="small">Sign in to sync your progress, or choose a domain below to practise as a guest.</p><p id="authMessage" role="status" aria-live="polite"></p>':'Guest mode: accounts are unavailable. You can still practise on this device.';
+  const loginMsg = $('loginErrorMessage');
+  if (loginMsg && authNotice) loginMsg.textContent = authNotice;
+
+  $('authBox').innerHTML=user?'<div class="auth-row"><span>Signed in as '+escapeHtml(user.email||'learner')+'</span><button class="linkbtn" onclick="signOut()">Sign out</button></div>':'';
   if($('authMessage'))$('authMessage').textContent=authNotice;
   $('importGuest').hidden=!user;
   $('importCloud').hidden=!user;
@@ -1225,15 +1237,42 @@ function renderAuth() {
 function setSession(session) {
   const next=session?.user||null;
   if(next)authNotice='';
-  if(user?.id===next?.id) {renderAuth();return;}
-  clearTimeout(syncTimer);cloud.changeSession();user=next;state=readProgress(storage,user?.id,ids);
-  renderAuth();updateProgress();if(current)renderScenario();
-  if(user)cloud.request();else $('syncStatus').textContent='Guest profile. Signed-in progress stays separate.';
+  const previousUserId = user?.id;
+  user=next;
+
+  if (user) {
+    if ($('loginScreen')) $('loginScreen').hidden = true;
+    if ($('appMain')) $('appMain').hidden = false;
+    if ($('bottomNav')) $('bottomNav').hidden = false;
+
+    if (previousUserId !== user.id) {
+      clearTimeout(syncTimer);
+      cloud.changeSession();
+      state=readProgress(storage,user.id,ids);
+      renderAuth();
+      updateProgress();
+      if(current)renderScenario();
+      cloud.request();
+    } else {
+      renderAuth();
+    }
+    showScreen('home');
+  } else {
+    if ($('loginScreen')) $('loginScreen').hidden = false;
+    if ($('appMain')) $('appMain').hidden = true;
+    if ($('bottomNav')) $('bottomNav').hidden = true;
+
+    clearTimeout(syncTimer);
+    cloud.changeSession();
+    renderAuth();
+  }
 }
 async function signInWithGoogle() {
-  const button=$('googleSignIn'),message=$('authMessage');
+  const button=$('googleSignIn');
+  const message=$('loginErrorMessage') || $('authMessage');
   if(!client || !button || button.disabled)return;
-  button.disabled=true;button.textContent='Connecting to Google…';
+  button.disabled=true;
+  button.innerHTML=`<span>Connecting to Google…</span>`;
   authNotice='';if(message)message.textContent='';
   try {
     const {error}=await client.auth.signInWithOAuth({
@@ -1245,8 +1284,17 @@ async function signInWithGoogle() {
     });
     if(error)throw error;
   } catch {
-    button.disabled=false;button.textContent='Continue with Google';
-    authNotice='Google sign-in could not start. Please retry. If it keeps failing, check the Google provider and allowed redirect URLs in Supabase. Your guest progress is saved.';
+    button.disabled=false;
+    button.innerHTML=`
+      <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+      </svg>
+      <span>Continue with Google</span>
+    `;
+    authNotice='Google sign-in could not start. Please retry. If it keeps failing, check the connection or allowed redirect URLs in Supabase.';
     if(message)message.textContent=authNotice;
   }
 }
@@ -1257,10 +1305,14 @@ async function signOut() {
 async function initAuth() {
   try {
     client=window.supabase?.createClient('https://qklnaqfspvmnlequqagf.supabase.co','sb_publishable_dthVX8zmvd1HvWaYWBaojA_2YbvHWe1')||null;
-    renderAuth();if(!client)return;
+    renderAuth();
+    if(!client) {
+      setSession(null);
+      return;
+    }
     const callback=new URLSearchParams(location.hash.slice(1));
     if(callback.has('error')||callback.has('error_description')) {
-      const message=$('authMessage');
+      const message=$('loginErrorMessage') || $('authMessage');
       authNotice='Google sign-in was cancelled or unsuccessful. Please try again.';
       if(message)message.textContent=authNotice;
       history.replaceState(null,'',location.pathname+location.search);
@@ -1270,8 +1322,13 @@ async function initAuth() {
     client.auth.onAuthStateChange((_event,session)=>{authEventSeen=true;setTimeout(()=>setSession(session),0);});
     const {data:auth,error}=await client.auth.getSession();
     if(error)throw error;
-    if(!authEventSeen)setSession(auth.session);
-  } catch {$('syncStatus').textContent='Account connection unavailable. Local practice is still available.';renderAuth();}
+    if(!authEventSeen) {
+      setSession(auth?.session || null);
+    }
+  } catch (err) {
+    console.warn('Auth initialization error:', err);
+    setSession(null);
+  }
 }
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredPrompt=event;$('installBanner').classList.add('show');});
 async function installApp(){if(deferredPrompt){await deferredPrompt.prompt();deferredPrompt=null;$('installBanner').classList.remove('show');}}

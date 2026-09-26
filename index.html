@@ -804,6 +804,128 @@ body.landscape-layout .practice-container {
   }
 }
 
+/* Clean Welcome / Google Login Gate */
+.login-gate-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: radial-gradient(circle at top, #eff6ff 0%, var(--bg) 75%);
+}
+.login-gate-screen[hidden] {
+  display: none !important;
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+  max-width: 440px;
+  width: 100%;
+  padding: 38px 28px 30px;
+  text-align: center;
+}
+.login-logo-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 16px;
+  font-weight: 900;
+  font-size: 20px;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25);
+}
+.login-kicker {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 6px;
+}
+.login-title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: -1px;
+  color: var(--ink);
+}
+.login-tagline {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.login-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 22px 0;
+}
+.login-desc {
+  margin: 0 0 22px;
+  font-size: 14px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+.login-action-box {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.google-login-btn {
+  width: 100%;
+  height: 48px;
+  font-size: 15px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #1e293b;
+  border: 1.5px solid #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.google-login-btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.09);
+  transform: translateY(-1px);
+}
+.google-login-btn:active {
+  transform: translateY(0);
+}
+.google-login-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+.login-error {
+  min-height: 18px;
+  margin: 10px 0 0;
+  color: #dc2626;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.login-footer-meta {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .btn-landscape-toggle {
   display: none !important;
 }
@@ -1759,9 +1881,41 @@ body.landscape-layout .practice-container {
   </div>
 </div>
 
-<div class="app">
+<!-- Welcome / Google Login Screen (Login Gate) -->
+<section id="loginScreen" class="login-gate-screen">
+  <div class="login-card">
+    <div class="login-logo-badge">SQL</div>
+    <div class="login-kicker">Data To Dashboard</div>
+    <h1 class="login-title">Crack SQL</h1>
+    <p class="login-tagline">Think like a Data Engineer • Plan in English • Crack the SQL</p>
+    
+    <div class="login-divider"></div>
+    
+    <p class="login-desc">Sign in with your Google account to access practice scenarios, evaluate your thinking, and build production data engineering SQL skills.</p>
+    
+    <div class="login-action-box">
+      <button id="googleSignIn" class="google-login-btn" onclick="signInWithGoogle()">
+        <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+        </svg>
+        <span>Continue with Google</span>
+      </button>
+    </div>
 
-<section id="home" class="screen active">
+    <p id="loginErrorMessage" class="login-error" role="status" aria-live="polite"></p>
+
+    <div class="login-footer-meta">
+      <span>Curated Data Engineering Scenarios • Banking • Healthcare • Insurance • Retail</span>
+    </div>
+  </div>
+</section>
+
+<div class="app" id="appMain" hidden>
+
+<section id="home" class="screen">
   <div class="header">
     <div>
       <div class="d2d-company-kicker">Data To Dashboard</div>
@@ -1996,7 +2150,7 @@ body.landscape-layout .practice-container {
 </div>
 
 <!-- Bottom Floating Navigation -->
-<nav class="bottom-nav">
+<nav class="bottom-nav" id="bottomNav" hidden>
   <button class="nav-item active" id="navHome" onclick="showScreen('home')">
     <span class="nav-icon">🧭</span>
     <span class="nav-label">Explore</span>
