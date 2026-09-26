@@ -1253,11 +1253,15 @@ function setSession(session) {
       updateProgress();
       if(current)renderScenario();
       cloud.request();
+      void checkAdminStatus();
     } else {
       renderAuth();
+      void checkAdminStatus();
     }
     showScreen('home');
   } else {
+    isCurrentUserAdmin = false;
+    updateAdminPortalVisibility();
     if ($('loginScreen')) $('loginScreen').hidden = false;
     if ($('appMain')) $('appMain').hidden = true;
     if ($('bottomNav')) $('bottomNav').hidden = true;
@@ -1414,6 +1418,7 @@ function renderProfileAvatar() {
   if (signOutLabel) {
     signOutLabel.textContent = info.isLoggedIn ? 'Sign Out' : 'Sign in with Google';
   }
+  updateAdminPortalVisibility();
 }
 
 function toggleProfileDropdown(event) {
@@ -1505,6 +1510,51 @@ function handleProfileSignOut() {
   }
 }
 
+let isCurrentUserAdmin = false;
+
+async function checkAdminStatus() {
+  if (!user || !client) {
+    isCurrentUserAdmin = false;
+    updateAdminPortalVisibility();
+    return;
+  }
+  try {
+    const { data: profileRow, error } = await client
+      .from('profiles')
+      .select('is_admin')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    isCurrentUserAdmin = Boolean(!error && profileRow?.is_admin === true);
+  } catch (err) {
+    console.warn('Admin status check warning:', err);
+    isCurrentUserAdmin = false;
+  }
+  updateAdminPortalVisibility();
+}
+
+function updateAdminPortalVisibility() {
+  const adminBtn = $('adminPortalBtn');
+  if (adminBtn) {
+    adminBtn.hidden = !isCurrentUserAdmin;
+  }
+}
+
+function openAdminPortal() {
+  closeProfileDropdown();
+  const loc = window.location;
+  if (loc.pathname.includes('/D2d/')) {
+    const basePath = loc.pathname.substring(0, loc.pathname.indexOf('/D2d/') + 5);
+    window.location.href = `${loc.origin}${basePath}admin.html`;
+    return;
+  }
+  if (loc.pathname.endsWith('/D2d')) {
+    window.location.href = `${loc.origin}${loc.pathname}/admin.html`;
+    return;
+  }
+  window.location.href = new URL('admin.html', loc.href).href;
+}
+
 document.addEventListener('click', event => {
   const container = $('profileContainer');
   if (container && !container.contains(event.target)) {
@@ -1529,7 +1579,7 @@ Object.assign(window,{
   filterScenarioSearch,filterProgressDomain,filterProgressStatus,filterProgressSearch,
   setDomainTrack,openOnboarding,closeOnboarding,toggleLandscapeMode,
   toggleProfileDropdown,closeProfileDropdown,openProfileModal,closeProfileModal,
-  handleModalAuthAction,openMyProgress,handleProfileSignOut,
+  handleModalAuthAction,openMyProgress,handleProfileSignOut,openAdminPortal,
   copySchemaAndOpenFiddle,
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   sqlEngineManager

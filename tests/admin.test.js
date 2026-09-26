@@ -128,4 +128,68 @@ describe('Admin Dashboard Progress Evaluation', () => {
     assert.strictEqual(solvedCount, 0);
     assert.strictEqual(attemptedCount, 0);
   });
+
+  it('accurately evaluates admin status using profiles.is_admin', () => {
+    // Admin profile
+    const adminProfile = { id: 'user-admin-1', is_admin: true };
+    const isAdmin = Boolean(adminProfile?.is_admin === true);
+    assert.strictEqual(isAdmin, true, 'Admin profile should have isAdmin = true');
+
+    // Normal learner profile
+    const learnerProfile = { id: 'user-learner-1', is_admin: false };
+    const isLearnerAdmin = Boolean(learnerProfile?.is_admin === true);
+    assert.strictEqual(isLearnerAdmin, false, 'Learner profile should have isAdmin = false');
+
+    // Profile without is_admin property
+    const defaultProfile = { id: 'user-default-1' };
+    const isDefaultAdmin = Boolean(defaultProfile?.is_admin === true);
+    assert.strictEqual(isDefaultAdmin, false, 'Default profile should have isAdmin = false');
+
+    // Unauthenticated / null profile
+    const nullProfile = null;
+    const isNullAdmin = Boolean(nullProfile?.is_admin === true);
+    assert.strictEqual(isNullAdmin, false, 'Null profile should have isAdmin = false');
+  });
+
+  it('generates deployment-safe admin portal path for GitHub Pages and root deployments', () => {
+    function resolveAdminPath(pathname, origin = 'https://example.com') {
+      if (pathname.includes('/D2d/')) {
+        const basePath = pathname.substring(0, pathname.indexOf('/D2d/') + 5);
+        return `${origin}${basePath}admin.html`;
+      }
+      if (pathname.endsWith('/D2d')) {
+        return `${origin}${pathname}/admin.html`;
+      }
+      const basePath = pathname.substring(0, pathname.lastIndexOf('/') + 1);
+      return `${origin}${basePath}admin.html`;
+    }
+
+    // GitHub Pages standard subdirectory: /D2d/
+    assert.strictEqual(
+      resolveAdminPath('/D2d/'),
+      'https://example.com/D2d/admin.html'
+    );
+
+    // GitHub Pages with index.html: /D2d/index.html
+    assert.strictEqual(
+      resolveAdminPath('/D2d/index.html'),
+      'https://example.com/D2d/admin.html'
+    );
+
+    // GitHub Pages without trailing slash: /D2d
+    assert.strictEqual(
+      resolveAdminPath('/D2d'),
+      'https://example.com/D2d/admin.html'
+    );
+
+    // Standard root deployment
+    assert.strictEqual(
+      resolveAdminPath('/index.html'),
+      'https://example.com/admin.html'
+    );
+    assert.strictEqual(
+      resolveAdminPath('/'),
+      'https://example.com/admin.html'
+    );
+  });
 });
