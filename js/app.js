@@ -5,6 +5,7 @@ import {createCloudSync} from './cloud.js';
 import {renderSchemaCards} from './schema.js';
 import {escapeHtml} from './util.js';
 import {SqlEngineManager, loadBrowserPGlite} from './sql-evaluator.js?v=4';
+import {initContest, renderContestCard, closeContestModal} from './contest.js';
 
 const $ = id => document.getElementById(id);
 let data, scenarios=[], ids=new Set(), state=EMPTY(), current=null, user=null;
@@ -699,6 +700,9 @@ function showScreen(name) {
     }
   } else if (name === 'home') {
     renderScenarioCatalog();
+    if (user && client) {
+      renderContestCard();
+    }
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1398,6 +1402,7 @@ async function setSession(session) {
       void checkAdminStatus();
     }
     showScreen('home');
+    void initContest(client, user);
   } else {
     // Signed out: reset in-memory active state and return to login gate
     isCurrentUserAdmin = false;
@@ -1407,12 +1412,14 @@ async function setSession(session) {
     if ($('bottomNav')) $('bottomNav').hidden = true;
     closeProfileDropdown();
     closeProfileModal();
+    closeContestModal();
 
     clearTimeout(syncTimer);
     cloud.changeSession();
     state = EMPTY();
     current = null;
     renderAuth();
+    void initContest(null, null);
   }
 }
 async function signInWithGoogle() {

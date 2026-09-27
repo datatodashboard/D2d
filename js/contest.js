@@ -1,0 +1,805 @@
+// Crack SQL Thinking Contest — Participant Client Controller
+// Completely isolated module for Admin-controlled thinking contests
+import { escapeHtml } from './util.js';
+
+let activeClient = null;
+let activeUser = null;
+let currentContest = null;
+let currentRegistration = null;
+let currentPayment = null;
+let currentAttempt = null;
+let currentEvaluation = null;
+
+let timerInterval = null;
+let autoSaveInterval = null;
+let isSubmitting = false;
+
+const $ = id => document.getElementById(id);
+
+export function getContestState() {
+  return {
+    contest: currentContest,
+    registration: currentRegistration,
+    payment: currentPayment,
+    attempt: currentAttempt,
+    evaluation: currentEvaluation
+  };
+}
+
+// Initialize Contest on login or refresh
+export async function initContest(client, user) {
+  activeClient = client;
+  activeUser = user;
+
+  hideContestCard();
+  closeContestModal();
+
+  if (!client || !user) {
+    currentContest = null;
+    return;
+  }
+
+  try {
+    // 1. Fetch any published or active contest
+    const { data: contests, error: contestErr } = await client
+      .from('contests')
+      .select('*')
+      .in('status', ['PUBLISHED', 'REGISTRATION_CLOSED', 'CONTEST_CLOSED', 'EVALUATION', 'RESULTS_PUBLISHED'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (contestErr || !contests || contests.length === 0) {
+      currentContest = null;
+      hideContestCard();
+      return;
+    }
+
+    const contest = contests[0];
+
+    // 2. Check audience eligibility
+    if (contest.audience_type !== 'ALL') {
+      const { data: elig, error: eligErr } = await client
+        .from('contest_eligibility')
+        .select('id')
+        .eq('contest_id', contest.id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (eligErr || !elig) {
+        // User not eligible — contest must remain 100% invisible
+        currentContest = null;
+        hideContestCard();
+        return;
+      }
+    }
+
+    currentContest = contest;
+
+    // 3. Load user's contest registration, payment, attempt
+    await refreshUserContestRecords();
+
+    // 4. Render glowing contest invitation card in the user portal
+    renderContestCard();
+
+    // 5. If user was in the middle of an attempt (IN_PROGRESS), automatically restore contest modal
+    if (currentAttempt && currentAttempt.status === 'IN_PROGRESS') {
+      openContestModal('active');
+    }
+  } catch (err) {
+    console.warn('[Contest] Initialization check notice:', err);
+    hideContestCard();
+  }
+}
+
+export async function refreshUserContestRecords() {
+  if (!activeClient || !activeUser || !currentContest) return;
+
+  const [regRes, payRes, attRes, evalRes] = await Promise.all([
+    activeClient.from('contest_registrations').select('*').eq('contest_id', currentContest.id).eq('user_id', activeUser.id).maybeSingle(),
+    activeClient.from('contest_payments').select('*').eq('contest_id', currentContest.id).eq('user_id', activeUser.id).maybeSingle(),
+    activeClient.from('contest_attempts').select('*').eq('contest_id', currentContest.id).eq('user_id', activeUser.id).maybeSingle(),
+    currentContest.status === 'RESULTS_PUBLISHED'
+      ? activeClient.from('contest_evaluations').select('*').eq('contest_id', currentContest.id).eq('user_id', activeUser.id).maybeSingle()
+      : Promise.resolve({ data: null })
+  ]);
+
+  currentRegistration = regRes.data || null;
+  currentPayment = payRes.data || null;
+  currentAttempt = attRes.data || null;
+  currentEvaluation = evalRes?.data || null;
+}
+
+export function hideContestCard() {
+  const card = $('contestCardWrapper');
+  if (card) card.style.display = 'none';
+}
+
+export function renderContestCard() {
+  if (!currentContest) {
+    hideContestCard();
+    return;
+  }
+
+  let wrapper = $('contestCardWrapper');
+  if (!wrapper) {
+    wrapper = document.createElement('div');
+    wrapper.id = 'contestCardWrapper';
+    // Insert nicely on the Home screen right above the progress card
+    const home = $('home');
+    const progressCard = document.querySelector('.progress-card');
+    if (home && progressCard) {
+      home.insertBefore(wrapper, progressCard);
+    } else if (home) {
+      home.prepend(wrapper);
+    }
+  }
+
+  wrapper.style.display = 'block';
+
+  let btnLabel = 'JOIN THE CONTEST';
+  let btnIcon = '🚀';
+  let badgeText = 'NEW';
+  let badgeClass = 'contest-badge-live';
+
+  if (currentAttempt?.status === 'SUBMITTED') {
+    btnLabel = currentContest.status === 'RESULTS_PUBLISHED' ? 'VIEW RESULTS & RANK 🏆' : 'VIEW SUBMISSION DETAILS';
+    btnIcon = '📋';
+    badgeText = 'SUBMITTED';
+    badgeClass = 'contest-badge-submitted';
+  } else if (currentAttempt?.status === 'IN_PROGRESS') {
+    btnLabel = 'RESUME CONTEST ⚡';
+    btnIcon = '⏱️';
+    badgeText = 'IN PROGRESS';
+    badgeClass = 'contest-badge-progress';
+  } else if (currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
+    btnLabel = 'ENTER CHALLENGE ROOM';
+    btnIcon = '🚪';
+    badgeText = 'READY';
+    badgeClass = 'contest-badge-ready';
+  } else if (currentRegistration) {
+    btnLabel = 'COMPLETE PAYMENT & JOIN';
+    btnIcon = '💳';
+    badgeText = 'PAYMENT PENDING';
+    badgeClass = 'contest-badge-pending';
+  }
+
+  const feeDisplay = Number(currentContest.entry_fee) > 0 ? `₹${currentContest.entry_fee}` : 'FREE ENTRY';
+
+  wrapper.innerHTML = `
+    <div class="contest-invitation-card">
+      <div class="contest-card-glow"></div>
+      <div class="contest-card-header">
+        <div class="contest-tag">
+          <span class="pulse-dot"></span>
+          <span>🏆 OFFICIAL CONTEST</span>
+          <span class="${badgeClass}">${badgeText}</span>
+        </div>
+        <div class="contest-fee-badge">${feeDisplay}</div>
+      </div>
+      <h3 class="contest-card-title">${escapeHtml(currentContest.title)}</h3>
+      <p class="contest-card-tagline">Think beyond syntax. Solve with logic.</p>
+      
+      <div class="contest-card-prizes">
+        <div class="prize-pill">🥇 1st: <strong>${escapeHtml(currentContest.first_prize || '₹1,000')}</strong></div>
+        <div class="prize-pill">🥈 2nd: <strong>${escapeHtml(currentContest.second_prize || '₹500')}</strong></div>
+        <div class="prize-pill">🥉 3rd: <strong>${escapeHtml(currentContest.third_prize || '₹250')}</strong></div>
+      </div>
+
+      <div class="contest-card-footer">
+        <button id="contestJoinBtn" class="contest-action-btn">
+          <span>${btnIcon}</span>
+          <span>${btnLabel}</span>
+        </button>
+      </div>
+    </div>
+  `;
+
+  $('contestJoinBtn')?.addEventListener('click', handleContestAction);
+}
+
+function handleContestAction() {
+  if (!currentContest) return;
+
+  // Route to the appropriate screen
+  if (currentAttempt?.status === 'SUBMITTED') {
+    openContestModal('submitted');
+  } else if (currentAttempt?.status === 'IN_PROGRESS') {
+    openContestModal('active');
+  } else if (currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
+    openContestModal('ready');
+  } else if (currentRegistration) {
+    openContestModal('payment');
+  } else {
+    openContestModal('details');
+  }
+}
+
+// Modal View Switcher: 'details' | 'payment' | 'ready' | 'active' | 'submitted'
+export function openContestModal(stage = 'details') {
+  let modal = $('contestModalContainer');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'contestModalContainer';
+    modal.className = 'contest-modal-overlay';
+    document.body.appendChild(modal);
+  }
+
+  modal.style.display = 'flex';
+  modal.innerHTML = renderModalContent(stage);
+  attachModalListeners(stage);
+
+  if (stage === 'active') {
+    startActiveContestRuntime();
+  }
+}
+
+export function closeContestModal() {
+  const modal = $('contestModalContainer');
+  if (modal) modal.style.display = 'none';
+  stopTimers();
+}
+
+function renderModalContent(stage) {
+  if (!currentContest) return '';
+
+  const feeDisplay = Number(currentContest.entry_fee) > 0 ? `₹${currentContest.entry_fee}` : 'FREE';
+
+  if (stage === 'details') {
+    return `
+      <div class="contest-modal-window">
+        <div class="contest-modal-header">
+          <div>
+            <div class="contest-badge-header">CONTEST DETAILS &amp; INSTRUCTIONS</div>
+            <h2 class="contest-modal-title">${escapeHtml(currentContest.title)}</h2>
+          </div>
+          <button class="contest-modal-close" onclick="window.closeContestModal()">✕</button>
+        </div>
+        <div class="contest-modal-body">
+          <div class="contest-info-grid">
+            <div class="info-cell">
+              <span class="cell-label">Entry Fee</span>
+              <span class="cell-val highlight">${feeDisplay}</span>
+            </div>
+            <div class="info-cell">
+              <span class="cell-label">🥇 1st Prize</span>
+              <span class="cell-val">${escapeHtml(currentContest.first_prize || '₹1,000')}</span>
+            </div>
+            <div class="info-cell">
+              <span class="cell-label">🥈 2nd Prize</span>
+              <span class="cell-val">${escapeHtml(currentContest.second_prize || '₹500')}</span>
+            </div>
+            <div class="info-cell">
+              <span class="cell-label">🥉 3rd Prize</span>
+              <span class="cell-val">${escapeHtml(currentContest.third_prize || '₹250')}</span>
+            </div>
+          </div>
+
+          <div class="contest-section-block">
+            <h4>Description</h4>
+            <p>${escapeHtml(currentContest.description || 'Welcome to the official Crack SQL Thinking Contest. Put your data architecture and logical deduction skills to the test.')}</p>
+          </div>
+
+          <div class="contest-section-block highlight-box">
+            <h4>🧠 What is evaluated?</h4>
+            <p><strong>This contest evaluates HOW YOU THINK about a data problem.</strong></p>
+            <p>Participants are <strong>NOT required to write SQL</strong>. You will be asked to explain the procedural and logical steps you would follow to solve the business challenge.</p>
+          </div>
+
+          <div class="contest-section-block">
+            <h4>Contest Rules &amp; Guidelines</h4>
+            <ul class="contest-rules-list">
+              <li>Each participant is permitted exactly <strong>ONE official attempt</strong>.</li>
+              <li>Once you click <em>Start Contest</em>, your official timer begins and <strong>cannot be paused or reset</strong>.</li>
+              <li>Your draft approach is auto-saved as you type. If you refresh, your timer and draft will resume smoothly.</li>
+              <li>Evaluation is based on requirement comprehension, entity identification, procedural logic, and operational reasoning.</li>
+              <li>${escapeHtml(currentContest.rules || 'Submission deadline and decisions made by the evaluation panel are final.')}</li>
+            </ul>
+          </div>
+
+          <div class="contest-agreement-check">
+            <label>
+              <input type="checkbox" id="agreeRulesCheckbox" />
+              <span>I have read and agree to the contest rules and conditions.</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="contest-modal-footer">
+          <button class="ghost-btn" onclick="window.closeContestModal()">Cancel</button>
+          <button id="btnProceedToPayment" class="action primary" disabled>Continue to Registration →</button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (stage === 'payment') {
+    const isPending = currentPayment?.status === 'PENDING';
+    const isFee = Number(currentContest.entry_fee) > 0;
+
+    return `
+      <div class="contest-modal-window">
+        <div class="contest-modal-header">
+          <div>
+            <div class="contest-badge-header">STEP 2 OF 3: REGISTRATION &amp; PAYMENT</div>
+            <h2 class="contest-modal-title">Entry Fee Verification</h2>
+          </div>
+          <button class="contest-modal-close" onclick="window.closeContestModal()">✕</button>
+        </div>
+
+        <div class="contest-modal-body">
+          <div class="payment-card">
+            <div class="payment-amount-row">
+              <span>Required Entry Fee:</span>
+              <strong class="payment-fee">${feeDisplay}</strong>
+            </div>
+            <div class="payment-status-badge ${isPending ? 'pending' : 'ready'}">
+              Status: <strong>${currentPayment ? currentPayment.status : (isFee ? 'UNPAID' : 'FREE')}</strong>
+            </div>
+          </div>
+
+          ${isFee ? `
+            <div class="contest-section-block">
+              <h4>Payment Instructions</h4>
+              <p>To participate, transfer the entry fee of <strong>₹${currentContest.entry_fee}</strong> via UPI or online transfer.</p>
+              <div class="upi-box">
+                <span class="upi-label">Admin UPI ID / Payment Handle:</span>
+                <span class="upi-id"><strong>datatodashboard@upi</strong> (or scan desk QR)</span>
+              </div>
+              <p class="small text-muted" style="margin-top:8px;">
+                Enter your transaction reference / UTR number below. Our administrator will verify your payment and activate your challenge room.
+              </p>
+
+              <div class="form-group" style="margin-top:14px;">
+                <label for="txnRefInput" style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;">Transaction Reference / UTR Number:</label>
+                <input type="text" id="txnRefInput" class="contest-input" placeholder="e.g. UPI Ref 328491823901" value="${escapeHtml(currentPayment?.transaction_ref || '')}" />
+              </div>
+
+              <div id="paymentNotice" class="alert-box" style="margin-top:12px;${isPending ? '' : 'display:none;'}">
+                ⏳ Payment verification submitted. Waiting for Admin verification. You can refresh anytime to check status.
+              </div>
+            </div>
+          ` : `
+            <div class="contest-section-block">
+              <p>This contest has <strong>FREE entry</strong>! You can proceed directly to the challenge room.</p>
+            </div>
+          `}
+        </div>
+
+        <div class="contest-modal-footer">
+          <button class="ghost-btn" onclick="openContestModal('details')">← Back</button>
+          <button id="btnSubmitPayment" class="action primary">
+            ${isPending ? 'Refresh Verification Status 🔄' : (isFee ? 'Submit Reference for Verification' : 'Proceed to Ready Screen →')}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (stage === 'ready') {
+    return `
+      <div class="contest-modal-window">
+        <div class="contest-modal-header">
+          <div>
+            <div class="contest-badge-header">FINAL STEP</div>
+            <h2 class="contest-modal-title">🏆 YOU’RE IN!</h2>
+          </div>
+          <button class="contest-modal-close" onclick="window.closeContestModal()">✕</button>
+        </div>
+
+        <div class="contest-modal-body text-center" style="padding:30px 20px;">
+          <div class="ready-badge-icon">🎯</div>
+          <h3>Your Crack SQL Challenge is ready.</h3>
+          <p class="text-muted" style="max-width:440px;margin:10px auto 20px;">
+            You have satisfied all entry and verification requirements for <strong>${escapeHtml(currentContest.title)}</strong>.
+          </p>
+
+          <div class="contest-warning-card">
+            <span class="warning-icon">⚠️</span>
+            <div class="warning-text">
+              <strong>Official Timer Warning:</strong> Your official timer will start the instant you click <strong>START CONTEST</strong> and cannot be paused or reset.
+            </div>
+          </div>
+        </div>
+
+        <div class="contest-modal-footer" style="justify-content:center;gap:16px;">
+          <button class="ghost-btn" onclick="window.closeContestModal()">I'll start later</button>
+          <button id="btnBeginContest" class="action primary btn-lg">START CONTEST NOW 🚀</button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (stage === 'active') {
+    return `
+      <div class="contest-modal-window contest-fullscreen-mode">
+        <div class="contest-active-topbar">
+          <div class="contest-topbar-left">
+            <span class="contest-live-dot"></span>
+            <strong>🏆 CRACK SQL THINKING CHALLENGE</strong>
+            <span class="text-muted" style="margin-left:8px;">| ${escapeHtml(currentContest.title)}</span>
+          </div>
+          <div class="contest-topbar-right">
+            <div class="contest-timer-pill" id="contestTimerDisplay">
+              ⏱️ <span id="timerDigits">00:00</span>
+            </div>
+            <span id="draftSaveIndicator" class="draft-indicator">Draft saved</span>
+          </div>
+        </div>
+
+        <div class="contest-active-content">
+          <div class="contest-scenario-panel">
+            <div class="scenario-panel-title">Business Challenge &amp; Problem Statement</div>
+            <div class="scenario-panel-body">
+              ${escapeHtml(currentContest.scenario_text || '')}
+            </div>
+          </div>
+
+          <div class="contest-editor-panel">
+            <div class="editor-panel-instruction">
+              <span class="inst-icon">💡</span>
+              <div>
+                <strong>Instructions:</strong> Explain step by step how you would solve this problem. Do not write SQL.
+              </div>
+            </div>
+
+            <textarea
+              id="contestThinkingInput"
+              class="contest-thinking-textarea"
+              placeholder="Explain your approach step by step. Consider the required data, tables, filters, relationships, calculations and expected result."
+            >${escapeHtml(currentAttempt?.draft_response || '')}</textarea>
+
+            <div class="contest-active-footer">
+              <div class="footer-left text-muted small">
+                Locked contest mode • One attempt per user • Auto-saved to cloud
+              </div>
+              <button id="btnSubmitContest" class="action primary">
+                SUBMIT FINAL ANSWER 🏁
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (stage === 'submitted') {
+    const timeFormatted = formatSeconds(currentAttempt?.elapsed_seconds || 0);
+    const hasResults = currentContest.status === 'RESULTS_PUBLISHED' && currentEvaluation;
+
+    return `
+      <div class="contest-modal-window">
+        <div class="contest-modal-header">
+          <div>
+            <div class="contest-badge-header">COMPLETION STATUS</div>
+            <h2 class="contest-modal-title">🏆 CHALLENGE COMPLETED</h2>
+          </div>
+          <button class="contest-modal-close" onclick="window.closeContestModal()">✕</button>
+        </div>
+
+        <div class="contest-modal-body">
+          <div class="submitted-confirmation-card">
+            <div class="check-icon">✓</div>
+            <h3>Your response has been successfully submitted!</h3>
+            <p class="text-muted">Your attempt is locked and officially recorded.</p>
+            <div class="submitted-meta-row">
+              <div class="meta-pill">Time Taken: <strong>${timeFormatted}</strong></div>
+              <div class="meta-pill">Status: <strong>${currentContest.status === 'RESULTS_PUBLISHED' ? 'RESULTS ANNOUNCED' : 'UNDER EVALUATION'}</strong></div>
+            </div>
+          </div>
+
+          ${hasResults ? `
+            <div class="contest-section-block results-box">
+              <h4>🏆 Official Results</h4>
+              <div class="results-score-row">
+                <div class="score-card-big">
+                  <span class="score-label">Final Score</span>
+                  <span class="score-num">${currentEvaluation.admin_final_score} / 100</span>
+                </div>
+                ${currentEvaluation.rank ? `
+                  <div class="score-card-big">
+                    <span class="score-label">Rank</span>
+                    <span class="score-num">#${currentEvaluation.rank}</span>
+                  </div>
+                ` : ''}
+              </div>
+
+              ${currentEvaluation.admin_feedback ? `
+                <div class="feedback-card" style="margin-top:14px;">
+                  <strong>Evaluator Feedback:</strong>
+                  <p style="margin-top:6px;">${escapeHtml(currentEvaluation.admin_feedback)}</p>
+                </div>
+              ` : ''}
+            </div>
+          ` : `
+            <div class="contest-section-block">
+              <h4>Evaluation Notice</h4>
+              <p>Our evaluation panel reviews all procedural submissions using our structured 100-point rubric. Official contest winners and prize distributions will be announced once evaluations are concluded.</p>
+            </div>
+          `}
+
+          <div class="contest-section-block">
+            <h4>Your Submitted Answer</h4>
+            <div class="submitted-response-viewer">
+              ${escapeHtml(currentAttempt?.final_response || currentAttempt?.draft_response || 'No response recorded.')}
+            </div>
+          </div>
+        </div>
+
+        <div class="contest-modal-footer">
+          <button class="action primary" onclick="window.closeContestModal()">Return to Crack SQL</button>
+        </div>
+      </div>
+    `;
+  }
+
+  return '';
+}
+
+function attachModalListeners(stage) {
+  if (stage === 'details') {
+    const chk = $('agreeRulesCheckbox');
+    const btn = $('btnProceedToPayment');
+    chk?.addEventListener('change', () => {
+      if (btn) btn.disabled = !chk.checked;
+    });
+
+    btn?.addEventListener('click', async () => {
+      if (!chk?.checked) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      try {
+        // Record registration
+        await activeClient.from('contest_registrations').upsert({
+          contest_id: currentContest.id,
+          user_id: activeUser.id,
+          user_email: activeUser.email,
+          agreed_rules: true,
+          agreed_at: new Date().toISOString()
+        }, { onConflict: 'contest_id,user_id' });
+
+        await refreshUserContestRecords();
+
+        if (Number(currentContest.entry_fee) === 0) {
+          openContestModal('ready');
+        } else {
+          openContestModal('payment');
+        }
+      } catch (err) {
+        alert('Could not save registration: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Continue to Registration →';
+      }
+    });
+  }
+
+  if (stage === 'payment') {
+    const btn = $('btnSubmitPayment');
+    btn?.addEventListener('click', async () => {
+      const isFee = Number(currentContest.entry_fee) > 0;
+      if (!isFee) {
+        openContestModal('ready');
+        return;
+      }
+
+      const txnRef = $('txnRefInput')?.value.trim();
+      btn.disabled = true;
+      btn.textContent = 'Verifying…';
+
+      try {
+        await activeClient.from('contest_payments').upsert({
+          contest_id: currentContest.id,
+          user_id: activeUser.id,
+          amount: Number(currentContest.entry_fee),
+          currency: 'INR',
+          status: 'PENDING',
+          transaction_ref: txnRef || null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'contest_id,user_id' });
+
+        await refreshUserContestRecords();
+
+        if (currentPayment?.status === 'VERIFIED') {
+          openContestModal('ready');
+        } else {
+          const notice = $('paymentNotice');
+          if (notice) notice.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Refresh Verification Status 🔄';
+        }
+      } catch (err) {
+        alert('Payment recording notice: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Retry';
+      }
+    });
+  }
+
+  if (stage === 'ready') {
+    const btn = $('btnBeginContest');
+    btn?.addEventListener('click', async () => {
+      const confirmed = confirm('Are you ready to start? Your official timer will start now and cannot be paused or reset.');
+      if (!confirmed) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Starting…';
+
+      try {
+        // Enforce ONE attempt: check or create attempt
+        if (!currentAttempt) {
+          const { data: newAttempt, error: attErr } = await activeClient
+            .from('contest_attempts')
+            .insert({
+              contest_id: currentContest.id,
+              user_id: activeUser.id,
+              started_at: new Date().toISOString(),
+              draft_response: '',
+              status: 'IN_PROGRESS'
+            })
+            .select('*')
+            .single();
+
+          if (attErr) throw attErr;
+          currentAttempt = newAttempt;
+        }
+
+        openContestModal('active');
+      } catch (err) {
+        alert('Could not start attempt: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'START CONTEST NOW 🚀';
+      }
+    });
+  }
+
+  if (stage === 'active') {
+    const textarea = $('contestThinkingInput');
+    const submitBtn = $('btnSubmitContest');
+
+    // Auto-save debounced on input
+    let debounceTimer = null;
+    textarea?.addEventListener('input', () => {
+      const ind = $('draftSaveIndicator');
+      if (ind) ind.textContent = 'Saving draft…';
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => saveDraftResponse(false), 1200);
+    });
+
+    submitBtn?.addEventListener('click', async () => {
+      const responseText = textarea?.value.trim() || '';
+      if (!responseText) {
+        alert('Please write your step-by-step thinking approach before submitting.');
+        return;
+      }
+
+      const confirmed = confirm('This is your final submission. You cannot edit your answer after submission. Continue?');
+      if (!confirmed) return;
+
+      await submitFinalContestResponse(responseText);
+    });
+  }
+}
+
+// Runtime: Persistent Timer & Draft Recovery
+function startActiveContestRuntime() {
+  stopTimers();
+
+  if (!currentAttempt || !currentAttempt.started_at) return;
+
+  const startTime = new Date(currentAttempt.started_at).getTime();
+
+  function updateTimer() {
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+    const digitsEl = $('timerDigits');
+    if (digitsEl) {
+      digitsEl.textContent = formatSeconds(elapsedSeconds);
+    }
+  }
+
+  updateTimer();
+  timerInterval = setInterval(updateTimer, 1000);
+
+  // Auto-save draft every 15 seconds
+  autoSaveInterval = setInterval(() => {
+    saveDraftResponse(true);
+  }, 15000);
+}
+
+function stopTimers() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  if (autoSaveInterval) {
+    clearInterval(autoSaveInterval);
+    autoSaveInterval = null;
+  }
+}
+
+async function saveDraftResponse(isPeriodic = false) {
+  if (!activeClient || !activeUser || !currentContest || !currentAttempt) return;
+  if (currentAttempt.status !== 'IN_PROGRESS' || isSubmitting) return;
+
+  const textarea = $('contestThinkingInput');
+  const text = textarea ? textarea.value : '';
+
+  try {
+    // Local backup
+    try {
+      localStorage.setItem(`contestDraft:${currentContest.id}:${activeUser.id}`, text);
+    } catch {}
+
+    await activeClient
+      .from('contest_attempts')
+      .update({
+        draft_response: text,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', currentAttempt.id);
+
+    const ind = $('draftSaveIndicator');
+    if (ind) ind.textContent = 'Draft saved ✓';
+  } catch (err) {
+    const ind = $('draftSaveIndicator');
+    if (ind) ind.textContent = 'Offline (cached locally)';
+  }
+}
+
+async function submitFinalContestResponse(finalText) {
+  if (!activeClient || !activeUser || !currentContest || !currentAttempt) return;
+  if (isSubmitting) return;
+
+  isSubmitting = true;
+  stopTimers();
+
+  const submitBtn = $('btnSubmitContest');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting…';
+  }
+
+  const startTime = new Date(currentAttempt.started_at).getTime();
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+
+  try {
+    const { data: updated, error } = await activeClient
+      .from('contest_attempts')
+      .update({
+        final_response: finalText,
+        submitted_at: new Date().toISOString(),
+        elapsed_seconds: elapsedSeconds,
+        status: 'SUBMITTED',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', currentAttempt.id)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+
+    currentAttempt = updated;
+    isSubmitting = false;
+
+    // Refresh and transition to submitted screen
+    renderContestCard();
+    openContestModal('submitted');
+  } catch (err) {
+    isSubmitting = false;
+    alert('Submission error: ' + err.message);
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'SUBMIT FINAL ANSWER 🏁';
+    }
+  }
+}
+
+function formatSeconds(secs) {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+// Global modal close hook
+window.closeContestModal = closeContestModal;
+window.openContestModal = openContestModal;

@@ -10,58 +10,103 @@
 <style>
 :root{
   --bg:#f5f7fb; --surface:#ffffff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0;
-  --primary:#2563eb; --primary2:#1d4ed8; --soft:#eff6ff; --good:#16a34a; --warn:#d97706;
+  --primary:#2563eb; --primary2:#1d4ed8; --soft:#eff6ff; --good:#16a34a; --warn:#d97706; --gold:#b45309;
 }
 *{box-sizing:border-box;}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
-.wrap{max-width:1180px;margin:0 auto;padding:24px 20px 60px;}
-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;}
+.wrap{max-width:1240px;margin:0 auto;padding:24px 20px 60px;}
+header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
 h1{font-size:1.4rem;margin:0;}
 .subtitle{color:var(--muted);font-size:0.9rem;margin-top:2px;}
-.action{border:none;border-radius:8px;padding:10px 16px;font-weight:600;font-size:0.9rem;cursor:pointer;}
+.action{border:none;border-radius:8px;padding:8px 14px;font-weight:600;font-size:0.88rem;cursor:pointer;transition:all 0.15s ease;}
 .action.primary{background:var(--primary);color:#fff;}
 .action.primary:hover{background:var(--primary2);}
+.action.secondary{background:var(--soft);color:var(--primary);}
+.action.secondary:hover{background:#dbeafe;}
+.action.success{background:#dcfce7;color:#15803d;}
+.action.success:hover{background:#bbf7d0;}
+.action.warn{background:#fef3c7;color:#92400e;}
+.action.danger{background:#fee2e2;color:#b91c1c;}
+.action.sm{padding:5px 10px;font-size:0.8rem;border-radius:6px;}
 .linkbtn{background:none;border:none;color:var(--primary);cursor:pointer;font-size:0.85rem;text-decoration:underline;padding:0;}
-#gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:40px 24px;text-align:center;color:var(--muted);}
-#dashboard[hidden],#gate[hidden]{display:none;}
 
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
-.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;}
-.stat .num{font-size:1.6rem;font-weight:800;}
+/* Tab navigation */
+.admin-tab-nav{display:flex;gap:10px;border-bottom:1px solid var(--line);margin-bottom:20px;}
+.tab-btn{background:none;border:none;border-bottom:3px solid transparent;padding:10px 18px;font-size:0.95rem;font-weight:600;color:var(--muted);cursor:pointer;}
+.tab-btn.active{color:var(--primary);border-bottom-color:var(--primary);}
+
+#gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:40px 24px;text-align:center;color:var(--muted);}
+#dashboard[hidden],#gate[hidden],#contestsTabContent[hidden],#learnersTabContent[hidden]{display:none;}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;}
+.stat .num{font-size:1.5rem;font-weight:800;}
 .stat .label{color:var(--muted);font-size:0.8rem;margin-top:2px;}
 
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
 .controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;}
-.controls input[type="text"],.controls input[type="number"]{
+.controls input[type="text"],.controls input[type="number"],.controls select{
   border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:0.9rem;
 }
 .controls label{font-size:0.85rem;color:var(--muted);display:flex;align-items:center;gap:6px;}
-#threshLabel{font-size:0.85rem;color:var(--muted);margin-top:8px;}
-#status{font-size:0.8rem;color:var(--muted);margin-top:8px;}
 
 table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;}
-th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:0.88rem;vertical-align:top;}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:0.88rem;vertical-align:middle;}
 th{background:var(--soft);color:var(--muted);font-weight:700;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer;user-select:none;}
 th:hover{color:var(--primary);}
 td.num{text-align:right;white-space:nowrap;}
-tr.elig{background:#fffbeb;}
-.learner-name{font-weight:600;}
-.learner-email{color:var(--muted);font-size:0.78rem;}
-.badge{display:inline-block;background:#fef3c7;color:#92400e;border-radius:999px;padding:1px 8px;font-size:0.72rem;font-weight:700;}
-.of-total{color:var(--muted);font-size:0.8rem;}
-.bar{height:4px;background:var(--line);border-radius:2px;margin-top:4px;overflow:hidden;}
-.bar-fill{height:100%;background:var(--primary);}
-.domains{color:var(--muted);font-size:0.8rem;}
-.empty{text-align:center;color:var(--muted);padding:24px;}
+.badge{display:inline-block;border-radius:999px;padding:2px 8px;font-size:0.75rem;font-weight:700;}
+.badge.draft{background:#f1f5f9;color:#475569;}
+.badge.published{background:#dcfce7;color:#15803d;}
+.badge.paused{background:#fee2e2;color:#991b1b;}
+.badge.reg-closed{background:#ffedd5;color:#9a3412;}
+.badge.closed{background:#e2e8f0;color:#334155;}
+.badge.eval{background:#fef3c7;color:#92400e;}
+.badge.results{background:#e0e7ff;color:#3730a3;}
+.badge.archived{background:#cbd5e1;color:#1e293b;}
+.badge.verified{background:#dcfce7;color:#15803d;}
+.badge.pending{background:#fef3c7;color:#92400e;}
+.badge.submitted{background:#dbeafe;color:#1e40af;}
+.badge.progress{background:#fef3c7;color:#b45309;}
+
 .tablewrap{overflow-x:auto;}
+
+/* Contest cards & list */
+.contest-item-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.04);}
+.contest-item-header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px;}
+.contest-item-title{font-size:1.15rem;font-weight:700;margin:0;}
+.contest-meta-row{display:flex;gap:16px;flex-wrap:wrap;font-size:0.85rem;color:var(--muted);margin-bottom:14px;}
+.contest-actions-row{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px;}
+
+/* Modal styles */
+.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;display:none;align-items:center;justify-content:center;padding:16px;}
+.modal-box{background:var(--surface);border-radius:14px;width:100%;max-width:850px;max-height:92vh;overflow-y:auto;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1),0 10px 10px -5px rgba(0,0,0,0.04);}
+.modal-header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;}
+.modal-header h3{margin:0;font-size:1.15rem;}
+.modal-close{background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--muted);}
+.modal-body{padding:20px;}
+.modal-footer{padding:14px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px;}
+
+.form-group{margin-bottom:16px;}
+.form-group label{display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;}
+.form-control{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:0.9rem;}
+textarea.form-control{min-height:90px;font-family:inherit;}
+.form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;}
+
+.rubric-card{background:var(--soft);border:1px solid #bfdbfe;border-radius:10px;padding:14px;margin-bottom:14px;}
+.rubric-title{font-weight:700;font-size:0.95rem;margin-bottom:4px;display:flex;justify-content:space-between;}
+.rubric-desc{font-size:0.82rem;color:var(--muted);margin-bottom:10px;}
+.rubric-ai-box{background:#ffffff;border:1px dashed #93c5fd;border-radius:6px;padding:8px 10px;font-size:0.8rem;margin-bottom:10px;}
+.rubric-input-row{display:flex;align-items:center;gap:10px;}
+.score-badge-live{font-size:1.3rem;font-weight:800;color:var(--primary);}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
-      <h1>Think and Crack SQL — Admin</h1>
-      <div class="subtitle">Learner progress &amp; contest eligibility</div>
+      <h1>Think and Crack SQL — Admin Dashboard</h1>
+      <div class="subtitle">Learner progress, verification &amp; contest administration</div>
     </div>
     <div id="authBox"></div>
   </header>
@@ -71,45 +116,356 @@ tr.elig{background:#fffbeb;}
   </div>
 
   <div id="dashboard" hidden>
-    <div class="stats">
-      <div class="stat"><div class="num" id="statLearners">0</div><div class="label">Signed-up learners</div></div>
-      <div class="stat"><div class="num" id="statSolved">0</div><div class="label">Scenarios solved <span id="scenarioBankNote"></span></div></div>
-      <div class="stat"><div class="num" id="statAvg">0</div><div class="label">Avg. solved / learner</div></div>
-      <div class="stat"><div class="num" id="statActive">0</div><div class="label">Active in last 7 days</div></div>
-    </div>
+    <!-- Top Navigation Tabs -->
+    <nav class="admin-tab-nav">
+      <button id="tabLearnersBtn" class="tab-btn active" onclick="window.switchAdminTab('learners')">📊 Learner Directory &amp; Progress</button>
+      <button id="tabContestsBtn" class="tab-btn" onclick="window.switchAdminTab('contests')">🏆 Contest Management</button>
+    </nav>
 
-    <div class="panel">
-      <div class="controls">
-        <input type="text" id="search" placeholder="Search by name or email…" />
-        <label>Contest threshold: solved
-          <input type="number" id="threshold" min="0" placeholder="e.g. 50" style="width:80px" />
-          scenarios
-        </label>
-        <button class="action primary" id="refreshBtn">Refresh</button>
-        <button class="action" id="exportBtn" style="background:var(--soft);color:var(--primary);">Export CSV</button>
+    <!-- Tab 1: Learner Directory & Progress -->
+    <div id="learnersTabContent">
+      <div class="stats">
+        <div class="stat"><div class="num" id="statLearners">0</div><div class="label">Signed-up learners</div></div>
+        <div class="stat"><div class="num" id="statSolved">0</div><div class="label">Scenarios solved <span id="scenarioBankNote"></span></div></div>
+        <div class="stat"><div class="num" id="statAvg">0</div><div class="label">Avg. solved / learner</div></div>
+        <div class="stat"><div class="num" id="statActive">0</div><div class="label">Active in last 7 days</div></div>
       </div>
-      <div id="threshLabel">Set a scenario count to mark contest-eligible learners.</div>
-      <div id="status"></div>
+
+      <div class="panel">
+        <div class="controls">
+          <input type="text" id="search" placeholder="Search by name or email…" />
+          <label>Contest threshold: solved
+            <input type="number" id="threshold" min="0" placeholder="e.g. 50" style="width:80px" />
+            scenarios
+          </label>
+          <button class="action primary" id="refreshBtn">Refresh</button>
+          <button class="action" id="exportBtn" style="background:var(--soft);color:var(--primary);">Export CSV</button>
+        </div>
+        <div id="threshLabel" style="font-size:0.85rem;color:var(--muted);margin-top:8px;">Set a scenario count to mark contest-eligible learners.</div>
+        <div id="status" style="font-size:0.8rem;color:var(--muted);margin-top:8px;"></div>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="num">#</th>
+              <th data-sort="email">Learner</th>
+              <th class="num" data-sort="solved">Solved / Progress</th>
+              <th class="num" data-sort="attempted">Attempted</th>
+              <th>Top domains</th>
+              <th data-sort="reachedAt">Reached threshold</th>
+              <th data-sort="lastActivity">Last active</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="tablewrap">
-      <table>
-        <thead>
-          <tr>
-            <th class="num">#</th>
-            <th data-sort="email">Learner</th>
-            <th class="num" data-sort="solved">Solved / Progress</th>
-            <th class="num" data-sort="attempted">Attempted</th>
-            <th>Top domains</th>
-            <th data-sort="reachedAt">Reached threshold</th>
-            <th data-sort="lastActivity">Last active</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
+    <!-- Tab 2: Contest Management -->
+    <div id="contestsTabContent" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <h2 style="margin:0;font-size:1.25rem;">🏆 Crack SQL Thinking Contests</h2>
+          <div style="color:var(--muted);font-size:0.85rem;">Manage draft/published contests, audience eligibility, manual payments, and 100-pt AI review.</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="action primary" onclick="window.openContestEditor()">+ Create New Contest</button>
+          <button class="action secondary" onclick="window.loadContests()">Refresh Contests 🔄</button>
+        </div>
+      </div>
+
+      <!-- Contests List View -->
+      <div id="contestsListView">
+        <div id="contestsContainer">Loading contests…</div>
+      </div>
+
+      <!-- Contest Submissions & Review View (Visible when an admin drills into a contest) -->
+      <div id="contestDetailView" style="display:none;margin-top:20px;">
+        <div style="margin-bottom:14px;">
+          <button class="action secondary sm" onclick="window.backToContestsList()">← Back to Contests List</button>
+        </div>
+        <div id="contestDetailStats" class="stats"></div>
+
+        <div class="panel">
+          <div class="controls">
+            <input type="text" id="participantSearch" placeholder="Search participant email or ID…" oninput="window.filterParticipantsTable()" />
+            <select id="filterPaymentStatus" onchange="window.filterParticipantsTable()">
+              <option value="ALL">Payment: All</option>
+              <option value="VERIFIED">Verified</option>
+              <option value="PENDING">Pending</option>
+            </select>
+            <select id="filterAttemptStatus" onchange="window.filterParticipantsTable()">
+              <option value="ALL">Attempt: All</option>
+              <option value="SUBMITTED">Submitted</option>
+              <option value="IN_PROGRESS">In Progress</option>
+              <option value="NOT_STARTED">Not Started</option>
+            </select>
+            <select id="filterEvaluationStatus" onchange="window.filterParticipantsTable()">
+              <option value="ALL">Evaluation: All</option>
+              <option value="FINALIZED">Finalized</option>
+              <option value="DRAFT">Draft</option>
+              <option value="PENDING">Pending</option>
+            </select>
+            <button class="action secondary sm" onclick="window.openResultsModal()">🏆 View Results Leaderboard</button>
+          </div>
+        </div>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Participant</th>
+                <th>Eligibility</th>
+                <th>Payment</th>
+                <th>Attempt Status</th>
+                <th>Started At</th>
+                <th>Submitted At</th>
+                <th>Time Taken</th>
+                <th>Score</th>
+                <th>Evaluation</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="participantsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 </div>
+
+<!-- Modal 1: Create / Edit Contest -->
+<div id="contestEditorModal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="editorModalTitle">Create Contest</h3>
+      <button class="modal-close" onclick="window.closeEditorModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editContestId" />
+      <div class="form-group">
+        <label>Contest Title / Name *</label>
+        <input type="text" id="contestTitleInput" class="form-control" placeholder="e.g. Crack SQL Thinking Challenge #1" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Entry Fee (₹) *</label>
+          <input type="number" id="contestFeeInput" class="form-control" value="49" min="0" />
+        </div>
+        <div class="form-group">
+          <label>Audience Target *</label>
+          <select id="contestAudienceInput" class="form-control">
+            <option value="ALL">ALL USERS (Public Invitation)</option>
+            <option value="SELECTED">SELECTED USERS (Admin Chosen)</option>
+            <option value="INVITED">INVITED USERS (Special)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>🥇 1st Prize</label>
+          <input type="text" id="contestPrize1Input" class="form-control" value="₹1,000" />
+        </div>
+        <div class="form-group">
+          <label>🥈 2nd Prize</label>
+          <input type="text" id="contestPrize2Input" class="form-control" value="₹500" />
+        </div>
+        <div class="form-group">
+          <label>🥉 3rd Prize</label>
+          <input type="text" id="contestPrize3Input" class="form-control" value="₹250" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Contest Scenario / Problem Statement *</label>
+        <textarea id="contestScenarioInput" class="form-control" rows="5" placeholder="Describe the business problem, entities, constraints, and target output..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Instructions for Participants</label>
+        <textarea id="contestInstructionsInput" class="form-control" rows="3" placeholder="Explain step by step how you would solve this problem. Do not write SQL."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Contest Rules</label>
+        <textarea id="contestRulesInput" class="form-control" rows="3" placeholder="One attempt per user. Timer starts immediately upon launch."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="action secondary" onclick="window.closeEditorModal()">Cancel</button>
+      <button class="action primary" onclick="window.saveContestForm()">Save Contest</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 2: Audience Selector -->
+<div id="audienceModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:700px;">
+    <div class="modal-header">
+      <h3>Select Contest Audience</h3>
+      <button class="modal-close" onclick="window.closeAudienceModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:10px;margin-bottom:12px;">
+        <input type="text" id="audienceSearch" class="form-control" placeholder="Search learners by name or email…" oninput="window.filterAudienceList()" />
+        <button class="action secondary sm" onclick="window.selectAllAudience(true)">Select All</button>
+        <button class="action secondary sm" onclick="window.selectAllAudience(false)">Clear</button>
+      </div>
+      <div id="audienceListContainer" style="max-height:360px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="action secondary" onclick="window.closeAudienceModal()">Cancel</button>
+      <button class="action primary" onclick="window.saveAudienceSelection()">Save Audience Eligibility</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 3: Evaluation & AI Review -->
+<div id="evaluationModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:920px;">
+    <div class="modal-header">
+      <div>
+        <h3 id="evalModalTitle">Review &amp; Evaluate Submission</h3>
+        <div id="evalParticipantMeta" style="font-size:0.85rem;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <button class="modal-close" onclick="window.closeEvaluationModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Problem statement -->
+      <div style="background:var(--soft);border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin-bottom:14px;">
+        <strong>Contest Scenario:</strong>
+        <p id="evalScenarioText" style="margin:4px 0 0;font-size:0.88rem;"></p>
+      </div>
+
+      <!-- Procedural Answer -->
+      <div style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:18px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+          <strong>Participant's Procedural Answer:</strong>
+          <span id="evalTimeTakenBadge" class="badge submitted">Time Taken: 00:00</span>
+        </div>
+        <div id="evalAnswerText" style="font-size:0.9rem;white-space:pre-wrap;line-height:1.5;max-height:220px;overflow-y:auto;background:#fff;padding:10px;border-radius:6px;border:1px solid var(--line);"></div>
+      </div>
+
+      <!-- AI Evaluation Trigger -->
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#eff6ff;padding:12px;border-radius:8px;border:1px solid #bfdbfe;margin-bottom:18px;">
+        <div>
+          <strong>🤖 AI-Assisted Evaluation</strong>
+          <div style="font-size:0.8rem;color:var(--muted);">Generate suggested scoring &amp; strengths across all 5 criteria. Admin final score is authoritative.</div>
+        </div>
+        <button id="btnRunAiEval" class="action primary sm" onclick="window.runAiEvaluation()">Run AI Evaluation</button>
+      </div>
+
+      <!-- Structured 100-Point Scoring Rubric -->
+      <h4 style="margin:0 0 12px;font-size:1rem;">Structured 100-Point Evaluation</h4>
+
+      <!-- 1. Req Understanding (20) -->
+      <div class="rubric-card">
+        <div class="rubric-title">
+          <span>1. Business Requirement Understanding</span>
+          <span>Max: 20 pts</span>
+        </div>
+        <div class="rubric-desc">Did the participant understand what the business problem asks?</div>
+        <div id="aiReqBox" class="rubric-ai-box" style="display:none;"></div>
+        <div class="rubric-input-row">
+          <label style="font-size:0.85rem;">Score (0-20):</label>
+          <input type="number" id="scoreReq" class="form-control" style="width:80px;" min="0" max="20" value="0" oninput="window.calcTotalScore()" />
+        </div>
+      </div>
+
+      <!-- 2. Data Identification (15) -->
+      <div class="rubric-card">
+        <div class="rubric-title">
+          <span>2. Data / Table Identification</span>
+          <span>Max: 15 pts</span>
+        </div>
+        <div class="rubric-desc">Did the participant identify appropriate data/entities/tables?</div>
+        <div id="aiDataBox" class="rubric-ai-box" style="display:none;"></div>
+        <div class="rubric-input-row">
+          <label style="font-size:0.85rem;">Score (0-15):</label>
+          <input type="number" id="scoreData" class="form-control" style="width:80px;" min="0" max="15" value="0" oninput="window.calcTotalScore()" />
+        </div>
+      </div>
+
+      <!-- 3. Logical Sequence (25) -->
+      <div class="rubric-card">
+        <div class="rubric-title">
+          <span>3. Logical Sequence</span>
+          <span>Max: 25 pts</span>
+        </div>
+        <div class="rubric-desc">Are the procedural steps correctly ordered and meaningful?</div>
+        <div id="aiSeqBox" class="rubric-ai-box" style="display:none;"></div>
+        <div class="rubric-input-row">
+          <label style="font-size:0.85rem;">Score (0-25):</label>
+          <input type="number" id="scoreSeq" class="form-control" style="width:80px;" min="0" max="25" value="0" oninput="window.calcTotalScore()" />
+        </div>
+      </div>
+
+      <!-- 4. Data Operation Reasoning (25) -->
+      <div class="rubric-card">
+        <div class="rubric-title">
+          <span>4. Data Operation Reasoning</span>
+          <span>Max: 25 pts</span>
+        </div>
+        <div class="rubric-desc">Evaluate reasoning: Filters, Relationships/Joins, Grouping, Aggregation, Calculations.</div>
+        <div id="aiOpBox" class="rubric-ai-box" style="display:none;"></div>
+        <div class="rubric-input-row">
+          <label style="font-size:0.85rem;">Score (0-25):</label>
+          <input type="number" id="scoreOp" class="form-control" style="width:80px;" min="0" max="25" value="0" oninput="window.calcTotalScore()" />
+        </div>
+      </div>
+
+      <!-- 5. Completeness & Clarity (15) -->
+      <div class="rubric-card">
+        <div class="rubric-title">
+          <span>5. Completeness &amp; Clarity</span>
+          <span>Max: 15 pts</span>
+        </div>
+        <div class="rubric-desc">Is the solution complete, unambiguous, and easy to follow?</div>
+        <div id="aiClarBox" class="rubric-ai-box" style="display:none;"></div>
+        <div class="rubric-input-row">
+          <label style="font-size:0.85rem;">Score (0-15):</label>
+          <input type="number" id="scoreClar" class="form-control" style="width:80px;" min="0" max="15" value="0" oninput="window.calcTotalScore()" />
+        </div>
+      </div>
+
+      <!-- Total Score Display -->
+      <div style="background:#f8fafc;border:2px solid var(--primary);border-radius:10px;padding:16px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <strong style="font-size:1.05rem;">Admin Authoritative Final Score</strong>
+          <div style="font-size:0.8rem;color:var(--muted);">Determines ranking and contest cash-prize awards.</div>
+        </div>
+        <div class="score-badge-live" id="totalScoreLive">0 / 100</div>
+      </div>
+
+      <div class="form-group">
+        <label>Admin Feedback / Evaluation Notes</label>
+        <textarea id="adminFeedbackInput" class="form-control" rows="3" placeholder="Provide constructive feedback for the participant..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="action secondary" onclick="window.closeEvaluationModal()">Cancel</button>
+      <button class="action warn" onclick="window.saveEvaluation('DRAFT')">Save Draft Evaluation</button>
+      <button class="action primary" onclick="window.saveEvaluation('FINALIZED')">Finalize Evaluation ✓</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 4: Results & Leaderboard -->
+<div id="resultsModal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>🏆 Contest Results &amp; Leaderboard</h3>
+      <button class="modal-close" onclick="window.closeResultsModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="resultsLeaderboardContainer">Loading leaderboard…</div>
+    </div>
+    <div class="modal-footer">
+      <button class="action secondary" onclick="window.closeResultsModal()">Close</button>
+      <button id="btnPublishResultsModal" class="action success" onclick="window.publishContestResults()">Publish Results to Participants 📢</button>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="./js/admin.js"></script>
 </body>
 </html>

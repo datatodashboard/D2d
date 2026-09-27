@@ -2,6 +2,7 @@
 // Reads existing Supabase learner data from public.profiles and public.learning_progress
 import { stage, isCompleted, isAttempted } from './progress.js';
 import { escapeHtml } from './util.js';
+import { evaluateContestSubmission } from './contest-ai-evaluator.js';
 
 const SUPABASE_URL = 'https://qklnaqfspvmnlequqagf.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_dthVX8zmvd1HvWaYWBaojA_2YbvHWe1';
@@ -651,3 +652,894 @@ function formatDate(dt) {
     return String(dt);
   }
 }
+
+// ============================================================
+// CONTEST MANAGEMENT CONTROLLER
+// ============================================================
+
+let currentAdminTab = 'learners';
+let contestsData = [];
+let selectedContestId = null;
+let currentContestParticipants = [];
+let allLearnersForAudience = [];
+let selectedAudienceIds = new Set();
+let activeReviewSubmission = null;
+
+// Tab switcher
+export function switchAdminTab(tab) {
+  currentAdminTab = tab;
+  const isLearners = tab === 'learners';
+
+  if ($('learnersTabContent')) $('learnersTabContent').hidden = !isLearners;
+  if ($('contestsTabContent')) $('contestsTabContent').hidden = isLearners;
+
+  if ($('tabLearnersBtn')) $('tabLearnersBtn').classList.toggle('active', isLearners);
+  if ($('tabContestsBtn')) $('tabContestsBtn').classList.toggle('active', !isLearners);
+
+  if (tab === 'contests') {
+    void loadContests();
+  }
+}
+
+// 1. Load all contests
+export async function loadContests() {
+  if (!client) return;
+  const container = $('contestsContainer');
+  if (container) container.innerHTML = '<p style="color:var(--muted);padding:14px;">Loading contests from database…</p>';
+
+  try {
+    const { data, error } = await client
+      .from('contests')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    contestsData = data || [];
+    renderContestsList();
+  } catch (err) {
+    if (container) container.innerHTML = `<div class="empty" style="color:#b91c1c;">Error loading contests: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderContestsList() {
+  const container = $('contestsContainer');
+  if (!container) return;
+
+  if (!contestsData.length) {
+    container.innerHTML = `
+      <div class="empty panel">
+        <p style="font-size:1.1rem;font-weight:600;margin:0 0 6px;">No contests created yet</p>
+        <p style="color:var(--muted);margin:0 0 14px;">Create your first Crack SQL Thinking Contest to challenge learners.</p>
+        <button class="action primary" onclick="window.openContestEditor()">+ Create New Contest</button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = contestsData.map(c => {
+    const statusClass = (c.status || 'draft').toLowerCase().replace('_', '-');
+    const feeDisplay = Number(c.entry_fee) > 0 ? `₹${c.entry_fee}` : 'FREE';
+
+    return `
+      <div class="contest-item-card">
+        <div class="contest-item-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <span class="badge ${statusClass}">${c.status}</span>
+              <span style="font-size:0.8rem;color:var(--muted);">Audience: <strong>${c.audience_type}</strong></span>
+            </div>
+            <h3 class="contest-item-title">${escapeHtml(c.title)}</h3>
+          </div>
+          <div style="font-weight:700;font-size:1rem;color:var(--primary);">
+            Entry: ${feeDisplay}
+          </div>
+        </div>
+
+        <div class="contest-meta-row">
+          <span>🥇 ${escapeHtml(c.first_prize || '₹1,000')}</span>
+          <span>🥈 ${escapeHtml(c.second_prize || '₹500')}</span>
+          <span>🥉 ${escapeHtml(c.third_prize || '₹250')}</span>
+          <span>Created: ${formatDate(c.created_at)}</span>
+          ${c.results_published_at ? `<span>Results: ${formatDate(c.results_published_at)}</span>` : ''}
+        </div>
+
+        <p style="font-size:0.88rem;color:var(--muted);margin:0 0 12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">
+          ${escapeHtml(c.scenario_text || 'No scenario text set.')}
+        </p>
+
+        <div class="contest-actions-row">
+          <button class="action primary sm" onclick="window.openContestSubmissions('${c.id}')">👥 Submissions &amp; Review</button>
+          <button class="action secondary sm" onclick="window.openContestEditor('${c.id}')">✏️ Edit</button>
+          <button class="action secondary sm" onclick="window.duplicateContest('${c.id}')">📋 Duplicate</button>
+          <button class="action secondary sm" onclick="window.openAudienceSelector('${c.id}')">🎯 Audience (${c.audience_type})</button>
+
+          <!-- Status transition dropdown / actions -->
+          ${c.status === 'DRAFT' ? `
+            <button class="action success sm" onclick="window.updateContestStatus('${c.id}', 'PUBLISHED')">🚀 Publish Contest</button>
+          ` : ''}
+
+          ${c.status === 'PUBLISHED' ? `
+            <button class="action warn sm" onclick="window.updateContestStatus('${c.id}', 'PAUSED')">⏸️ Pause Contest</button>
+            <button class="action secondary sm" onclick="window.updateContestStatus('${c.id}', 'REGISTRATION_CLOSED')">🔒 Close Reg</button>
+            <button class="action secondary sm" onclick="window.updateContestStatus('${c.id}', 'CONTEST_CLOSED')">⏹️ Close Contest</button>
+          ` : ''}
+
+          ${c.status === 'PAUSED' ? `
+            <button class="action success sm" onclick="window.updateContestStatus('${c.id}', 'PUBLISHED')">▶️ Resume (Publish)</button>
+          ` : ''}
+
+          ${c.status === 'REGISTRATION_CLOSED' ? `
+            <button class="action secondary sm" onclick="window.updateContestStatus('${c.id}', 'CONTEST_CLOSED')">⏹️ Close Contest</button>
+          ` : ''}
+
+          ${c.status === 'CONTEST_CLOSED' ? `
+            <button class="action primary sm" onclick="window.updateContestStatus('${c.id}', 'EVALUATION')">📝 Move to Evaluation</button>
+          ` : ''}
+
+          ${c.status === 'EVALUATION' ? `
+            <button class="action success sm" onclick="window.updateContestStatus('${c.id}', 'RESULTS_PUBLISHED')">📢 Publish Results</button>
+          ` : ''}
+
+          ${c.status !== 'ARCHIVED' ? `
+            <button class="action danger sm" style="margin-left:auto;" onclick="window.updateContestStatus('${c.id}', 'ARCHIVED')">Archive</button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// 2. Create / Edit Contest
+export function openContestEditor(contestId = null) {
+  const modal = $('contestEditorModal');
+  if (!modal) return;
+
+  const titleEl = $('editorModalTitle');
+  const idEl = $('editContestId');
+  const titleInput = $('contestTitleInput');
+  const feeInput = $('contestFeeInput');
+  const audienceInput = $('contestAudienceInput');
+  const p1 = $('contestPrize1Input');
+  const p2 = $('contestPrize2Input');
+  const p3 = $('contestPrize3Input');
+  const scen = $('contestScenarioInput');
+  const inst = $('contestInstructionsInput');
+  const rules = $('contestRulesInput');
+
+  if (contestId) {
+    const c = contestsData.find(x => x.id === contestId);
+    if (!c) return;
+    titleEl.textContent = 'Edit Contest: ' + c.title;
+    idEl.value = c.id;
+    titleInput.value = c.title || '';
+    feeInput.value = c.entry_fee ?? 49;
+    audienceInput.value = c.audience_type || 'ALL';
+    p1.value = c.first_prize || '₹1,000';
+    p2.value = c.second_prize || '₹500';
+    p3.value = c.third_prize || '₹250';
+    scen.value = c.scenario_text || '';
+    inst.value = c.instructions || '';
+    rules.value = c.rules || '';
+  } else {
+    titleEl.textContent = 'Create New Contest (Starts as DRAFT)';
+    idEl.value = '';
+    titleInput.value = 'Crack SQL Thinking Challenge #' + (contestsData.length + 1);
+    feeInput.value = 49;
+    audienceInput.value = 'ALL';
+    p1.value = '₹1,000';
+    p2.value = '₹500';
+    p3.value = '₹250';
+    scen.value = 'You are the lead data architect for a high-volume financial institution. Fraud detection algorithms have flagged an abnormal cluster of international transactions occurring within minutes of local account ATM withdrawals. Explain step by step how you would identify all compromised accounts, the corresponding transaction details, and calculate the total financial exposure across all impacted customers.';
+    inst.value = 'Explain step by step how you would solve this problem. Do not write SQL. Consider the required data, tables, filters, relationships, calculations and expected result.';
+    rules.value = '1. Each participant receives exactly ONE official attempt.\n2. Official timer begins immediately upon start and cannot be reset.\n3. Procedural answers are auto-saved in draft mode.\n4. Admin evaluation score out of 100 determines official rankings.';
+  }
+
+  modal.style.display = 'flex';
+}
+
+export function closeEditorModal() {
+  const modal = $('contestEditorModal');
+  if (modal) modal.style.display = 'none';
+}
+
+export async function saveContestForm() {
+  if (!client) return;
+
+  const id = $('editContestId')?.value;
+  const title = $('contestTitleInput')?.value.trim();
+  const fee = Number($('contestFeeInput')?.value) || 0;
+  const audience = $('contestAudienceInput')?.value || 'ALL';
+  const p1 = $('contestPrize1Input')?.value.trim() || '₹1,000';
+  const p2 = $('contestPrize2Input')?.value.trim() || '₹500';
+  const p3 = $('contestPrize3Input')?.value.trim() || '₹250';
+  const scen = $('contestScenarioInput')?.value.trim();
+  const inst = $('contestInstructionsInput')?.value.trim();
+  const rules = $('contestRulesInput')?.value.trim();
+
+  if (!title || !scen) {
+    alert('Please enter both Contest Title and Problem Statement.');
+    return;
+  }
+
+  const payload = {
+    title,
+    entry_fee: fee,
+    currency: 'INR',
+    audience_type: audience,
+    first_prize: p1,
+    second_prize: p2,
+    third_prize: p3,
+    scenario_text: scen,
+    instructions: inst,
+    rules: rules,
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    if (id) {
+      const { error } = await client.from('contests').update(payload).eq('id', id);
+      if (error) throw error;
+    } else {
+      payload.status = 'DRAFT'; // Always starts as DRAFT
+      payload.created_by = currentUser?.id || null;
+      payload.created_at = new Date().toISOString();
+      const { error } = await client.from('contests').insert(payload);
+      if (error) throw error;
+    }
+
+    closeEditorModal();
+    await loadContests();
+  } catch (err) {
+    alert('Error saving contest: ' + err.message);
+  }
+}
+
+// 3. Duplicate Contest
+export async function duplicateContest(contestId) {
+  if (!client) return;
+  const original = contestsData.find(c => c.id === contestId);
+  if (!original) return;
+
+  const confirmed = confirm(`Duplicate contest "${original.title}" as a new DRAFT? Settings will be copied but participant records, payments, and submissions will NOT be copied.`);
+  if (!confirmed) return;
+
+  try {
+    const payload = {
+      title: `${original.title} (Copy)`,
+      description: original.description,
+      instructions: original.instructions,
+      rules: original.rules,
+      scenario_text: original.scenario_text,
+      entry_fee: original.entry_fee,
+      currency: original.currency || 'INR',
+      first_prize: original.first_prize,
+      second_prize: original.second_prize,
+      third_prize: original.third_prize,
+      audience_type: original.audience_type,
+      status: 'DRAFT', // Clean new DRAFT
+      created_by: currentUser?.id || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await client.from('contests').insert(payload);
+    if (error) throw error;
+
+    await loadContests();
+    alert('Contest duplicated as DRAFT successfully.');
+  } catch (err) {
+    alert('Duplicate error: ' + err.message);
+  }
+}
+
+// 4. Update Contest Status (Publish, Pause, etc.)
+export async function updateContestStatus(contestId, newStatus) {
+  if (!client) return;
+
+  if (newStatus === 'PUBLISHED') {
+    const ok = confirm('Publish this contest? Eligible participants will immediately see the contest card.');
+    if (!ok) return;
+  } else if (newStatus === 'PAUSED') {
+    const ok = confirm('Pause this contest? New entries will be blocked, but existing submissions and payments are preserved safely.');
+    if (!ok) return;
+  } else if (newStatus === 'ARCHIVED') {
+    const ok = confirm('Archive this contest?');
+    if (!ok) return;
+  }
+
+  try {
+    const patch = { status: newStatus, updated_at: new Date().toISOString() };
+    if (newStatus === 'RESULTS_PUBLISHED') {
+      patch.results_published_at = new Date().toISOString();
+    }
+
+    const { error } = await client.from('contests').update(patch).eq('id', contestId);
+    if (error) throw error;
+
+    await loadContests();
+  } catch (err) {
+    alert('Status update error: ' + err.message);
+  }
+}
+
+// 5. Audience Selector Modal
+export async function openAudienceSelector(contestId) {
+  selectedContestId = contestId;
+  const modal = $('audienceModal');
+  if (!modal || !client) return;
+
+  modal.style.display = 'flex';
+  const container = $('audienceListContainer');
+  if (container) container.innerHTML = '<p style="color:var(--muted);padding:10px;">Loading learners…</p>';
+
+  try {
+    // 1. Fetch all learners
+    const { data: profiles, error: profErr } = await client.from('profiles').select('id, name, email');
+    if (profErr) throw profErr;
+    allLearnersForAudience = profiles || [];
+
+    // 2. Fetch existing eligibility for this contest
+    const { data: elig, error: eligErr } = await client
+      .from('contest_eligibility')
+      .select('user_id')
+      .eq('contest_id', contestId);
+
+    if (eligErr) throw eligErr;
+    selectedAudienceIds = new Set((elig || []).map(e => e.user_id));
+
+    renderAudienceList();
+  } catch (err) {
+    if (container) container.innerHTML = `<p style="color:#b91c1c;">Error: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+export function closeAudienceModal() {
+  const modal = $('audienceModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function renderAudienceList(filterQuery = '') {
+  const container = $('audienceListContainer');
+  if (!container) return;
+
+  const q = (filterQuery || '').toLowerCase().trim();
+  const filtered = allLearnersForAudience.filter(l =>
+    (l.email || '').toLowerCase().includes(q) || (l.name || '').toLowerCase().includes(q)
+  );
+
+  if (!filtered.length) {
+    container.innerHTML = '<p style="color:var(--muted);padding:8px;">No matching learners found.</p>';
+    return;
+  }
+
+  container.innerHTML = filtered.map(l => {
+    const isChecked = selectedAudienceIds.has(l.id);
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);">
+        <input type="checkbox" id="aud_chk_${l.id}" ${isChecked ? 'checked' : ''} onchange="window.toggleAudienceSelection('${l.id}', this.checked)" />
+        <label for="aud_chk_${l.id}" style="cursor:pointer;flex:1;font-size:0.88rem;">
+          <strong>${escapeHtml(l.name || 'Learner')}</strong>
+          <span style="color:var(--muted);margin-left:6px;font-size:0.8rem;">(${escapeHtml(l.email || l.id)})</span>
+        </label>
+      </div>
+    `;
+  }).join('');
+}
+
+export function filterAudienceList() {
+  const q = $('audienceSearch')?.value || '';
+  renderAudienceList(q);
+}
+
+export function toggleAudienceSelection(userId, checked) {
+  if (checked) selectedAudienceIds.add(userId);
+  else selectedAudienceIds.delete(userId);
+}
+
+export function selectAllAudience(selectAll = true) {
+  allLearnersForAudience.forEach(l => {
+    if (selectAll) selectedAudienceIds.add(l.id);
+    else selectedAudienceIds.delete(l.id);
+  });
+  filterAudienceList();
+}
+
+export async function saveAudienceSelection() {
+  if (!client || !selectedContestId) return;
+
+  try {
+    // Delete existing eligibility rows
+    await client.from('contest_eligibility').delete().eq('contest_id', selectedContestId);
+
+    // Insert new selected rows
+    const rows = Array.from(selectedAudienceIds).map(uid => {
+      const learner = allLearnersForAudience.find(l => l.id === uid);
+      return {
+        contest_id: selectedContestId,
+        user_id: uid,
+        user_email: learner?.email || null,
+        is_invited: true
+      };
+    });
+
+    if (rows.length > 0) {
+      const { error } = await client.from('contest_eligibility').insert(rows);
+      if (error) throw error;
+    }
+
+    closeAudienceModal();
+    alert(`Audience updated: ${rows.length} participants selected.`);
+  } catch (err) {
+    alert('Error saving audience: ' + err.message);
+  }
+}
+
+// 6. Submissions & Participants Drill-down
+export async function openContestSubmissions(contestId) {
+  selectedContestId = contestId;
+  const contest = contestsData.find(c => c.id === contestId);
+  if (!contest || !client) return;
+
+  if ($('contestsListView')) $('contestsListView').style.display = 'none';
+  if ($('contestDetailView')) $('contestDetailView').style.display = 'block';
+
+  const tbody = $('participantsTableBody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted);">Loading participants &amp; submissions…</td></tr>';
+
+  try {
+    // Fetch eligibility, registrations, payments, attempts, evaluations for this contest
+    const [eligRes, regRes, payRes, attRes, evalRes] = await Promise.all([
+      client.from('contest_eligibility').select('*').eq('contest_id', contestId),
+      client.from('contest_registrations').select('*').eq('contest_id', contestId),
+      client.from('contest_payments').select('*').eq('contest_id', contestId),
+      client.from('contest_attempts').select('*').eq('contest_id', contestId),
+      client.from('contest_evaluations').select('*').eq('contest_id', contestId)
+    ]);
+
+    const eligMap = new Map((eligRes.data || []).map(x => [x.user_id, x]));
+    const regMap = new Map((regRes.data || []).map(x => [x.user_id, x]));
+    const payMap = new Map((payRes.data || []).map(x => [x.user_id, x]));
+    const attMap = new Map((attRes.data || []).map(x => [x.user_id, x]));
+    const evalMap = new Map((evalRes.data || []).map(x => [x.user_id, x]));
+
+    // Aggregate user IDs across all records
+    const allUserIds = new Set([
+      ...eligMap.keys(),
+      ...regMap.keys(),
+      ...payMap.keys(),
+      ...attMap.keys(),
+      ...evalMap.keys()
+    ]);
+
+    // Build unified participant objects
+    currentContestParticipants = Array.from(allUserIds).map(uid => {
+      const learner = learnersData.find(l => l.id === uid);
+      const reg = regMap.get(uid);
+      const pay = payMap.get(uid);
+      const att = attMap.get(uid);
+      const ev = evalMap.get(uid);
+      const elig = eligMap.get(uid);
+
+      return {
+        userId: uid,
+        name: learner?.name || reg?.user_email?.split('@')[0] || 'Learner',
+        email: learner?.email || reg?.user_email || '—',
+        isEligible: contest.audience_type === 'ALL' || Boolean(elig),
+        paymentStatus: pay?.status || (Number(contest.entry_fee) === 0 ? 'VERIFIED' : 'UNPAID'),
+        paymentMethod: pay?.payment_method || '—',
+        txnRef: pay?.transaction_ref || null,
+        attemptStatus: att?.status || 'NOT_STARTED',
+        startedAt: att?.started_at || null,
+        submittedAt: att?.submitted_at || null,
+        elapsedSeconds: att?.elapsed_seconds || 0,
+        draftResponse: att?.draft_response || '',
+        finalResponse: att?.final_response || '',
+        evalStatus: ev?.evaluation_status || 'PENDING',
+        adminScore: ev?.admin_final_score ?? null,
+        aiScore: ev?.ai_suggested_score ?? null,
+        evalObj: ev || null
+      };
+    });
+
+    renderContestStats();
+    renderParticipantsTable();
+  } catch (err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="color:#b91c1c;padding:20px;">Error: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+export function backToContestsList() {
+  if ($('contestsListView')) $('contestsListView').style.display = 'block';
+  if ($('contestDetailView')) $('contestDetailView').style.display = 'none';
+  selectedContestId = null;
+}
+
+function renderContestStats() {
+  const statsEl = $('contestDetailStats');
+  if (!statsEl) return;
+
+  const totalEligible = currentContestParticipants.filter(p => p.isEligible).length;
+  const totalReg = currentContestParticipants.filter(p => p.attemptStatus !== 'NOT_STARTED' || p.paymentStatus !== 'UNPAID').length;
+  const payPending = currentContestParticipants.filter(p => p.paymentStatus === 'PENDING').length;
+  const payVerified = currentContestParticipants.filter(p => p.paymentStatus === 'VERIFIED').length;
+  const contestStarted = currentContestParticipants.filter(p => p.attemptStatus === 'IN_PROGRESS' || p.attemptStatus === 'SUBMITTED').length;
+  const submitted = currentContestParticipants.filter(p => p.attemptStatus === 'SUBMITTED').length;
+  const notSubmitted = currentContestParticipants.filter(p => p.attemptStatus === 'IN_PROGRESS').length;
+  const evalPending = currentContestParticipants.filter(p => p.attemptStatus === 'SUBMITTED' && p.evalStatus !== 'FINALIZED').length;
+  const evalCompleted = currentContestParticipants.filter(p => p.evalStatus === 'FINALIZED').length;
+
+  statsEl.innerHTML = `
+    <div class="stat"><div class="num">${totalEligible}</div><div class="label">Total Eligible</div></div>
+    <div class="stat"><div class="num">${totalReg}</div><div class="label">Registrations</div></div>
+    <div class="stat"><div class="num">${payPending}</div><div class="label">Payment Pending</div></div>
+    <div class="stat"><div class="num">${payVerified}</div><div class="label">Payment Verified</div></div>
+    <div class="stat"><div class="num">${contestStarted}</div><div class="label">Contest Started</div></div>
+    <div class="stat"><div class="num">${submitted}</div><div class="label">Submitted</div></div>
+    <div class="stat"><div class="num">${notSubmitted}</div><div class="label">In Progress</div></div>
+    <div class="stat"><div class="num">${evalPending}</div><div class="label">Eval Pending</div></div>
+    <div class="stat"><div class="num">${evalCompleted}</div><div class="label">Eval Completed</div></div>
+  `;
+}
+
+export function filterParticipantsTable() {
+  renderParticipantsTable();
+}
+
+function renderParticipantsTable() {
+  const tbody = $('participantsTableBody');
+  if (!tbody) return;
+
+  const q = ($('participantSearch')?.value || '').toLowerCase().trim();
+  const payFilter = $('filterPaymentStatus')?.value || 'ALL';
+  const attFilter = $('filterAttemptStatus')?.value || 'ALL';
+  const evalFilter = $('filterEvaluationStatus')?.value || 'ALL';
+
+  const filtered = currentContestParticipants.filter(p => {
+    if (q && !p.email.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
+    if (payFilter !== 'ALL' && p.paymentStatus !== payFilter) return false;
+    if (attFilter !== 'ALL' && p.attemptStatus !== attFilter) return false;
+    if (evalFilter !== 'ALL' && p.evalStatus !== evalFilter) return false;
+    return true;
+  });
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--muted);">No matching participants found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(p => {
+    const payBadge = p.paymentStatus === 'VERIFIED' ? 'badge verified' : (p.paymentStatus === 'PENDING' ? 'badge pending' : 'badge draft');
+    const attBadge = p.attemptStatus === 'SUBMITTED' ? 'badge submitted' : (p.attemptStatus === 'IN_PROGRESS' ? 'badge progress' : 'badge draft');
+    const timeFormatted = p.elapsedSeconds > 0 ? formatSec(p.elapsedSeconds) : '—';
+    const scoreDisplay = p.adminScore !== null ? `<strong>${p.adminScore}</strong> / 100` : '—';
+
+    return `
+      <tr>
+        <td>
+          <div style="font-weight:600;">${escapeHtml(p.name)}</div>
+          <div style="font-size:0.78rem;color:var(--muted);">${escapeHtml(p.email)}</div>
+        </td>
+        <td>${p.isEligible ? '<span class="badge verified">Eligible</span>' : '<span class="badge draft">Not Eligible</span>'}</td>
+        <td>
+          <span class="${payBadge}">${p.paymentStatus}</span>
+          ${p.txnRef ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Ref: ${escapeHtml(p.txnRef)}</div>` : ''}
+        </td>
+        <td><span class="${attBadge}">${p.attemptStatus}</span></td>
+        <td style="font-size:0.8rem;">${p.startedAt ? formatDate(p.startedAt) : '—'}</td>
+        <td style="font-size:0.8rem;">${p.submittedAt ? formatDate(p.submittedAt) : '—'}</td>
+        <td style="font-size:0.85rem;font-weight:600;">${timeFormatted}</td>
+        <td>${scoreDisplay}</td>
+        <td><span class="badge ${p.evalStatus === 'FINALIZED' ? 'verified' : 'pending'}">${p.evalStatus}</span></td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${p.paymentStatus === 'PENDING' ? `
+              <button class="action success sm" onclick="window.verifyPayment('${selectedContestId}', '${p.userId}', 'VERIFIED')">Verify Pay ✓</button>
+            ` : ''}
+            ${p.attemptStatus === 'SUBMITTED' ? `
+              <button class="action primary sm" onclick="window.openEvaluationModal('${selectedContestId}', '${p.userId}')">Evaluate</button>
+            ` : ''}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// 7. Payment Verification
+export async function verifyPayment(contestId, userId, newStatus = 'VERIFIED') {
+  if (!client) return;
+  const ok = confirm(`Mark payment for participant as ${newStatus}?`);
+  if (!ok) return;
+
+  try {
+    const { error } = await client
+      .from('contest_payments')
+      .update({
+        status: newStatus,
+        verified_at: new Date().toISOString(),
+        verified_by: currentUser?.id || null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('contest_id', contestId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+    await openContestSubmissions(contestId);
+  } catch (err) {
+    alert('Payment verification error: ' + err.message);
+  }
+}
+
+// 8. Evaluation & AI Review Modal
+export function openEvaluationModal(contestId, userId) {
+  const p = currentContestParticipants.find(x => x.userId === userId);
+  const c = contestsData.find(x => x.id === contestId);
+  if (!p || !c) return;
+
+  activeReviewSubmission = { contest: c, participant: p };
+  const modal = $('evaluationModal');
+  if (!modal) return;
+
+  $('evalModalTitle').textContent = `Review: ${p.name}`;
+  $('evalParticipantMeta').textContent = `Email: ${p.email} | User ID: ${p.userId}`;
+  $('evalScenarioText').textContent = c.scenario_text || '';
+  $('evalAnswerText').textContent = p.finalResponse || p.draftResponse || 'No response submitted.';
+  $('evalTimeTakenBadge').textContent = `Time Taken: ${formatSec(p.elapsedSeconds)}`;
+
+  // Populate existing scores if already evaluated
+  const ev = p.evalObj;
+  $('scoreReq').value = ev?.score_req_understanding ?? 0;
+  $('scoreData').value = ev?.score_data_identification ?? 0;
+  $('scoreSeq').value = ev?.score_logical_sequence ?? 0;
+  $('scoreOp').value = ev?.score_operation_reasoning ?? 0;
+  $('scoreClar').value = ev?.score_completeness_clarity ?? 0;
+  $('adminFeedbackInput').value = ev?.admin_feedback || '';
+
+  calcTotalScore();
+
+  // Reset AI suggestion boxes
+  ['aiReqBox', 'aiDataBox', 'aiSeqBox', 'aiOpBox', 'aiClarBox'].forEach(id => {
+    const el = $(id);
+    if (el) el.style.display = 'none';
+  });
+
+  modal.style.display = 'flex';
+}
+
+export function closeEvaluationModal() {
+  const modal = $('evaluationModal');
+  if (modal) modal.style.display = 'none';
+  activeReviewSubmission = null;
+}
+
+export function calcTotalScore() {
+  const s1 = Number($('scoreReq')?.value) || 0;
+  const s2 = Number($('scoreData')?.value) || 0;
+  const s3 = Number($('scoreSeq')?.value) || 0;
+  const s4 = Number($('scoreOp')?.value) || 0;
+  const s5 = Number($('scoreClar')?.value) || 0;
+
+  const total = Math.min(100, Math.max(0, s1 + s2 + s3 + s4 + s5));
+  const badge = $('totalScoreLive');
+  if (badge) badge.textContent = `${total} / 100`;
+  return total;
+}
+
+export function runAiEvaluation() {
+  if (!activeReviewSubmission) return;
+  const btn = $('btnRunAiEval');
+  if (btn) { btn.disabled = true; btn.textContent = 'Analyzing thinking…'; }
+
+  const scenario = activeReviewSubmission.contest.scenario_text;
+  const response = activeReviewSubmission.participant.finalResponse || activeReviewSubmission.participant.draftResponse;
+
+  const result = evaluateContestSubmission({ scenario, response });
+  const b = result.breakdown;
+
+  // Fill in suggested scores
+  $('scoreReq').value = b.req_understanding.score;
+  $('scoreData').value = b.data_identification.score;
+  $('scoreSeq').value = b.logical_sequence.score;
+  $('scoreOp').value = b.operation_reasoning.score;
+  $('scoreClar').value = b.completeness_clarity.score;
+
+  // Show reasoning boxes
+  showAiBox('aiReqBox', `🤖 Suggested: ${b.req_understanding.score}/20 — ${b.req_understanding.reason} | Strengths: ${b.req_understanding.strengths}`);
+  showAiBox('aiDataBox', `🤖 Suggested: ${b.data_identification.score}/15 — ${b.data_identification.reason} | Strengths: ${b.data_identification.strengths}`);
+  showAiBox('aiSeqBox', `🤖 Suggested: ${b.logical_sequence.score}/25 — ${b.logical_sequence.reason} | Strengths: ${b.logical_sequence.strengths}`);
+  showAiBox('aiOpBox', `🤖 Suggested: ${b.operation_reasoning.score}/25 — ${b.operation_reasoning.reason} | Strengths: ${b.operation_reasoning.strengths}`);
+  showAiBox('aiClarBox', `🤖 Suggested: ${b.completeness_clarity.score}/15 — ${b.completeness_clarity.reason} | Strengths: ${b.completeness_clarity.strengths}`);
+
+  calcTotalScore();
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Re-run AI Evaluation'; }
+}
+
+function showAiBox(id, text) {
+  const el = $(id);
+  if (el) {
+    el.style.display = 'block';
+    el.textContent = text;
+  }
+}
+
+export async function saveEvaluation(evaluationStatus = 'DRAFT') {
+  if (!client || !activeReviewSubmission) return;
+
+  const contestId = activeReviewSubmission.contest.id;
+  const userId = activeReviewSubmission.participant.userId;
+  const totalScore = calcTotalScore();
+
+  const payload = {
+    contest_id: contestId,
+    user_id: userId,
+    score_req_understanding: Number($('scoreReq')?.value) || 0,
+    score_data_identification: Number($('scoreData')?.value) || 0,
+    score_logical_sequence: Number($('scoreSeq')?.value) || 0,
+    score_operation_reasoning: Number($('scoreOp')?.value) || 0,
+    score_completeness_clarity: Number($('scoreClar')?.value) || 0,
+    admin_final_score: totalScore,
+    admin_feedback: $('adminFeedbackInput')?.value.trim() || '',
+    evaluation_status: evaluationStatus,
+    evaluated_by: currentUser?.id || null,
+    evaluated_at: new Date().toISOString()
+  };
+
+  if (evaluationStatus === 'FINALIZED') {
+    payload.finalized_at = new Date().toISOString();
+  }
+
+  try {
+    const { error } = await client
+      .from('contest_evaluations')
+      .upsert(payload, { onConflict: 'contest_id,user_id' });
+
+    if (error) throw error;
+
+    closeEvaluationModal();
+    await openContestSubmissions(contestId);
+    alert(`Evaluation saved as ${evaluationStatus}!`);
+  } catch (err) {
+    alert('Error saving evaluation: ' + err.message);
+  }
+}
+
+// 9. Results Leaderboard Modal & Publication
+export async function openResultsModal() {
+  if (!client || !selectedContestId) return;
+  const modal = $('resultsModal');
+  if (!modal) return;
+
+  const container = $('resultsLeaderboardContainer');
+  if (container) container.innerHTML = '<p style="color:var(--muted);padding:14px;">Calculating rankings…</p>';
+  modal.style.display = 'flex';
+
+  try {
+    const { data: evals, error } = await client
+      .from('contest_evaluations')
+      .select('*')
+      .eq('contest_id', selectedContestId);
+
+    if (error) throw error;
+
+    // Join with participants
+    const scoredList = (evals || []).map(ev => {
+      const p = currentContestParticipants.find(x => x.userId === ev.user_id);
+      return {
+        ...ev,
+        name: p?.name || 'Participant',
+        email: p?.email || ev.user_id,
+        elapsedSeconds: p?.elapsedSeconds || 0
+      };
+    });
+
+    // Primary sort: admin_final_score DESC, Secondary sort: elapsedSeconds ASC
+    scoredList.sort((a, b) => {
+      if (b.admin_final_score !== a.admin_final_score) {
+        return b.admin_final_score - a.admin_final_score;
+      }
+      return a.elapsedSeconds - b.elapsedSeconds;
+    });
+
+    if (!scoredList.length) {
+      if (container) container.innerHTML = '<p style="color:var(--muted);padding:14px;">No evaluated submissions found for this contest yet.</p>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th class="num">Rank</th>
+            <th>Participant</th>
+            <th class="num">Score</th>
+            <th class="num">Time Taken</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${scoredList.map((s, idx) => `
+            <tr>
+              <td class="num" style="font-weight:700;">#${idx + 1}</td>
+              <td>
+                <div style="font-weight:600;">${escapeHtml(s.name)}</div>
+                <div style="font-size:0.75rem;color:var(--muted);">${escapeHtml(s.email)}</div>
+              </td>
+              <td class="num" style="font-weight:700;color:var(--primary);">${s.admin_final_score} / 100</td>
+              <td class="num">${formatSec(s.elapsedSeconds)}</td>
+              <td><span class="badge ${s.evaluation_status === 'FINALIZED' ? 'verified' : 'pending'}">${s.evaluation_status}</span></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (err) {
+    if (container) container.innerHTML = `<p style="color:#b91c1c;">Error: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+export function closeResultsModal() {
+  const modal = $('resultsModal');
+  if (modal) modal.style.display = 'none';
+}
+
+export async function publishContestResults() {
+  if (!client || !selectedContestId) return;
+  const ok = confirm('Publish results to participants? All evaluated participants will be able to see their scores, ranks, and feedback.');
+  if (!ok) return;
+
+  try {
+    const { error } = await client
+      .from('contests')
+      .update({
+        status: 'RESULTS_PUBLISHED',
+        results_published_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', selectedContestId);
+
+    if (error) throw error;
+
+    closeResultsModal();
+    await loadContests();
+    alert('Results officially published to participants!');
+  } catch (err) {
+    alert('Publishing error: ' + err.message);
+  }
+}
+
+function formatSec(s) {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+// Expose on window for inline handlers
+Object.assign(window, {
+  switchAdminTab,
+  loadContests,
+  openContestEditor,
+  closeEditorModal,
+  saveContestForm,
+  duplicateContest,
+  updateContestStatus,
+  openAudienceSelector,
+  closeAudienceModal,
+  filterAudienceList,
+  toggleAudienceSelection,
+  selectAllAudience,
+  saveAudienceSelection,
+  openContestSubmissions,
+  backToContestsList,
+  filterParticipantsTable,
+  verifyPayment,
+  openEvaluationModal,
+  closeEvaluationModal,
+  calcTotalScore,
+  runAiEvaluation,
+  saveEvaluation,
+  openResultsModal,
+  closeResultsModal,
+  publishContestResults
+});
+
