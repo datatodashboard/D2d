@@ -540,6 +540,7 @@ function renderScenario() {
   $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
   $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
   renderSchemaCards(effective.schemaText);
+  currentSampleTable = null;
   setSchemaTab('schema');
   $('thinking').value=thinkingText(e.thinking);
   if ($('fiddleCopyConfirmation')) $('fiddleCopyConfirmation').textContent = '';
@@ -854,40 +855,44 @@ function renderSampleDataView() {
   if (!container || !current) return;
   const sampleSql = data.assets[current.domain]?.sample || '';
   const parsed = parseSampleData(sampleSql);
-  const tableNames = current.tables.filter(t => parsed[t]).length ? current.tables.filter(t => parsed[t]) : Object.keys(parsed);
+  const tableNames = Object.keys(parsed).sort();
   if (tableNames.length === 0) {
-    container.innerHTML = '<p class="small">No sample data available for this scenario.</p>';
+    container.innerHTML = '<p class="small muted">No sample data available for this scenario.</p>';
     return;
   }
-  if (!currentSampleTable || !tableNames.includes(currentSampleTable)) {
-    currentSampleTable = tableNames[0];
+  if (currentSampleTable && !tableNames.includes(currentSampleTable)) {
+    currentSampleTable = null;
   }
-  const tData = parsed[currentSampleTable];
-  if (!tData) {
-    container.innerHTML = '<p class="small">Sample table data not found.</p>';
-    return;
-  }
+  const tData = currentSampleTable ? parsed[currentSampleTable] : null;
+
   container.innerHTML = `
+    <div style="font-weight: 800; font-size: 15px; margin-bottom: 10px; color: var(--ink);">Sample Data</div>
     <div class="sample-table-tabs">
       ${tableNames.map(t => `
-        <button class="sample-tab ${t === currentSampleTable ? 'active' : ''}" onclick="selectSampleTable('${t}')">
-          ${t} (${parsed[t]?.rows?.length || 0} rows)
+        <button type="button" class="sample-tab ${t === currentSampleTable ? 'active' : ''}" onclick="selectSampleTable('${t}')">
+          [ ${escapeHtml(t)} ]
         </button>
       `).join('')}
     </div>
-    <div class="table-scroll">
-      <table class="sample-table">
-        <thead>
-          <tr>${tData.cols.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr>
-        </thead>
-        <tbody>
-          ${tData.rows.slice(0, 10).map(r => `
-            <tr>${r.map(v => `<td>${escapeHtml(v)}</td>`).join('')}</tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-    ${tData.rows.length > 10 ? `<div class="small muted" style="margin-top:6px;">Showing first 10 of ${tData.rows.length} sample rows in database fixture</div>` : ''}
+    ${tData ? `
+      <div class="table-scroll">
+        <table class="sample-table">
+          <thead>
+            <tr>${tData.cols.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr>
+          </thead>
+          <tbody>
+            ${tData.rows.slice(0, 10).map(r => `
+              <tr>${r.map(v => `<td>${escapeHtml(v)}</td>`).join('')}</tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${tData.rows.length > 10 ? `<div class="small muted" style="margin-top:6px;">Showing first 10 of ${tData.rows.length} rows</div>` : ''}
+    ` : `
+      <div class="small muted" style="padding:14px; background:#f8fafc; border:1px dashed var(--line); border-radius:10px; text-align:center;">
+        Click any table name above to view its sample data.
+      </div>
+    `}
   `;
 }
 
