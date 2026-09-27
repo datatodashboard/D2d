@@ -14,6 +14,7 @@ export function sanitize(value, ids) {
       variantIndex: Number.isFinite(entry.variantIndex) ? entry.variantIndex : null,
       skill: typeof entry.skill === 'string' ? entry.skill : null,
       assessment: entry.assessment && typeof entry.assessment === 'object' ? entry.assessment : null,
+      completed: (typeof entry.assessment?.score === 'number') ? entry.assessment.score >= 7 : !!entry.completed,
       fiddleFingerprint: typeof entry.fiddleFingerprint === 'string' ? entry.fiddleFingerprint : null,
       evaluationFingerprint: typeof entry.evaluationFingerprint === 'string' ? entry.evaluationFingerprint : null,
       evaluationResult: entry.evaluationResult && typeof entry.evaluationResult === 'object' ? entry.evaluationResult : null,
@@ -27,6 +28,19 @@ export function sanitize(value, ids) {
     result.skills = value.skills;
   }
   return result;
+}
+export function isCompleted(scenario, entry) {
+  if (!entry) return false;
+  if (entry.assessment && typeof entry.assessment.score === 'number') {
+    return entry.assessment.score >= 7;
+  }
+  if (entry.completed === true) {
+    return true;
+  }
+  if (scenario && entry.thinking) {
+    return thinkingIsReady(scenario, entry);
+  }
+  return false;
 }
 export function readProgress(storage, userId, ids) {
   try { return sanitize(JSON.parse(storage.getItem(storageKey(userId))), ids); }
@@ -61,8 +75,8 @@ export function stage(scenario,entry) {
   return 'sql_written';
 }
 export function chooseNext(pool,state,currentId) {
-  return pool.find(s=>s.id!==currentId && stage(s,state.entries[s.id])!=='verified')
-    || pool.find(s=>s.id===currentId && stage(s,state.entries[s.id])!=='verified') || null;
+  return pool.find(s=>s.id!==currentId && !isCompleted(s,state.entries[s.id]))
+    || pool.find(s=>s.id===currentId && !isCompleted(s,state.entries[s.id])) || null;
 }
 export function importLegacy(idsFromOldStorage,state,aliases,ids,now=Date.now()) {
   const next=structuredClone(state);let timestamp=nextTimestamp(next,now);

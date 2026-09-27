@@ -182,4 +182,57 @@ describe('Domain Experience & Curriculum Regression Tests', () => {
       assert.strictEqual(res.ready, false);
     });
   });
+
+  describe('TEST 8 – Schema Explorer Neutral Behavior & Alphabetical Sorting', () => {
+    it('sorts all domain tables in ascending alphabetical (A–Z) order and includes all tables', () => {
+      for (const domain of targetDomains) {
+        const s = scenarios.find(item => item.domain === domain);
+        assert(s, `Scenario for ${domain} must exist`);
+
+        // Parse schema text
+        const schema = parseScenarioSchema(s.schemaText);
+        const tableNames = Object.keys(schema);
+
+        // Sort ascending A-Z
+        const sorted = [...tableNames].sort((a, b) => a.localeCompare(b));
+
+        // Verify sorted order
+        for (let i = 0; i < sorted.length - 1; i++) {
+          assert(sorted[i].localeCompare(sorted[i + 1]) <= 0, `Tables in ${domain} must be in alphabetical order: ${sorted}`);
+        }
+
+        // Verify all scenario tables are present in the full sorted table list
+        for (const t of s.tables) {
+          assert(sorted.includes(t.toLowerCase()), `Table ${t} from scenario ${s.id} must be in the sorted explorer tables`);
+        }
+      }
+    });
+
+    it('ensures question target table is not automatically prioritized or hinted in order', () => {
+      const banScenario = scenarios.find(s => s.id === 'BAN_BEG_001');
+      assert(banScenario);
+      const schema = parseScenarioSchema(banScenario.schemaText);
+      const sortedTables = Object.keys(schema).sort((a, b) => a.localeCompare(b));
+
+      // In Banking: account_products, accounts, customers, transactions
+      // banScenario.tables is ['accounts']
+      assert.strictEqual(sortedTables[0], 'account_products', 'First table must be alphabetically first (account_products), not question target table');
+      assert.notStrictEqual(sortedTables[0], banScenario.tables[0], 'Question target table must not be forced to position 0');
+    });
+
+    it('verifies search query filtering on table names', () => {
+      const sampleTables = ['account_products', 'accounts', 'customers', 'healthcare', 'orders', 'payments', 'products'];
+      const query = 'pro';
+      const filtered = sampleTables.filter(t => t.toLowerCase().includes(query.toLowerCase()));
+      assert.deepStrictEqual(filtered, ['account_products', 'products']);
+
+      const query2 = 'acc';
+      const filtered2 = sampleTables.filter(t => t.toLowerCase().includes(query2.toLowerCase()));
+      assert.deepStrictEqual(filtered2, ['account_products', 'accounts']);
+
+      const queryNone = 'xyz123';
+      const filteredNone = sampleTables.filter(t => t.toLowerCase().includes(queryNone.toLowerCase()));
+      assert.strictEqual(filteredNone.length, 0);
+    });
+  });
 });

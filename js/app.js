@@ -1,5 +1,5 @@
 import {evaluateThinking, thinkingIsReady, thinkingText} from './thinking.js';
-import {EMPTY, readProgress, saveProgress, mergeProgress, nextTimestamp, workFingerprint, stage, chooseNext, importLegacy, storageKey} from './progress.js';
+import {EMPTY, readProgress, saveProgress, mergeProgress, nextTimestamp, workFingerprint, stage, isCompleted, chooseNext, importLegacy, storageKey} from './progress.js';
 import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
 import {renderSchemaCards} from './schema.js';
@@ -128,24 +128,27 @@ function updateProgress() {
   const activeScenarios = (currentDomainTrack === 'core' && !scenarioSearchQuery)
     ? scenarios.filter(s => CORE_DOMAINS.includes(s.domain))
     : scenarios;
-  const stages = activeScenarios.map(s => stage(s, state.entries[s.id]));
-  const verified = stages.filter(x => x === 'verified').length;
-  if ($('progressCount')) $('progressCount').textContent = verified + ' / ' + activeScenarios.length;
-  if ($('progressFill')) $('progressFill').style.width = (activeScenarios.length ? verified / activeScenarios.length * 100 : 0) + '%';
+  const completed = activeScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+  if ($('progressCount')) $('progressCount').textContent = completed + ' / ' + activeScenarios.length;
+  if ($('progressFill')) $('progressFill').style.width = (activeScenarios.length ? (completed / activeScenarios.length * 100) : 0) + '%';
   if ($('progressStages')) {
-    $('progressStages').textContent = stages.filter(x => x !== 'not_started').length + ' started · ' +
-      stages.filter(x => ['thinking_ready', 'sql_written', 'fiddle_opened', 'verified'].includes(x)).length + ' thinking ready · ' + verified + ' verified';
+    const started = activeScenarios.filter(s => {
+      const e = state.entries[s.id];
+      return e && (e.updatedAt || e.thinking?.response || e.assessment);
+    }).length;
+    $('progressStages').textContent = `${started} started · ${completed} completed (score ≥ 7)`;
   }
   if (current) {
-    if ($('learningStage')) $('learningStage').textContent = labels[stage(current, entry())];
+    const isCurCompleted = isCompleted(current, entry());
+    if ($('learningStage')) {
+      $('learningStage').textContent = isCurCompleted ? 'Thinking ready (Score ≥ 7)' : labels[stage(current, entry())];
+    }
     if ($('doneTag')) {
-      $('doneTag').classList.toggle('show', stage(current, entry()) === 'verified');
-      $('doneTag').textContent = 'SQL verified';
+      $('doneTag').classList.toggle('show', isCurCompleted);
+      $('doneTag').textContent = isCurCompleted ? 'Completed ✓' : 'SQL verified';
     }
   }
-  if ($('progressScreen')?.classList.contains('active')) {
-    renderProgressScreen();
-  }
+  renderProgressScreen();
 }
 function renderAssessment(result) {
   $('feedback').classList.toggle('active', !!result);
@@ -564,10 +567,19 @@ function selectLevel(level,el) {
 function evaluatePlan() {
   if(!current) return;
   const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
-  const thinking=readThinking(),assessment=evaluateThinking(effective,thinking);
-  changeEntry({thinking,assessment,variantIndex:effective.variantIndex,skill:effective.skill});
-  renderAssessment(assessment);updateGates();
-  if (assessment.score >= 7 && $('nextButton')) {
+  const thinking = readThinking();
+  const assessment = evaluateThinking(effective, thinking);
+  const completed = typeof assessment?.score === 'number' && assessment.score >= 7;
+  changeEntry({
+    thinking,
+    assessment,
+    completed,
+    variantIndex: effective.variantIndex,
+    skill: effective.skill
+  });
+  renderAssessment(assessment);
+  updateGates();
+  if (completed && $('nextButton')) {
     $('nextButton').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
@@ -584,9 +596,8 @@ function nextScenario() {
   for (let i = 1; i < pool.length; i++) {
     const candidate = pool[(currentIndex + i) % pool.length];
     const candidateEntry = state.entries[candidate.id];
-    const candidateScore = candidateEntry?.assessment?.score || 0;
-    const candidateVerified = stage(candidate, candidateEntry) === 'verified';
-    if (!candidateVerified && candidateScore < 7) {
+    const candidateCompleted = isCompleted(candidate, candidateEntry);
+    if (!candidateCompleted) {
       next = candidate;
       break;
     }
@@ -924,14 +935,15 @@ function renderScenarioCatalog() {
   container.innerHTML = list.slice(0, 50).map(s => {
     const e = state.entries[s.id] || {};
     const effective = getEffectiveScenario(s, user?.id || 'guest_user', state);
+    const completed = isCompleted(s, e);
     const stg = stage(s, e);
     const isCurrent = current && current.id === s.id;
     let badgeClass = 'status-pill not-started';
     let badgeText = 'Not started';
-    if (stg === 'verified') {
+    if (completed) {
       badgeClass = 'status-pill verified';
-      badgeText = '✓ Verified';
-    } else if (stg === 'thinking_ready') {
+      badgeText = '✓ Completed';
+    } else if (stg === 'thinking_ready' || stg === 'thinking') {
       badgeClass = 'status-pill thinking';
       badgeText = '🧠 Ready';
     } else if (stg === 'sql_written') {
@@ -958,8 +970,7 @@ function renderProgressScreen() {
     : scenarios;
   
   const totalQuestions = trackScenarios.length;
-  const stages = trackScenarios.map(s => stage(s, state.entries[s.id]));
-  const completedCount = stages.filter(x => x === 'verified').length;
+  const completedCount = trackScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
   const completionPct = totalQuestions > 0 ? Math.round((completedCount / totalQuestions) * 100) : 0;
 
   let totalScore = 0, countWithScore = 0;
@@ -992,7 +1003,7 @@ function renderProgressScreen() {
 
   const domainCounts = targetDomains.map(d => {
     const dScenarios = scenarios.filter(s => s.domain === d.name);
-    const count = dScenarios.filter(s => stage(s, state.entries[s.id]) === 'verified').length;
+    const count = dScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
     return { ...d, count, total: dScenarios.length };
   });
 
@@ -1466,7 +1477,7 @@ function openProfileModal() {
   }
 
   const totalExercises = scenarios.length || 240;
-  const verifiedCount = scenarios.filter(s => stage(s, state.entries[s.id]) === 'verified').length;
+  const verifiedCount = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
   if ($('modalProfileSolved')) $('modalProfileSolved').textContent = `${verifiedCount} / ${totalExercises}`;
   if ($('modalProfileSync')) {
     $('modalProfileSync').textContent = info.isLoggedIn ? 'Cloud Sync Active' : 'Saved on Device';
@@ -1580,7 +1591,7 @@ Object.assign(window,{
   setDomainTrack,openOnboarding,closeOnboarding,toggleLandscapeMode,
   toggleProfileDropdown,closeProfileDropdown,openProfileModal,closeProfileModal,
   handleModalAuthAction,openMyProgress,handleProfileSignOut,openAdminPortal,
-  copySchemaAndOpenFiddle,
+  copySchemaAndOpenFiddle,isCompleted,
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   sqlEngineManager
 });
@@ -1598,7 +1609,7 @@ try {
   const thinkingEl = $('thinking');
   if (thinkingEl) {
     thinkingEl.addEventListener('input',()=>{
-      changeEntry({thinking:readThinking(),assessment:null,fiddleFingerprint:null,evaluationFingerprint:null,evaluationResult:null});
+      changeEntry({thinking:readThinking(),assessment:null,completed:false,fiddleFingerprint:null,evaluationFingerprint:null,evaluationResult:null});
       renderAssessment(null);if(typeof renderSqlEvaluation==='function')renderSqlEvaluation(null);updateGates();
     });
   }
