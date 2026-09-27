@@ -2,7 +2,7 @@ import {evaluateThinking, thinkingIsReady, thinkingText} from './thinking.js';
 import {EMPTY, readProgress, saveProgress, mergeProgress, nextTimestamp, workFingerprint, stage, chooseNext, importLegacy, storageKey} from './progress.js';
 import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
-import {renderSchemaCards, parseSchema, inferReference, TABLE_ICONS} from './schema.js';
+import {renderSchemaCards} from './schema.js';
 import {escapeHtml} from './util.js';
 import {SqlEngineManager, loadBrowserPGlite} from './sql-evaluator.js?v=4';
 
@@ -537,9 +537,7 @@ function renderScenario() {
   $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
   $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
   renderSchemaCards(effective.schemaText);
-  selectedExplorerTable = null;
-  schemaTableSearchQuery = '';
-  renderSchemaExplorer();
+  setSchemaTab('schema');
   $('thinking').value=thinkingText(e.thinking);
   if ($('fiddleCopyConfirmation')) $('fiddleCopyConfirmation').textContent = '';
   renderAssessment(e.assessment?evaluateThinking(effective,e.thinking||{}):null);
@@ -831,209 +829,60 @@ function parseSampleData(sampleSql) {
   return tables;
 }
 
-let selectedExplorerTable = null;
-let schemaTableSearchQuery = '';
-
-function renderSchemaExplorer() {
-  const container = $('schemaExplorer');
-  if (!container || !current) return;
-
-  const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
-  const schemaTables = parseSchema(effective.schemaText || '');
-  const schemaMap = new Map(schemaTables.map(t => [t.name, t]));
-  const sampleSql = data.assets[effective.domain]?.sample || '';
-  const sampleTables = parseSampleData(sampleSql);
-
-  // 1. Show ALL tables available in the current scenario/schema
-  const allTableNamesSet = new Set([
-    ...schemaTables.map(t => t.name),
-    ...Object.keys(sampleTables)
-  ]);
-
-  // 2. Sort all table names in ascending alphabetical (A–Z) order
-  const allTableNames = Array.from(allTableNamesSet).sort((a, b) => a.localeCompare(b));
-
-  if (allTableNames.length === 0) {
-    container.innerHTML = '<p class="small muted">No tables found for this schema.</p>';
-    return;
-  }
-
-  // 6. Compact "Search tables..." filter
-  const query = (schemaTableSearchQuery || '').toLowerCase().trim();
-  const visibleTables = query
-    ? allTableNames.filter(t => t.toLowerCase().includes(query))
-    : allTableNames;
-
-  let html = `
-    <div class="schema-explorer-top">
-      <div class="schema-explorer-header">
-        <h3 class="schema-explorer-title">
-          <span>🗄️</span> Schema Explorer
-        </h3>
-        <div class="schema-explorer-subtitle">
-          Neutral reference • ${allTableNames.length} tables in A–Z order
-        </div>
-      </div>
-      <div class="schema-search-container">
-        <span class="schema-search-icon">🔍</span>
-        <input 
-          type="text" 
-          id="schemaTableSearch" 
-          class="schema-search-input" 
-          placeholder="Search tables..." 
-          value="${escapeHtml(schemaTableSearchQuery)}" 
-          oninput="filterSchemaTables(this.value)"
-          autocomplete="off"
-          aria-label="Search tables"
-        >
-        ${schemaTableSearchQuery ? `<button class="schema-search-clear" onclick="clearSchemaTableSearch()" title="Clear search">✕</button>` : ''}
-      </div>
-    </div>
-  `;
-
-  // 7. Clickable chips/tabs in ascending alphabetical order
-  html += `
-    <div class="schema-table-chips" role="tablist" aria-label="Available tables in schema">
-      ${visibleTables.map(t => `
-        <button 
-          type="button" 
-          role="tab"
-          aria-selected="${t === selectedExplorerTable ? 'true' : 'false'}"
-          class="schema-table-chip ${t === selectedExplorerTable ? 'active' : ''}" 
-          onclick="selectExplorerTable('${escapeHtml(t)}')"
-        >
-          <span class="tbl-chip-icon">${TABLE_ICONS[t] || '🗂️'}</span>
-          <span class="tbl-chip-name">${escapeHtml(t)}</span>
-        </button>
-      `).join('')}
-    </div>
-  `;
-
-  if (visibleTables.length === 0) {
-    html += `<div class="small muted" style="padding: 10px 0;">No tables found matching "${escapeHtml(schemaTableSearchQuery)}".</div>`;
-  }
-
-  // 5. Initially show "Select a table to view sample data" with no table selected
-  if (!selectedExplorerTable || !allTableNames.includes(selectedExplorerTable)) {
-    html += `
-      <div class="schema-empty-state">
-        <div class="schema-empty-icon">📊</div>
-        <div class="schema-empty-title">Select a table to view sample data</div>
-        <p class="small muted" style="margin-top: 4px;">Click any table above to view column definitions and sample records.</p>
-      </div>
-    `;
-  } else {
-    // 8. When the learner clicks a table, show that table's columns and sample data
-    // 9. Only one selected table's sample data should be visible at a time
-    const t = selectedExplorerTable;
-    const tSchema = schemaMap.get(t);
-    const cols = tSchema ? tSchema.columns : (sampleTables[t]?.cols || []).map(c => ({ name: c, key: null }));
-    const tSample = sampleTables[t];
-    const sampleRows = tSample?.rows || [];
-
-    const columnsHtml = cols.map(c => {
-      let badges = '';
-      let ref = '';
-      if (c.key === 'PK') badges += '<span class="badge-pk">PK</span>';
-      if (c.key === 'FK') {
-        badges += '<span class="badge-fk">FK</span>';
-        const target = inferReference(c.name, allTableNames, t);
-        if (target) ref = '<span class="fk-ref">→ ' + escapeHtml(target) + '</span>';
-      }
-      return `
-        <div class="schema-row">
-          <span class="schema-col-name">${escapeHtml(c.name)}</span>
-          <span class="schema-badges">${ref}${badges}</span>
-        </div>
-      `;
-    }).join('');
-
-    let sampleHtml = '';
-    if (sampleRows.length === 0) {
-      sampleHtml = '<div class="small muted" style="padding: 8px 0;">No sample rows recorded for this table.</div>';
-    } else {
-      sampleHtml = `
-        <div class="table-scroll">
-          <table class="sample-table">
-            <thead>
-              <tr>${tSample.cols.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr>
-            </thead>
-            <tbody>
-              ${sampleRows.slice(0, 10).map(r => `
-                <tr>${r.map(v => `<td>${escapeHtml(v)}</td>`).join('')}</tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ${sampleRows.length > 10 ? `<div class="small muted" style="margin-top:6px;">Showing first 10 of ${sampleRows.length} sample rows in database fixture</div>` : ''}
-      `;
-    }
-
-    html += `
-      <div class="schema-selected-view">
-        <div class="schema-selected-header">
-          <div class="schema-selected-title">
-            <span class="tbl-icon">${TABLE_ICONS[t] || '🗂️'}</span>
-            <span>${escapeHtml(t)}</span>
-          </div>
-          <div class="schema-selected-meta">
-            ${cols.length} ${cols.length === 1 ? 'column' : 'columns'}${sampleRows.length ? ` • ${sampleRows.length} sample rows` : ''}
-          </div>
-        </div>
-
-        <div>
-          <div class="schema-section-label">Columns</div>
-          <div class="schema-card">
-            <div class="schema-card-body">
-              ${columnsHtml || '<div class="small muted" style="padding:6px 12px;">No column definitions available</div>'}
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <div class="schema-section-label">Sample Data</div>
-          ${sampleHtml}
-        </div>
-      </div>
-    `;
-  }
-
-  container.innerHTML = html;
-}
-
-function selectExplorerTable(table) {
-  selectedExplorerTable = table;
-  renderSchemaExplorer();
-}
-
-function filterSchemaTables(query) {
-  schemaTableSearchQuery = query;
-  renderSchemaExplorer();
-  const input = $('schemaTableSearch');
-  if (input) {
-    input.focus();
-    const len = input.value.length;
-    input.setSelectionRange(len, len);
-  }
-}
-
-function clearSchemaTableSearch() {
-  schemaTableSearchQuery = '';
-  renderSchemaExplorer();
-  const input = $('schemaTableSearch');
-  if (input) input.focus();
-}
-
-function selectSampleTable(table) {
-  selectExplorerTable(table);
-}
-
-function setSchemaTab(_tab) {
-  // Backward compatibility wrapper
+let currentSampleTable = null;
+function setSchemaTab(tab) {
+  $('tabSchema').classList.toggle('active', tab === 'schema');
+  $('tabSample').classList.toggle('active', tab === 'sample');
+  $('schemaOverview').hidden = tab !== 'schema';
+  $('sampleDataView').hidden = tab !== 'sample';
+  if (tab === 'sample') renderSampleDataView();
 }
 
 function renderSampleDataView() {
-  renderSchemaExplorer();
+  const container = $('sampleDataView');
+  if (!container || !current) return;
+  const sampleSql = data.assets[current.domain]?.sample || '';
+  const parsed = parseSampleData(sampleSql);
+  const tableNames = current.tables.filter(t => parsed[t]).length ? current.tables.filter(t => parsed[t]) : Object.keys(parsed);
+  if (tableNames.length === 0) {
+    container.innerHTML = '<p class="small">No sample data available for this scenario.</p>';
+    return;
+  }
+  if (!currentSampleTable || !tableNames.includes(currentSampleTable)) {
+    currentSampleTable = tableNames[0];
+  }
+  const tData = parsed[currentSampleTable];
+  if (!tData) {
+    container.innerHTML = '<p class="small">Sample table data not found.</p>';
+    return;
+  }
+  container.innerHTML = `
+    <div class="sample-table-tabs">
+      ${tableNames.map(t => `
+        <button class="sample-tab ${t === currentSampleTable ? 'active' : ''}" onclick="selectSampleTable('${t}')">
+          ${t} (${parsed[t]?.rows?.length || 0} rows)
+        </button>
+      `).join('')}
+    </div>
+    <div class="table-scroll">
+      <table class="sample-table">
+        <thead>
+          <tr>${tData.cols.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr>
+        </thead>
+        <tbody>
+          ${tData.rows.slice(0, 10).map(r => `
+            <tr>${r.map(v => `<td>${escapeHtml(v)}</td>`).join('')}</tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${tData.rows.length > 10 ? `<div class="small muted" style="margin-top:6px;">Showing first 10 of ${tData.rows.length} sample rows in database fixture</div>` : ''}
+  `;
+}
+
+function selectSampleTable(table) {
+  currentSampleTable = table;
+  renderSampleDataView();
 }
 
 let scenarioSearchQuery = '';
@@ -1727,7 +1576,6 @@ Object.assign(window,{
   retrySync,signInWithGoogle,signOut,installApp,
   showScreen,openScenario,showSampleThinking,improveLogic,compareExpert,closeCompare,
   useStarterSql,showStepSql,closeStepSql,selectSampleTable,setSchemaTab,practiceDomain,
-  renderSchemaExplorer,selectExplorerTable,filterSchemaTables,clearSchemaTableSearch,
   filterScenarioSearch,filterProgressDomain,filterProgressStatus,filterProgressSearch,
   setDomainTrack,openOnboarding,closeOnboarding,toggleLandscapeMode,
   toggleProfileDropdown,closeProfileDropdown,openProfileModal,closeProfileModal,

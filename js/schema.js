@@ -36,17 +36,7 @@ function inferReference(colName, tableNames, currentTable) {
   return null;
 }
 
-export const TABLE_ICONS = {
-  customers: '👤', accounts: '🏦', transactions: '💳', account_products: '📦',
-  patients: '🧑‍⚕️', doctors: '🩺', appointments: '📅', visits: '📋',
-  insurance_products: '🛡️', policies: '📄', claims: '🧾',
-  investors: '💼', securities: '📈', holdings: '📊', trades: '⚡',
-  clients: '🏢', chip_products: '🔲', production_batches: '🏭', test_results: '🔬',
-  students: '🎓', courses: '📚', enrollments: '📝', assessments: '🎯',
-  products: '📦', orders: '🧺', order_items: '🧾', healthcare: '🏥', payments: '💳'
-};
-
-export { parseSchema, inferReference };
+const TABLE_ICONS = { customers: '👤', accounts: '🏦', transactions: '💳', patients: '🧑‍⚕️', doctors: '🩺', appointments: '📅', visits: '📋', policies: '📄', claims: '🧾', products: '📦', orders: '🧺', order_items: '🧾' };
 
 export function renderSchemaCards(schemaText) {
   const container = document.getElementById('schema');
