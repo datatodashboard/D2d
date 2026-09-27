@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
-import { stage, workFingerprint } from '../js/progress.js';
+import { stage, isCompleted, workFingerprint } from '../js/progress.js';
 
 const data = JSON.parse(fs.readFileSync('./data/scenarios.json', 'utf8'));
 const scenariosMap = new Map(data.scenarios.map(s => [s.id, s]));
@@ -84,9 +84,9 @@ describe('Admin Dashboard Progress Evaluation', () => {
       const domain = scenario?.domain || 'General SQL';
       const stg = stage(scenario, entry);
 
-      const isSolved = (stg === 'verified');
+      const isSolved = isCompleted(scenario, entry);
       const isAttempted = isSolved ||
-        ['thinking', 'thinking_ready', 'sql_written', 'fiddle_opened', 'answer_viewed'].includes(stg) ||
+        ['thinking', 'thinking_ready', 'sql_written', 'fiddle_opened', 'answer_viewed', 'verified'].includes(stg) ||
         (entry.attempts && entry.attempts > 0);
 
       if (isAttempted) {
@@ -111,6 +111,31 @@ describe('Admin Dashboard Progress Evaluation', () => {
     const threshold = 2;
     const reachedAt = solvedCount >= threshold ? solvedTimestamps[threshold - 1] : null;
     assert.strictEqual(reachedAt, 1700000005000, 'Should accurately determine reachedAt timestamp for threshold');
+  });
+
+  it('correctly reads completed scenarios from Supabase learning_progress state where Thinking Score >= 7 without requiring SQL execution', () => {
+    const s1 = scenariosMap.get('HEA_BEG_001');
+    const s2 = scenariosMap.get('BAN_BEG_001');
+
+    // Learner with score 8 and NO sql run, no db fiddle verification
+    const thinkingOnlyCompletedEntry = {
+      thinking: { response: 'Use appointments filter status Active' },
+      assessment: { score: 8, ready: true },
+      sql: '',
+      evaluationResult: null,
+      updatedAt: 1700000000000
+    };
+    assert.strictEqual(isCompleted(s1, thinkingOnlyCompletedEntry), true, 'Thinking Score >= 7 without SQL must be recognized as completed/solved');
+
+    // Learner with score 5 and SQL passed (should NOT be completed under new rule)
+    const lowThinkingWithSqlEntry = {
+      thinking: { response: 'vague' },
+      assessment: { score: 5, ready: false },
+      sql: "SELECT * FROM accounts WHERE status = 'Active';",
+      evaluationResult: { passed: true },
+      updatedAt: 1700000005000
+    };
+    assert.strictEqual(isCompleted(s2, lowThinkingWithSqlEntry), false, 'Thinking Score < 7 must not be completed even if SQL passed');
   });
 
   it('handles empty progress state without crashing and preserves clean 0 metrics', () => {

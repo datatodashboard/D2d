@@ -1,6 +1,6 @@
 // Think and Crack SQL — Admin Dashboard Controller
 // Reads existing Supabase learner data from public.profiles and public.learning_progress
-import { stage } from './progress.js';
+import { stage, isCompleted } from './progress.js';
 import { escapeHtml } from './util.js';
 
 const SUPABASE_URL = 'https://qklnaqfspvmnlequqagf.supabase.co';
@@ -382,12 +382,14 @@ async function loadDashboardData() {
         // Evaluate stage using the exact same function used by the Crack SQL practice interface
         const stg = scenario ? stage(scenario, entry) : (entry.evaluationResult?.passed ? 'verified' : 'not_started');
 
-        const isSolved = (stg === 'verified');
+        // Evaluate solved/completed status: Thinking Score >= 7/10
+        const isSolved = isCompleted(scenario, entry);
         const isAttempted = isSolved ||
-          ['thinking', 'thinking_ready', 'sql_written', 'fiddle_opened', 'answer_viewed'].includes(stg) ||
+          ['thinking', 'thinking_ready', 'sql_written', 'fiddle_opened', 'answer_viewed', 'verified'].includes(stg) ||
           (Number.isFinite(entry.attempts) && entry.attempts > 0) ||
           Boolean(entry.sql && String(entry.sql).trim()) ||
-          Boolean(entry.thinking && (entry.thinking.response || entry.thinking.steps));
+          Boolean(entry.thinking && (entry.thinking.response || entry.thinking.steps)) ||
+          (entry.assessment && typeof entry.assessment.score === 'number');
 
         if (isAttempted) {
           userAttemptedCount++;
