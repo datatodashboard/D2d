@@ -1,6 +1,10 @@
 -- ============================================================
--- Think and Crack SQL — Supabase Setup & Complete Schema
--- Run this in: Supabase Dashboard -> SQL Editor -> New query -> Run
+-- Think and Crack SQL — Consolidated Supabase Schema & Migration
+-- Tables: profiles, learning_progress, progress, admin_users,
+--         payments, contests, contest_eligibility, 
+--         contest_registrations, contest_attempts, 
+--         contest_evaluations, contest_payments
+-- Run this in Supabase Dashboard -> SQL Editor -> New Query -> Run
 -- ============================================================
 
 -- 1. Profiles Table with paid_unlocked, contest_eligible, completed_count
@@ -15,7 +19,7 @@ create table if not exists public.profiles (
   last_active timestamptz default now()
 );
 
--- Ensure columns exist if table was created earlier
+-- Ensure all columns exist on existing profiles table
 alter table public.profiles
   add column if not exists email text,
   add column if not exists is_admin boolean default false,
@@ -140,7 +144,7 @@ create table if not exists public.contests (
 
 alter table public.contests enable row level security;
 
--- 7. Contest Eligibility Table
+-- 7. Contest Eligibility Table (for targeted audiences)
 create table if not exists public.contest_eligibility (
   id bigint generated always as identity primary key,
   contest_id uuid not null references public.contests(id) on delete cascade,
@@ -209,7 +213,7 @@ create table if not exists public.contest_evaluations (
 
 alter table public.contest_evaluations enable row level security;
 
--- 11. Contest Payments Table
+-- 11. Contest Payments Table (for paid contests)
 create table if not exists public.contest_payments (
   id bigint generated always as identity primary key,
   contest_id uuid not null references public.contests(id) on delete cascade,

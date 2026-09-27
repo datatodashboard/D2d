@@ -432,6 +432,8 @@ async function loadDashboardData() {
         email: email || '—',
         displayName,
         isAdmin: p.is_admin === true || email === 'datatodashboard2@gmail.com',
+        paidUnlocked: p.paid_unlocked === true,
+        contestEligible: p.contest_eligible === true || userSolvedCount >= 18,
         solved: userSolvedCount,
         attempted: Math.max(userSolvedCount, userAttemptedCount),
         domainSolved,
@@ -537,10 +539,18 @@ function renderLearnersTable() {
 
   let html = '';
   filtered.forEach((l, idx) => {
-    const isEligible = currentThreshold > 0 && l.solved >= currentThreshold;
+    const isEligible = (currentThreshold > 0 && l.solved >= currentThreshold) || l.contestEligible;
     const pct = Math.min(100, Math.round((l.solved / totalScenariosCount) * 100));
 
     const subText = (l.name && l.email && l.email !== '—') ? l.email : l.id;
+
+    const paidBadge = l.paidUnlocked 
+      ? '<span class="badge verified">✓ Unlocked (₹49)</span>' 
+      : (l.solved >= 5 ? '<span class="badge warn">Paywall (₹49)</span>' : '<span class="badge draft">Free (≤5)</span>');
+
+    const contestBadge = l.contestEligible
+      ? '<span class="badge" style="background:#fef3c7;color:#92400e;font-weight:800;">🏆 Eligible (≥18)</span>'
+      : `<span class="badge draft">${Math.max(0, 18 - l.solved)} to eligible</span>`;
 
     html += `
       <tr class="${isEligible ? 'elig' : ''}">
@@ -549,7 +559,7 @@ function renderLearnersTable() {
           <div class="learner-name">
             ${escapeHtml(l.displayName)}
             ${l.isAdmin ? '<span class="badge admin">Admin</span>' : ''}
-            ${isEligible ? '<span class="badge">Eligible ★</span>' : ''}
+            ${l.contestEligible ? '<span class="badge" style="background:#fef3c7;color:#92400e;">🏆 Eligible</span>' : ''}
           </div>
           <div class="learner-email">${escapeHtml(subText)}</div>
         </td>
@@ -558,6 +568,8 @@ function renderLearnersTable() {
           <div class="bar"><div class="bar-fill" style="width:${pct}%;"></div></div>
         </td>
         <td class="num">${l.attempted}</td>
+        <td>${paidBadge}</td>
+        <td>${contestBadge}</td>
         <td class="domains">${escapeHtml(l.topDomains)}</td>
         <td style="font-size:0.82rem; color:var(--muted);">${formatDate(l.reachedAt)}</td>
         <td style="font-size:0.82rem; color:var(--muted);">${formatDate(l.lastActivity)}</td>
@@ -654,7 +666,7 @@ function formatDate(dt) {
 }
 
 // ============================================================
-// CONTEST MANAGEMENT CONTROLLER
+// CONTEST & PAYMENT MANAGEMENT CONTROLLERS
 // ============================================================
 
 let currentAdminTab = 'learners';
@@ -665,21 +677,258 @@ let allLearnersForAudience = [];
 let selectedAudienceIds = new Set();
 let activeReviewSubmission = null;
 
+// Payments state
+let paymentsData = [];
+let paymentFilterStatus = 'ALL';
+let paymentSearchQuery = '';
+
 // Tab switcher
 export function switchAdminTab(tab) {
   currentAdminTab = tab;
   const isLearners = tab === 'learners';
+  const isPayments = tab === 'payments';
+  const isContests = tab === 'contests';
 
   if ($('learnersTabContent')) $('learnersTabContent').hidden = !isLearners;
-  if ($('contestsTabContent')) $('contestsTabContent').hidden = isLearners;
+  if ($('paymentsTabContent')) $('paymentsTabContent').hidden = !isPayments;
+  if ($('contestsTabContent')) $('contestsTabContent').hidden = !isContests;
 
   if ($('tabLearnersBtn')) $('tabLearnersBtn').classList.toggle('active', isLearners);
-  if ($('tabContestsBtn')) $('tabContestsBtn').classList.toggle('active', !isLearners);
+  if ($('tabPaymentsBtn')) $('tabPaymentsBtn').classList.toggle('active', isPayments);
+  if ($('tabContestsBtn')) $('tabContestsBtn').classList.toggle('active', isContests);
 
   if (tab === 'contests') {
     void loadContests();
+  } else if (tab === 'payments') {
+    void loadPayments();
   }
 }
+
+// ------------------------------------------------------------
+// Payment Verification Controller (Course ₹49 Unlock)
+// ------------------------------------------------------------
+export async function loadPayments() {
+  if (!client) return;
+  const tbody = $('paymentsTableBody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted);">Loading payments from database…</td></tr>';
+
+  try {
+    const { data, error } = await client
+      .from('payments')
+      .select('*')
+      .order('submitted_at', { ascending: false });
+
+    if (error) {
+      if (error.message && error.message.includes('schema cache')) {
+        if (tbody) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="9" style="padding:24px;text-align:center;background:#fffbeb;color:#92400e;">
+                <strong>Payments table not found in Supabase schema cache.</strong><br>
+                Please execute <code>migrations/006_complete_system_schema.sql</code> in your Supabase SQL editor.
+              </td>
+            </tr>
+          `;
+        }
+        return;
+      }
+      throw error;
+    }
+
+    paymentsData = data || [];
+    renderPaymentsStats();
+    renderPaymentsTable();
+  } catch (err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="color:#b91c1c;text-align:center;padding:20px;">Error loading payments: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+export function filterPaymentsTable() {
+  paymentSearchQuery = ($('paymentSearch')?.value || '').toLowerCase().trim();
+  paymentFilterStatus = $('filterPaymentStatusSelect')?.value || 'ALL';
+  renderPaymentsTable();
+}
+
+function renderPaymentsStats() {
+  const total = paymentsData.length;
+  const pending = paymentsData.filter(p => p.status === 'pending').length;
+  const verified = paymentsData.filter(p => p.status === 'verified').length;
+  const rejected = paymentsData.filter(p => p.status === 'rejected').length;
+
+  if ($('statTotalPayments')) $('statTotalPayments').textContent = String(total);
+  if ($('statPendingPayments')) $('statPendingPayments').textContent = String(pending);
+  if ($('statVerifiedPayments')) $('statVerifiedPayments').textContent = String(verified);
+  if ($('statRejectedPayments')) $('statRejectedPayments').textContent = String(rejected);
+
+  const badge = $('pendingPaymentsCountBadge');
+  if (badge) {
+    badge.textContent = String(pending);
+    badge.style.display = pending > 0 ? 'inline-block' : 'none';
+  }
+}
+
+function renderPaymentsTable() {
+  const tbody = $('paymentsTableBody');
+  if (!tbody) return;
+
+  let list = paymentsData;
+  if (paymentFilterStatus && paymentFilterStatus !== 'ALL') {
+    list = list.filter(p => p.status === paymentFilterStatus);
+  }
+  if (paymentSearchQuery) {
+    list = list.filter(p =>
+      (p.user_email || '').toLowerCase().includes(paymentSearchQuery) ||
+      (p.user_id || '').toLowerCase().includes(paymentSearchQuery) ||
+      (p.transaction_reference || '').toLowerCase().includes(paymentSearchQuery)
+    );
+  }
+
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted);">No matching payment records found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map((p, idx) => {
+    const isPending = p.status === 'pending';
+    const isVerified = p.status === 'verified';
+    const statusBadge = isVerified ? 'badge verified' : (isPending ? 'badge pending' : 'badge danger');
+
+    return `
+      <tr>
+        <td class="num">${idx + 1}</td>
+        <td>
+          <div style="font-weight:600;">${escapeHtml(p.user_email ? p.user_email.split('@')[0] : 'Learner')}</div>
+          <div style="font-size:0.75rem;color:var(--muted);">${escapeHtml(p.user_id)}</div>
+        </td>
+        <td>${escapeHtml(p.user_email || '—')}</td>
+        <td style="font-weight:700;">₹${p.amount || 49}</td>
+        <td>
+          <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:0.85rem;">${escapeHtml(p.transaction_reference || '—')}</code>
+        </td>
+        <td style="font-size:0.82rem;color:var(--muted);">${formatDate(p.submitted_at || p.created_at)}</td>
+        <td><span class="${statusBadge}">${(p.status || 'pending').toUpperCase()}</span></td>
+        <td style="font-size:0.8rem;color:var(--muted);">
+          ${isVerified ? `Verified: ${formatDate(p.verified_at)}` : (p.status === 'rejected' ? 'Rejected' : 'Awaiting verification')}
+        </td>
+        <td>
+          <div style="display:flex;gap:6px;">
+            ${isPending ? `
+              <button class="action success sm" onclick="window.verifyLearnerPayment(${p.id}, '${p.user_id}')">✓ Verify</button>
+              <button class="action danger sm" onclick="window.rejectLearnerPayment(${p.id})">✕ Reject</button>
+            ` : (isVerified ? `
+              <span style="color:#16a34a;font-size:0.85rem;font-weight:700;">✓ Active Paid</span>
+            ` : `
+              <button class="action secondary sm" onclick="window.verifyLearnerPayment(${p.id}, '${p.user_id}')">Re-Verify</button>
+            `)}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+export async function verifyLearnerPayment(paymentId, userId) {
+  if (!client) return;
+  const ok = confirm('Verify this ₹49 payment and unlock Questions 6 onward for this learner?');
+  if (!ok) return;
+
+  try {
+    const { error: payErr } = await client
+      .from('payments')
+      .update({
+        status: 'verified',
+        verified_at: new Date().toISOString(),
+        verified_by: currentUser?.id || null
+      })
+      .eq('id', paymentId);
+
+    if (payErr) throw payErr;
+
+    const { error: profErr } = await client
+      .from('profiles')
+      .update({
+        paid_unlocked: true,
+        last_active: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (profErr) console.warn('Profile paid_unlocked update notice:', profErr);
+
+    alert('Payment verified! Question 6 onward is now unlocked for this learner.');
+    await loadPayments();
+    await loadDashboardData();
+  } catch (err) {
+    alert('Verification error: ' + err.message);
+  }
+}
+
+export async function rejectLearnerPayment(paymentId) {
+  if (!client) return;
+  const reason = prompt('Optional reason for rejecting this payment (or leave blank):');
+  if (reason === null) return;
+
+  try {
+    const { error } = await client
+      .from('payments')
+      .update({
+        status: 'rejected',
+        admin_notes: reason || null,
+        verified_at: new Date().toISOString(),
+        verified_by: currentUser?.id || null
+      })
+      .eq('id', paymentId);
+
+    if (error) throw error;
+    alert('Payment marked as rejected.');
+    await loadPayments();
+  } catch (err) {
+    alert('Rejection error: ' + err.message);
+  }
+}
+
+export function copyContestMigrationSql() {
+  const sql = `-- Run this in Supabase SQL Editor:
+-- File: migrations/006_complete_system_schema.sql
+CREATE TABLE IF NOT EXISTS public.contests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text,
+  instructions text,
+  rules text,
+  scenario_text text NOT NULL,
+  scenario_id text,
+  entry_fee numeric NOT NULL DEFAULT 0,
+  currency text NOT NULL DEFAULT 'INR',
+  first_prize text NOT NULL DEFAULT '₹1,000',
+  second_prize text NOT NULL DEFAULT '₹500',
+  third_prize text NOT NULL DEFAULT '₹250',
+  audience_type text NOT NULL DEFAULT 'ALL' CHECK (audience_type in ('ALL', 'SELECTED', 'INVITED')),
+  status text NOT NULL DEFAULT 'DRAFT' CHECK (status in ('DRAFT', 'PUBLISHED', 'PAUSED', 'REGISTRATION_CLOSED', 'CONTEST_CLOSED', 'EVALUATION', 'RESULTS_PUBLISHED', 'ARCHIVED')),
+  start_date timestamptz,
+  end_date timestamptz,
+  results_published_at timestamptz,
+  created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.contests ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Admins have full access to contests" ON public.contests FOR ALL USING (public.is_admin());
+NOTIFY pgrst, 'reload schema';`;
+
+  if (navigator?.clipboard?.writeText) {
+    navigator.clipboard.writeText(sql).then(() => {
+      alert('Migration SQL copied! Run it in the Supabase SQL editor.');
+    }).catch(() => {
+      prompt('Copy this SQL to run in Supabase SQL editor:', sql);
+    });
+  } else {
+    prompt('Copy this SQL to run in Supabase SQL editor:', sql);
+  }
+}
+
+// ------------------------------------------------------------
+// Contest Management Controller
+// ------------------------------------------------------------
 
 // 1. Load all contests
 export async function loadContests() {
@@ -697,7 +946,28 @@ export async function loadContests() {
     contestsData = data || [];
     renderContestsList();
   } catch (err) {
-    if (container) container.innerHTML = `<div class="empty" style="color:#b91c1c;">Error loading contests: ${escapeHtml(err.message)}</div>`;
+    if (container) {
+      if (err.message && err.message.includes('schema cache')) {
+        container.innerHTML = `
+          <div class="panel" style="border: 2px solid #f59e0b; background: #fffbeb; padding: 22px; border-radius: 12px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+              <span style="font-size:1.5rem;">⚙️</span>
+              <h3 style="margin:0;color:#92400e;">Contest Database Schema Setup Required</h3>
+            </div>
+            <p style="color:#78350f;margin:0 0 14px;font-size:0.92rem;line-height:1.6;">
+              The table <code>public.contests</code> was not found in the Supabase schema cache.<br>
+              To enable Contest Management, execute <code>migrations/006_complete_system_schema.sql</code> in your Supabase SQL Editor.
+            </p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+              <button class="action primary sm" onclick="window.copyContestMigrationSql()">📋 Copy Quick Setup SQL</button>
+              <button class="action secondary sm" onclick="window.loadContests()">🔄 Retry Loading</button>
+            </div>
+          </div>
+        `;
+      } else {
+        container.innerHTML = `<div class="empty" style="color:#b91c1c;">Error loading contests: ${escapeHtml(err.message)}</div>`;
+      }
+    }
   }
 }
 
@@ -890,7 +1160,11 @@ export async function saveContestForm() {
     closeEditorModal();
     await loadContests();
   } catch (err) {
-    alert('Error saving contest: ' + err.message);
+    if (err.message && err.message.includes('schema cache')) {
+      alert('The table "public.contests" was not found in the Supabase schema cache.\n\nPlease execute migrations/006_complete_system_schema.sql in your Supabase SQL Editor.');
+    } else {
+      alert('Error saving contest: ' + err.message);
+    }
   }
 }
 
@@ -1517,6 +1791,11 @@ function formatSec(s) {
 // Expose on window for inline handlers
 Object.assign(window, {
   switchAdminTab,
+  loadPayments,
+  filterPaymentsTable,
+  verifyLearnerPayment,
+  rejectLearnerPayment,
+  copyContestMigrationSql,
   loadContests,
   openContestEditor,
   closeEditorModal,

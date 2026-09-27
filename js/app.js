@@ -10,6 +10,7 @@ import {initContest, renderContestCard, closeContestModal} from './contest.js';
 const $ = id => document.getElementById(id);
 let data, scenarios=[], ids=new Set(), state=EMPTY(), current=null, user=null;
 let selectedDomain=null, selectedLevel=null, client=null, deferredPrompt=null, syncTimer=null;
+let isPaidUnlocked = false, userPendingPayment = null;
 let authNotice='';
 let storage;
 try { storage=window.localStorage; } catch { storage={getItem(){return null;},setItem(){throw Error('Storage unavailable');}}; }
@@ -600,11 +601,236 @@ function renderScenario() {
   renderAssessment(e.assessment?evaluateThinking(effective,e.thinking||{}):null);
   updateProgress();updateGates();
 }
+
+function getCompletedCount() {
+  if (!scenarios || !scenarios.length || !state || !state.entries) return 0;
+  return scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+}
+
+async function checkUserAccessStatus(userId) {
+  if (!userId || !client) return;
+
+  try {
+    const { data: profile, error: profErr } = await client
+      .from('profiles')
+      .select('paid_unlocked, contest_eligible, completed_count')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (!profErr && profile) {
+      if (profile.paid_unlocked === true) {
+        isPaidUnlocked = true;
+      }
+    }
+
+    const { data: payments, error: payErr } = await client
+      .from('payments')
+      .select('*')
+      .eq('user_id', userId)
+      .order('submitted_at', { ascending: false })
+      .limit(1);
+
+    if (!payErr && payments && payments.length > 0) {
+      const latestPay = payments[0];
+      if (latestPay.status === 'verified') {
+        isPaidUnlocked = true;
+      } else if (latestPay.status === 'pending') {
+        userPendingPayment = latestPay;
+      }
+    }
+
+    const currentCompleted = getCompletedCount();
+
+    // Persist latest completed count and contest eligibility
+    await client.from('profiles').update({
+      completed_count: currentCompleted,
+      contest_eligible: currentCompleted >= 18,
+      last_active: new Date().toISOString()
+    }).eq('id', userId);
+
+    void initContest(client, user, currentCompleted);
+  } catch (err) {
+    console.warn('checkUserAccessStatus warning:', err);
+  }
+}
+
+async function handleScenarioCompleted(scenarioId) {
+  const completedCount = getCompletedCount();
+
+  if (user && client) {
+    try {
+      // 1. Record completed scenario in public.progress
+      await client.from('progress').upsert({
+        user_id: user.id,
+        scenario_id: scenarioId,
+        completed_at: new Date().toISOString()
+      }, { onConflict: 'user_id,scenario_id' });
+
+      // 2. Update profile completed_count and contest_eligible in public.profiles
+      const isEligible = completedCount >= 18;
+      await client.from('profiles').update({
+        completed_count: completedCount,
+        contest_eligible: isEligible,
+        last_active: new Date().toISOString()
+      }).eq('id', user.id);
+
+      // 3. Update contest module
+      void initContest(client, user, completedCount);
+    } catch (err) {
+      console.warn('handleScenarioCompleted persistence warning:', err);
+    }
+  }
+
+  // 4. If learner has completed 5 challenges and has not paid, trigger paywall
+  if (completedCount >= 5 && !isPaidUnlocked) {
+    openPaywallModal();
+  }
+}
+
+function openPaywallModal() {
+  const modal = $('paywallModal');
+  if (!modal) return;
+  modal.hidden = false;
+
+  const notice = $('paywallNotice');
+  const btn = $('submitPaymentBtn');
+  const input = $('paywallTxnRef');
+
+  if (isPaidUnlocked) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#dcfce7';
+      notice.style.color = '#15803d';
+      notice.innerHTML = '<strong>Access Unlocked!</strong> You have full lifetime access to all 420 challenges.';
+    }
+    if (btn) btn.style.display = 'none';
+    if (input) input.style.display = 'none';
+    return;
+  }
+
+  if (userPendingPayment && userPendingPayment.status === 'pending') {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fef3c7';
+      notice.style.color = '#92400e';
+      notice.innerHTML = `<strong>Payment Submitted for Verification</strong><br>Reference ID: <code>${escapeHtml(userPendingPayment.transaction_reference || '')}</code><br>Status: <strong>Pending Admin Verification</strong>.<br>Question 6 onward will unlock immediately once verified.`;
+    }
+    if (btn) {
+      btn.style.display = 'block';
+      btn.textContent = 'Submitted (Pending Admin Verification)';
+    }
+  } else {
+    if (notice) notice.style.display = 'none';
+    if (btn) {
+      btn.style.display = 'block';
+      btn.textContent = 'Submit Payment for Verification';
+    }
+    if (input) input.style.display = 'block';
+  }
+}
+
+function closePaywallModal() {
+  const modal = $('paywallModal');
+  if (modal) modal.hidden = true;
+}
+
+function copyUpiId() {
+  const upiId = $('paywallUpiId')?.textContent.trim() || 'ramgokul1987@axisbank';
+  if (navigator?.clipboard?.writeText) {
+    navigator.clipboard.writeText(upiId).then(() => {
+      const btn = $('copyUpiBtn');
+      if (btn) {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '✓ Copied!';
+        setTimeout(() => { if (btn) btn.innerHTML = orig; }, 2000);
+      }
+    }).catch(() => {
+      prompt('Copy UPI ID:', upiId);
+    });
+  } else {
+    prompt('Copy UPI ID:', upiId);
+  }
+}
+
+async function submitCoursePayment() {
+  const txnRef = $('paywallTxnRef')?.value.trim();
+  const notice = $('paywallNotice');
+  const btn = $('submitPaymentBtn');
+
+  if (!user) {
+    alert('Please sign in to submit payment.');
+    return;
+  }
+  if (!txnRef) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fee2e2';
+      notice.style.color = '#991b1b';
+      notice.textContent = 'Please enter your UPI transaction / reference number.';
+    }
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Submitting…';
+
+  try {
+    const { data: newPay, error } = await client.from('payments').insert({
+      user_id: user.id,
+      user_email: user.email,
+      amount: 49,
+      currency: 'INR',
+      payment_method: 'UPI',
+      upi_id: 'ramgokul1987@axisbank',
+      transaction_reference: txnRef,
+      status: 'pending',
+      submitted_at: new Date().toISOString()
+    }).select('*').single();
+
+    if (error) throw error;
+
+    userPendingPayment = newPay || { status: 'pending', transaction_reference: txnRef };
+
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fef3c7';
+      notice.style.color = '#92400e';
+      notice.innerHTML = `<strong>Payment Submitted for Verification!</strong><br>Your reference <code>${escapeHtml(txnRef)}</code> has been recorded.<br>Status: <strong>Pending Admin Verification</strong>.<br>Note: Clicking Pay does not grant access automatically. As soon as admin verifies your payment, Question 6 onward will immediately become available.`;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Submitted (Pending Verification)';
+  } catch (err) {
+    console.error('Payment submission error:', err);
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fee2e2';
+      notice.style.color = '#991b1b';
+      notice.textContent = 'Error recording payment: ' + (err.message || 'Please check your connection and retry.');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Submit Payment for Verification';
+  }
+}
+
 function loadScenario() {
   if(!selectedDomain||!selectedLevel) return;
   const pool=scenarios.filter(s=>s.domain===selectedDomain&&s.level===selectedLevel);
-  current=chooseNext(pool,state,null)||pool[0];
-  if(current) renderScenario();
+  const next=chooseNext(pool,state,null)||pool[0];
+  if(next) {
+    const isTargetCompleted = isCompleted(next, state.entries[next.id]);
+    const completedCount = getCompletedCount();
+    if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked) {
+      const completedCandidate = pool.find(s => isCompleted(s, state.entries[s.id])) || scenarios.find(s => isCompleted(s, state.entries[s.id]));
+      if (completedCandidate) {
+        current = completedCandidate;
+        renderScenario();
+      }
+      openPaywallModal();
+      return;
+    }
+    current=next;
+    renderScenario();
+  }
 }
 function selectDomain(domain,el) {
   selectedDomain=domain;
@@ -638,6 +864,12 @@ function evaluatePlan() {
   }, true);
   renderAssessment(assessment);
   updateGates();
+
+  // Handle completion tracking and paywall/eligibility gates
+  if (completed) {
+    void handleScenarioCompleted(current.id);
+  }
+
   if (completed && $('nextButton')) {
     $('nextButton').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -648,6 +880,14 @@ function nextScenario() {
   if (!current || thinkingScore < 7) {
     return;
   }
+
+  // Paywall check: After Question 5 completed, do not unlock Question 6 for unpaid learner
+  const completedCount = getCompletedCount();
+  if (completedCount >= 5 && !isPaidUnlocked) {
+    openPaywallModal();
+    return;
+  }
+
   const pool=scenarios.filter(s=>s.domain===selectedDomain&&s.level===selectedLevel);
   if (!pool.length) return;
   const currentIndex = pool.findIndex(s=>s.id===current.id);
@@ -701,7 +941,7 @@ function showScreen(name) {
   } else if (name === 'home') {
     renderScenarioCatalog();
     if (user && client) {
-      renderContestCard();
+      void initContest(client, user, getCompletedCount());
     }
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -710,6 +950,14 @@ function goHome() { showScreen('home'); }
 function openScenario(id) {
   const target = scenarios.find(s => s.id === id);
   if (!target) return;
+
+  const isTargetCompleted = isCompleted(target, state.entries[target.id]);
+  const completedCount = getCompletedCount();
+  if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked) {
+    openPaywallModal();
+    return;
+  }
+
   current = target;
   selectedDomain = target.domain;
   selectedLevel = target.level;
@@ -1008,9 +1256,14 @@ function renderScenarioCatalog() {
     const completed = isCompleted(s, e);
     const attempted = isAttempted(s, e);
     const isCurrent = current && current.id === s.id;
+    const totalCompleted = getCompletedCount();
+    const isLocked = !completed && totalCompleted >= 5 && !isPaidUnlocked;
     let badgeClass = 'status-pill not-started';
     let badgeText = 'Not started';
-    if (completed) {
+    if (isLocked) {
+      badgeClass = 'status-pill warn';
+      badgeText = '🔒 Unlock (₹49)';
+    } else if (completed) {
       badgeClass = 'status-pill verified';
       badgeText = '✓ Completed';
     } else if (attempted) {
@@ -1396,16 +1649,21 @@ async function setSession(session) {
       renderAuth();
       // Load user's existing progress from Supabase, restore, and update Progress page
       await loadAndRestoreUserProgress(user.id);
+      await checkUserAccessStatus(user.id);
       void checkAdminStatus();
     } else {
       renderAuth();
+      await checkUserAccessStatus(user.id);
       void checkAdminStatus();
     }
     showScreen('home');
-    void initContest(client, user);
+    void initContest(client, user, getCompletedCount());
   } else {
     // Signed out: reset in-memory active state and return to login gate
     isCurrentUserAdmin = false;
+    isPaidUnlocked = false;
+    userPendingPayment = null;
+    closePaywallModal();
     updateAdminPortalVisibility();
     if ($('loginScreen')) $('loginScreen').hidden = false;
     if ($('appMain')) $('appMain').hidden = true;
@@ -1419,7 +1677,7 @@ async function setSession(session) {
     state = EMPTY();
     current = null;
     renderAuth();
-    void initContest(null, null);
+    void initContest(null, null, 0);
   }
 }
 async function signInWithGoogle() {

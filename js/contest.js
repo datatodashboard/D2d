@@ -27,7 +27,7 @@ export function getContestState() {
 }
 
 // Initialize Contest on login or refresh
-export async function initContest(client, user) {
+export async function initContest(client, user, completedCount = 0) {
   activeClient = client;
   activeUser = user;
 
@@ -39,8 +39,26 @@ export async function initContest(client, user) {
     return;
   }
 
+  // 1. Enforce Requirement 4: Learner is eligible ONLY after completing 18 questions
+  if (completedCount < 18) {
+    currentContest = null;
+    hideContestCard();
+    return;
+  }
+
+  // Learner has completed >= 18 questions: Persist contest_eligible in database
   try {
-    // 1. Fetch any published or active contest
+    await client.from('profiles').update({
+      contest_eligible: true,
+      completed_count: completedCount,
+      last_active: new Date().toISOString()
+    }).eq('id', user.id);
+  } catch (profErr) {
+    console.warn('Profile contest_eligible update notice:', profErr);
+  }
+
+  try {
+    // 2. Fetch admin published/enabled contest
     const { data: contests, error: contestErr } = await client
       .from('contests')
       .select('*')
@@ -50,13 +68,20 @@ export async function initContest(client, user) {
 
     if (contestErr || !contests || contests.length === 0) {
       currentContest = null;
-      hideContestCard();
+      renderContestWaitingCard();
       return;
     }
 
     const contest = contests[0];
 
-    // 2. Check audience eligibility
+    // If contest is not published/enabled for participation, and no attempt has been started:
+    if (contest.status !== 'PUBLISHED' && contest.status !== 'RESULTS_PUBLISHED') {
+      currentContest = null;
+      renderContestWaitingCard();
+      return;
+    }
+
+    // 3. Check audience eligibility
     if (contest.audience_type !== 'ALL') {
       const { data: elig, error: eligErr } = await client
         .from('contest_eligibility')
@@ -66,28 +91,28 @@ export async function initContest(client, user) {
         .maybeSingle();
 
       if (eligErr || !elig) {
-        // User not eligible — contest must remain 100% invisible
+        // Not in targeted audience
         currentContest = null;
-        hideContestCard();
+        renderContestWaitingCard();
         return;
       }
     }
 
     currentContest = contest;
 
-    // 3. Load user's contest registration, payment, attempt
+    // 4. Load user's contest registration, payment, attempt
     await refreshUserContestRecords();
 
-    // 4. Render glowing contest invitation card in the user portal
+    // 5. Render official contest invitation card
     renderContestCard();
 
-    // 5. If user was in the middle of an attempt (IN_PROGRESS), automatically restore contest modal
+    // 6. If user was in the middle of an attempt (IN_PROGRESS), automatically restore contest modal
     if (currentAttempt && currentAttempt.status === 'IN_PROGRESS') {
       openContestModal('active');
     }
   } catch (err) {
     console.warn('[Contest] Initialization check notice:', err);
-    hideContestCard();
+    renderContestWaitingCard();
   }
 }
 
@@ -114,6 +139,39 @@ export function hideContestCard() {
   if (card) card.style.display = 'none';
 }
 
+export function renderContestWaitingCard() {
+  let wrapper = $('contestCardWrapper');
+  if (!wrapper) {
+    wrapper = document.createElement('div');
+    wrapper.id = 'contestCardWrapper';
+    const home = $('home');
+    const progressCard = document.querySelector('.progress-card');
+    if (home && progressCard) {
+      home.insertBefore(wrapper, progressCard);
+    } else if (home) {
+      home.prepend(wrapper);
+    }
+  }
+
+  wrapper.style.display = 'block';
+  wrapper.innerHTML = `
+    <div class="contest-invitation-card" style="border: 1px solid #bae6fd; background: linear-gradient(135deg, #f0fdf4 0%, #f8fafc 100%);">
+      <div class="contest-card-header">
+        <div class="contest-tag" style="background:#dcfce7;color:#15803d;padding:4px 10px;border-radius:999px;font-weight:800;font-size:0.8rem;">
+          <span>🏆 Contest Eligible</span>
+        </div>
+        <div class="contest-fee-badge" style="background:#e0f2fe;color:#0284c7;font-weight:700;">18+ Solved</div>
+      </div>
+      <h3 class="contest-card-title" style="font-size:1.05rem;margin-top:8px;line-height:1.4;">
+        Congratulations! You have completed 18 SQL thinking challenges and are now eligible for Think and Crack SQL contests.
+      </h3>
+      <p style="font-size:0.88rem;color:var(--muted);margin:8px 0 0;line-height:1.5;">
+        You're contest eligible. The next contest will appear here when it is announced.
+      </p>
+    </div>
+  `;
+}
+
 export function renderContestCard() {
   if (!currentContest) {
     hideContestCard();
@@ -136,13 +194,13 @@ export function renderContestCard() {
 
   wrapper.style.display = 'block';
 
-  let btnLabel = 'JOIN THE CONTEST';
+  let btnLabel = 'Join Contest';
   let btnIcon = '🚀';
-  let badgeText = 'NEW';
+  let badgeText = '🏆 Contest Eligible';
   let badgeClass = 'contest-badge-live';
 
   if (currentAttempt?.status === 'SUBMITTED') {
-    btnLabel = currentContest.status === 'RESULTS_PUBLISHED' ? 'VIEW RESULTS & RANK 🏆' : 'VIEW SUBMISSION DETAILS';
+    btnLabel = currentContest.status === 'RESULTS_PUBLISHED' ? 'VIEW RESULTS & RANK 🏆' : 'VIEW OFFICIAL SUBMISSION';
     btnIcon = '📋';
     badgeText = 'SUBMITTED';
     badgeClass = 'contest-badge-submitted';
@@ -152,12 +210,12 @@ export function renderContestCard() {
     badgeText = 'IN PROGRESS';
     badgeClass = 'contest-badge-progress';
   } else if (currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
-    btnLabel = 'ENTER CHALLENGE ROOM';
+    btnLabel = 'Join Contest';
     btnIcon = '🚪';
     badgeText = 'READY';
     badgeClass = 'contest-badge-ready';
   } else if (currentRegistration) {
-    btnLabel = 'COMPLETE PAYMENT & JOIN';
+    btnLabel = 'Join Contest';
     btnIcon = '💳';
     badgeText = 'PAYMENT PENDING';
     badgeClass = 'contest-badge-pending';
@@ -166,17 +224,22 @@ export function renderContestCard() {
   const feeDisplay = Number(currentContest.entry_fee) > 0 ? `₹${currentContest.entry_fee}` : 'FREE ENTRY';
 
   wrapper.innerHTML = `
-    <div class="contest-invitation-card">
+    <div class="contest-invitation-card" style="border: 2px solid #2563eb; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);">
       <div class="contest-card-glow"></div>
       <div class="contest-card-header">
-        <div class="contest-tag">
+        <div class="contest-tag" style="background:#dcfce7;color:#15803d;padding:4px 10px;border-radius:999px;font-weight:800;font-size:0.8rem;">
           <span class="pulse-dot"></span>
-          <span>🏆 OFFICIAL CONTEST</span>
-          <span class="${badgeClass}">${badgeText}</span>
+          <span>🏆 Contest Eligible</span>
+          <span class="${badgeClass}" style="margin-left:6px;">${badgeText}</span>
         </div>
         <div class="contest-fee-badge">${feeDisplay}</div>
       </div>
-      <h3 class="contest-card-title">${escapeHtml(currentContest.title)}</h3>
+
+      <div style="font-size:0.88rem;font-weight:700;color:#1e40af;margin-top:8px;line-height:1.4;">
+        Congratulations! You have completed 18 SQL thinking challenges and are now eligible for Think and Crack SQL contests.
+      </div>
+
+      <h3 class="contest-card-title" style="margin-top:6px;">${escapeHtml(currentContest.title)}</h3>
       <p class="contest-card-tagline">Think beyond syntax. Solve with logic.</p>
       
       <div class="contest-card-prizes">
@@ -619,6 +682,13 @@ function attachModalListeners(stage) {
   if (stage === 'ready') {
     const btn = $('btnBeginContest');
     btn?.addEventListener('click', async () => {
+      // Enforce ONE attempt rule
+      if (currentAttempt && currentAttempt.status === 'SUBMITTED') {
+        alert('You have already completed your official attempt for this contest. Only one attempt is permitted.');
+        openContestModal('submitted');
+        return;
+      }
+
       const confirmed = confirm('Are you ready to start? Your official timer will start now and cannot be paused or reset.');
       if (!confirmed) return;
 

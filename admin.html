@@ -36,7 +36,7 @@ h1{font-size:1.4rem;margin:0;}
 .tab-btn.active{color:var(--primary);border-bottom-color:var(--primary);}
 
 #gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:40px 24px;text-align:center;color:var(--muted);}
-#dashboard[hidden],#gate[hidden],#contestsTabContent[hidden],#learnersTabContent[hidden]{display:none;}
+#dashboard[hidden],#gate[hidden],#contestsTabContent[hidden],#paymentsTabContent[hidden],#learnersTabContent[hidden]{display:none;}
 
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;}
@@ -119,6 +119,7 @@ textarea.form-control{min-height:90px;font-family:inherit;}
     <!-- Top Navigation Tabs -->
     <nav class="admin-tab-nav">
       <button id="tabLearnersBtn" class="tab-btn active" onclick="window.switchAdminTab('learners')">📊 Learner Directory &amp; Progress</button>
+      <button id="tabPaymentsBtn" class="tab-btn" onclick="window.switchAdminTab('payments')">💳 Payment Verification <span id="pendingPaymentsCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
       <button id="tabContestsBtn" class="tab-btn" onclick="window.switchAdminTab('contests')">🏆 Contest Management</button>
     </nav>
 
@@ -135,13 +136,13 @@ textarea.form-control{min-height:90px;font-family:inherit;}
         <div class="controls">
           <input type="text" id="search" placeholder="Search by name or email…" />
           <label>Contest threshold: solved
-            <input type="number" id="threshold" min="0" placeholder="e.g. 50" style="width:80px" />
+            <input type="number" id="threshold" min="0" placeholder="e.g. 18" style="width:80px" />
             scenarios
           </label>
           <button class="action primary" id="refreshBtn">Refresh</button>
           <button class="action" id="exportBtn" style="background:var(--soft);color:var(--primary);">Export CSV</button>
         </div>
-        <div id="threshLabel" style="font-size:0.85rem;color:var(--muted);margin-top:8px;">Set a scenario count to mark contest-eligible learners.</div>
+        <div id="threshLabel" style="font-size:0.85rem;color:var(--muted);margin-top:8px;">Threshold for contest eligibility is 18 completed challenges.</div>
         <div id="status" style="font-size:0.8rem;color:var(--muted);margin-top:8px;"></div>
       </div>
 
@@ -153,12 +154,67 @@ textarea.form-control{min-height:90px;font-family:inherit;}
               <th data-sort="email">Learner</th>
               <th class="num" data-sort="solved">Solved / Progress</th>
               <th class="num" data-sort="attempted">Attempted</th>
+              <th>Course Access (₹49)</th>
+              <th>Contest Eligibility</th>
               <th>Top domains</th>
               <th data-sort="reachedAt">Reached threshold</th>
               <th data-sort="lastActivity">Last active</th>
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab 2: Payment Verification Section -->
+    <div id="paymentsTabContent" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <h2 style="margin:0;font-size:1.25rem;">💳 ₹49 Full Course Unlock — Payment Verification</h2>
+          <div style="color:var(--muted);font-size:0.85rem;">Review learner UPI submissions. Verifying unlocks Questions 6 onward immediately.</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="action secondary" onclick="window.loadPayments()">Refresh Payments 🔄</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="num" id="statTotalPayments">0</div><div class="label">Total Payments</div></div>
+        <div class="stat"><div class="num" id="statPendingPayments" style="color:var(--warn);">0</div><div class="label">Pending Verification</div></div>
+        <div class="stat"><div class="num" id="statVerifiedPayments" style="color:var(--good);">0</div><div class="label">Verified (Unlocked)</div></div>
+        <div class="stat"><div class="num" id="statRejectedPayments" style="color:#b91c1c;">0</div><div class="label">Rejected</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="controls">
+          <input type="text" id="paymentSearch" placeholder="Search learner email, ID, or reference…" oninput="window.filterPaymentsTable()" />
+          <select id="filterPaymentStatusSelect" onchange="window.filterPaymentsTable()">
+            <option value="ALL">Status: All</option>
+            <option value="pending" selected>Pending Verification</option>
+            <option value="verified">Verified</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="num">#</th>
+              <th>Learner</th>
+              <th>Email</th>
+              <th>Amount</th>
+              <th>Transaction / Reference</th>
+              <th>Submitted Date</th>
+              <th>Status</th>
+              <th>Verified Details</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="paymentsTableBody">
+            <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted);">Loading payments…</td></tr>
+          </tbody>
         </table>
       </div>
     </div>
