@@ -1,5 +1,5 @@
 import {evaluateThinking, thinkingIsReady, thinkingText} from './thinking.js';
-import {EMPTY, readProgress, saveProgress, mergeProgress, nextTimestamp, workFingerprint, stage, isCompleted, isAttempted, chooseNext, importLegacy, storageKey} from './progress.js';
+import {EMPTY, readProgress, saveProgress, mergeProgress, sanitize, nextTimestamp, workFingerprint, stage, isCompleted, isAttempted, chooseNext, importLegacy, storageKey} from './progress.js';
 import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
 import {renderSchemaCards} from './schema.js';
@@ -1317,16 +1317,16 @@ function renderAuth() {
 async function loadAndRestoreUserProgress(userId) {
   if (!userId) return;
 
-  // 1. Read existing local progress for this user from localStorage
-  const local = readProgress(storage, userId, ids);
-  const localHasEntries = local && Object.keys(local.entries).length > 0;
-  if (localHasEntries) {
-    state = local;
-    updateProgress();
-    if (current) renderScenario();
-  }
+  console.log('[D2D Progress] User authenticated:', userId);
 
-  // 2. Load the user's existing progress from Supabase
+  // 1. Isolate in-memory state for this authenticated user (never reuse guest or previous user data)
+  const localCached = readProgress(storage, userId, ids);
+  const localHasEntries = localCached && Object.keys(localCached.entries).length > 0;
+  let workingState = localHasEntries ? localCached : EMPTY();
+
+  console.log('[D2D Progress] Loading cloud progress');
+
+  // 2. Fetch that user's learning_progress record from Supabase
   if (client) {
     try {
       const { data: row, error } = await client
@@ -1335,33 +1335,41 @@ async function loadAndRestoreUserProgress(userId) {
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (!error && row && row.state) {
+      if (error) {
+        console.error('[D2D Progress] Supabase load error:', error.message || error);
+      } else if (row && row.state) {
+        console.log('[D2D Progress] Cloud progress found');
+        // 3. Sanitize cloud state
         const cloudState = sanitize(row.state, ids);
         const cloudHasEntries = cloudState && Object.keys(cloudState.entries).length > 0;
         if (cloudHasEntries) {
-          // Merge safely: preserves all completed (score >= 7) and in-progress attempts
-          state = mergeProgress(state, cloudState, ids);
-          saveProgress(storage, userId, state);
-          updateProgress();
-          if (current) renderScenario();
+          // 4. Merge cloud and local progress safely (preserves score >= 7 completions)
+          workingState = mergeProgress(workingState, cloudState, ids);
         }
+      } else {
+        console.log('[D2D Progress] No existing cloud progress found for user');
       }
     } catch (err) {
-      console.warn('Error loading cloud progress from Supabase on login:', err);
+      console.error('[D2D Progress] Exception loading cloud progress from Supabase:', err);
     }
   }
 
-  // 3. Only initialize empty state for a genuinely new user who has neither local nor cloud progress
-  if (!localHasEntries && Object.keys(state.entries).length === 0) {
-    state = EMPTY();
-  }
+  // 5. Save merged local cache under this user's storageKey
+  saveProgress(storage, userId, workingState);
 
+  // 6. Update in-memory state
+  state = workingState;
+
+  const restoredCompleted = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+  console.log('[D2D Progress] Restored completed questions:', restoredCompleted);
+
+  // 7. Update progress UI & render scenarios
   renderAuth();
   updateProgress();
   renderScenarioCatalog();
   if (current) renderScenario();
 
-  // 4. Trigger cloud sync only if there are entries to sync
+  // 8. If there are local entries to synchronize, trigger cloud sync
   if (Object.keys(state.entries).length > 0) {
     cloud.request();
   }

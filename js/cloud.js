@@ -40,6 +40,7 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
           continue;
         }
 
+        console.log('[D2D Progress] Saving progress to cloud');
         onStatus('Syncing…');
         let mergedData = null;
 
@@ -52,12 +53,13 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
             });
             if (!error && data) {
               mergedData = data;
+              console.log('[D2D Progress] Cloud save successful (via RPC)');
             } else if (error) {
-              console.warn('merge_learning_progress RPC notice:', error.message || error);
+              console.warn('[D2D Progress] merge_learning_progress RPC notice:', error.message || error);
             }
           }
         } catch (rpcErr) {
-          console.warn('merge_learning_progress RPC exception:', rpcErr);
+          console.warn('[D2D Progress] merge_learning_progress RPC exception:', rpcErr);
         }
 
         // 2. Direct table fallback if RPC did not return data
@@ -88,12 +90,15 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
 
               if (!upsertErr) {
                 mergedData = mergedState;
+                console.log('[D2D Progress] Cloud save successful');
               } else {
-                console.warn('Direct learning_progress upsert notice:', upsertErr);
+                console.error('[D2D Progress] Direct learning_progress upsert error:', upsertErr.message || upsertErr);
               }
+            } else {
+              console.error('[D2D Progress] Error fetching current cloud progress before upsert:', fetchErr.message || fetchErr);
             }
           } catch (tableErr) {
-            console.warn('learning_progress table fallback notice:', tableErr);
+            console.error('[D2D Progress] learning_progress table fallback exception:', tableErr);
           }
         }
 

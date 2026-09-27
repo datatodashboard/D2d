@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
-import { isCompleted, isAttempted, sanitize, EMPTY, chooseNext, mergeProgress } from '../js/progress.js';
+import { isCompleted, isAttempted, sanitize, EMPTY, chooseNext, mergeProgress, readProgress, saveProgress } from '../js/progress.js';
 
 const data = JSON.parse(fs.readFileSync('./data/scenarios.json', 'utf8'));
 const scenarios = data.scenarios;
@@ -457,5 +457,146 @@ describe('Thinking Score Completion & Progress Logic', () => {
     assert.strictEqual(finalCompCount, 1, 'Final completed count is 1 (NOT zero)');
     assert.strictEqual(finalInProgCount, 2, 'Final in-progress count is 2');
     assert.strictEqual(finalTotal, 3, 'Final total attempted is 3 (NOT zero)');
+  });
+
+  it('User A completes Q1, Q2, Q3 -> saves -> logout -> User A logs in -> restores 3 -> completes Q4 -> saves (4 completed) -> logout/login -> 4 completed; User B never inherits User A state', () => {
+    const memoryStorage = (() => {
+      const store = new Map();
+      return {
+        getItem: k => store.get(k) || null,
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: k => store.delete(k)
+      };
+    })();
+
+    const remoteDatabase = new Map(); // user_id -> { user_id, state }
+
+    const userA_id = 'user-a-uuid-1111';
+    const userB_id = 'user-b-uuid-2222';
+    const q1 = scenarios[0];
+    const q2 = scenarios[1];
+    const q3 = scenarios[2];
+    const q4 = scenarios[3];
+
+    // --- SESSION 1: User A logs in ---
+    let activeUser = { id: userA_id };
+    let localCached = readProgress(memoryStorage, activeUser.id, ids);
+    let state = (localCached && Object.keys(localCached.entries).length > 0) ? localCached : EMPTY();
+    assert.strictEqual(Object.keys(state.entries).length, 0, 'New User A starts with 0 entries');
+
+    // User A completes Q1 (score 8/10 >= 7)
+    state.entries[q1.id] = {
+      thinking: { response: 'Q1 logic' },
+      assessment: { score: 8, ready: true },
+      completed: true,
+      status: 'completed',
+      attempts: 1,
+      updatedAt: 100
+    };
+    // User A completes Q2 (score 9/10 >= 7)
+    state.entries[q2.id] = {
+      thinking: { response: 'Q2 logic' },
+      assessment: { score: 9, ready: true },
+      completed: true,
+      status: 'completed',
+      attempts: 1,
+      updatedAt: 200
+    };
+    // User A completes Q3 (score 7/10 >= 7)
+    state.entries[q3.id] = {
+      thinking: { response: 'Q3 logic' },
+      assessment: { score: 7, ready: true },
+      completed: true,
+      status: 'completed',
+      attempts: 1,
+      updatedAt: 300
+    };
+
+    // Save locally and sync to cloud
+    saveProgress(memoryStorage, activeUser.id, state);
+    remoteDatabase.set(activeUser.id, {
+      user_id: activeUser.id,
+      state: sanitize(JSON.parse(JSON.stringify(state)), ids)
+    });
+
+    let completedCount = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    assert.strictEqual(completedCount, 3, 'User A has 3 completed questions in Session 1');
+
+    // --- LOGOUT USER A ---
+    saveProgress(memoryStorage, activeUser.id, state);
+    activeUser = null;
+    state = EMPTY();
+    assert.strictEqual(Object.keys(state.entries).length, 0, 'In-memory state reset on logout');
+
+    // --- SESSION 2: User A logs in again ---
+    activeUser = { id: userA_id };
+    localCached = readProgress(memoryStorage, activeUser.id, ids);
+    state = (localCached && Object.keys(localCached.entries).length > 0) ? localCached : EMPTY();
+
+    // Fetch cloud progress from Supabase
+    const cloudRecord = remoteDatabase.get(activeUser.id);
+    assert.ok(cloudRecord, 'Cloud record found for User A');
+    const cloudState = sanitize(cloudRecord.state, ids);
+    state = mergeProgress(state, cloudState, ids);
+    saveProgress(memoryStorage, activeUser.id, state);
+
+    // Verify User A restored completed questions: 3
+    completedCount = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    assert.strictEqual(completedCount, 3, 'User A restored 3 completed questions');
+    assert.strictEqual(isCompleted(q1, state.entries[q1.id]), true, 'Q1 remains completed');
+    assert.strictEqual(isCompleted(q2, state.entries[q2.id]), true, 'Q2 remains completed');
+    assert.strictEqual(isCompleted(q3, state.entries[q3.id]), true, 'Q3 remains completed');
+
+    // Verify next scenario selection picks Q4 (uncompleted)
+    const pool = [q1, q2, q3, q4];
+    const nextPick = chooseNext(pool, state, null);
+    assert.strictEqual(nextPick?.id, q4.id, 'Next scenario correctly selects Q4 because Q1..Q3 are completed');
+
+    // User A completes Q4 (score 10/10 >= 7)
+    state.entries[q4.id] = {
+      thinking: { response: 'Q4 logic' },
+      assessment: { score: 10, ready: true },
+      completed: true,
+      status: 'completed',
+      attempts: 1,
+      updatedAt: 400
+    };
+    saveProgress(memoryStorage, activeUser.id, state);
+    remoteDatabase.set(activeUser.id, {
+      user_id: activeUser.id,
+      state: sanitize(JSON.parse(JSON.stringify(state)), ids)
+    });
+
+    completedCount = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    assert.strictEqual(completedCount, 4, 'User A now has 4 completed questions');
+
+    // --- LOGOUT USER A AGAIN ---
+    activeUser = null;
+    state = EMPTY();
+
+    // --- SESSION 3: User A logs in from another device (local storage empty) ---
+    activeUser = { id: userA_id };
+    localCached = EMPTY(); // New device
+    const cloudRecordDevice2 = remoteDatabase.get(activeUser.id);
+    const cloudStateDevice2 = sanitize(cloudRecordDevice2.state, ids);
+    state = mergeProgress(localCached, cloudStateDevice2, ids);
+    completedCount = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    assert.strictEqual(completedCount, 4, 'User A on new device restores all 4 completed questions directly from cloud');
+
+    // --- LOGOUT USER A ---
+    activeUser = null;
+    state = EMPTY();
+
+    // --- USER B LOGS IN ---
+    activeUser = { id: userB_id };
+    localCached = readProgress(memoryStorage, activeUser.id, ids);
+    state = (localCached && Object.keys(localCached.entries).length > 0) ? localCached : EMPTY();
+    const cloudRecordB = remoteDatabase.get(activeUser.id);
+    if (cloudRecordB) {
+      state = mergeProgress(state, sanitize(cloudRecordB.state, ids), ids);
+    }
+    const userBCompleted = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    assert.strictEqual(userBCompleted, 0, 'User B starts with 0 completed questions and never inherits User A state');
+    assert.strictEqual(state.entries[q1.id], undefined, 'User B does not have User A Q1');
   });
 });
