@@ -6,7 +6,7 @@ export function sanitize(value, ids) {
   if (!value || value.version !== 2 || typeof value.entries !== 'object' || !value.entries || Array.isArray(value.entries)) return result;
   result.resetAt = Number.isFinite(value.resetAt) ? Math.max(0,value.resetAt) : 0;
   for (const [id,entry] of Object.entries(value.entries)) {
-    if (!ids.has(id) || !entry || typeof entry !== 'object' || !Number.isFinite(entry.updatedAt) || entry.updatedAt <= result.resetAt) continue;
+    if ((ids && ids.size > 0 && !ids.has(id)) || !entry || typeof entry !== 'object' || !Number.isFinite(entry.updatedAt) || entry.updatedAt <= result.resetAt) continue;
     const thinking = {response:String(entry.thinking?.response||'').slice(0,8000)};
     // Keep earlier four-box answers readable after upgrading to the single-box UI.
     for(const k of ['goal','sources','steps','check'])thinking[k]=String(entry.thinking?.[k]||'').slice(0,4000);
@@ -69,9 +69,23 @@ export function saveProgress(storage,userId,state) {
 export function mergeProgress(a,b,ids) {
   a=sanitize(a,ids); b=sanitize(b,ids);
   const result=EMPTY(); result.resetAt=Math.max(a.resetAt,b.resetAt);
-  for(const id of ids) {
+  const allIds = new Set([...(ids || []), ...Object.keys(a.entries), ...Object.keys(b.entries)]);
+  for(const id of allIds) {
+    if (ids && ids.size > 0 && !ids.has(id)) continue;
     const x=a.entries[id],y=b.entries[id];
-    const e=!x?y:!y?x:x.updatedAt>y.updatedAt?x:y;
+    let e = !x ? y : !y ? x : null;
+    if (x && y) {
+      // Preserve completed status (Score >= 7) so an uncompleted draft does not overwrite completion
+      const xComp = isCompleted(null, x);
+      const yComp = isCompleted(null, y);
+      if (xComp && !yComp) {
+        e = x;
+      } else if (yComp && !xComp) {
+        e = y;
+      } else {
+        e = x.updatedAt > y.updatedAt ? x : y;
+      }
+    }
     if(e && e.updatedAt>result.resetAt) result.entries[id]=e;
   }
   return result;

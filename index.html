@@ -2029,7 +2029,12 @@ body.landscape-layout .practice-container {
     <div style="display:flex;align-items:center;gap:10px;">
       <button class="linkbtn" onclick="goHome()">← Change</button>
     </div>
-    <div class="meta" id="meta"></div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div class="meta" id="meta"></div>
+      <button class="profile-avatar-btn" onclick="openProfileModal()" aria-haspopup="true" title="User Profile">
+        <span class="profile-avatar-content">👤</span>
+      </button>
+    </div>
   </div>
 
   <div class="practice-container">
@@ -2108,11 +2113,14 @@ body.landscape-layout .practice-container {
 <!-- Dedicated Progress Screen -->
 <section id="progressScreen" class="screen">
   <div class="progress-container">
-    <div class="header" style="justify-content: center; text-align: center; margin-bottom: 22px;">
-      <div>
+    <div class="header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px;">
+      <div style="text-align: left;">
         <h1 style="margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.4px;">Progress</h1>
         <div class="sub" id="progressTrackSubtitle">4 Core Domains Track</div>
       </div>
+      <button class="profile-avatar-btn" onclick="openProfileModal()" aria-haspopup="true" title="User Profile">
+        <span class="profile-avatar-content">👤</span>
+      </button>
     </div>
 
     <!-- 4 Core Metric Items -->
@@ -2168,6 +2176,10 @@ body.landscape-layout .practice-container {
   <button class="nav-item" id="navProgress" onclick="showScreen('progress')">
     <span class="nav-icon">📊</span>
     <span class="nav-label">Progress</span>
+  </button>
+  <button class="nav-item" id="navProfile" onclick="openProfileModal()">
+    <span class="nav-icon">👤</span>
+    <span class="nav-label">Profile</span>
   </button>
 </nav>
 

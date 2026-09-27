@@ -76,17 +76,24 @@ sqlEngineManager.onStateChange((engineState, details) => {
 });
 const labels={not_started:'Not started',thinking:'Thinking in progress',answer_viewed:'Earlier answer viewed — thinking not assessed',thinking_ready:'Thinking ready',sql_written:'SQL draft saved',fiddle_opened:'SQL draft saved',verified:'SQL verified'};
 const cloud=createCloudSync({
-  client: {rpc(...args){return client.rpc(...args);}},
+  client: () => client,
   getContext:()=>({userId:user?.id,state:structuredClone(state)}),
   onMerged(remote,owner) {
-    if(owner!==user?.id) return;
+    if(!user || owner!==user.id) return;
     const before=current?JSON.stringify(state.entries[current.id]):null;
     state=mergeProgress(state,remote,ids);
-    persist(false); updateProgress();
+    saveProgress(storage, user.id, state);
+    updateProgress();
     // Local edits have their own timestamp and win over older cloud snapshots.
     if(current && before!==JSON.stringify(state.entries[current.id])) renderScenario();
   },
-  onStatus:message=>{ $('syncStatus').textContent=message; }
+  onStatus:message=>{
+    if ($('syncStatus')) $('syncStatus').textContent=message;
+    if ($('modalProfileSync')) {
+      $('modalProfileSync').textContent = user ? message : 'Saved on Device';
+      $('modalProfileSync').style.color = (message.includes('synced') || message.includes('Sync')) ? '#166534' : '#64748b';
+    }
+  }
 });
 function persist(sync=true, immediateSync=true) {
   const saved=saveProgress(storage,user?.id,state);
@@ -647,6 +654,10 @@ function nextScenario() {
   current=next;renderScenario();
 }
 function showScreen(name) {
+  if (name === 'profile') {
+    openProfileModal();
+    return;
+  }
   if (!user) {
     if ($('loginScreen')) $('loginScreen').hidden = false;
     if ($('appMain')) $('appMain').hidden = true;
@@ -1290,7 +1301,34 @@ function renderAuth() {
   $('importCloud').hidden=!user;
   renderProfileAvatar();
 }
-function setSession(session) {
+
+async function loadUserCloudProgress(userId) {
+  if (!client || !userId || user?.id !== userId) return;
+  try {
+    const { data: row, error } = await client
+      .from('learning_progress')
+      .select('state, updated_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!error && row && row.state) {
+      const cloudState = sanitize(row.state, ids);
+      if (cloudState && Object.keys(cloudState.entries).length > 0) {
+        state = mergeProgress(state, cloudState, ids);
+        saveProgress(storage, userId, state);
+        updateProgress();
+        if (current) renderScenario();
+      }
+    }
+  } catch (err) {
+    console.warn('Error loading cloud progress on login:', err);
+  }
+
+  // Also trigger cloud merge sync
+  cloud.request();
+}
+
+async function setSession(session) {
   const next=session?.user||null;
   if(next)authNotice='';
   const previousUserId = user?.id;
@@ -1304,11 +1342,19 @@ function setSession(session) {
     if (previousUserId !== user.id) {
       clearTimeout(syncTimer);
       cloud.changeSession();
-      state=readProgress(storage,user.id,ids);
+      // 1. Restore local progress for this user from localStorage
+      const local = readProgress(storage, user.id, ids);
+      if (local && Object.keys(local.entries).length > 0) {
+        state = local;
+      } else {
+        state = EMPTY();
+      }
       renderAuth();
       updateProgress();
       if(current)renderScenario();
-      cloud.request();
+
+      // 2. Automatically load saved cloud progress from Supabase
+      await loadUserCloudProgress(user.id);
       void checkAdminStatus();
     } else {
       renderAuth();
@@ -1316,14 +1362,19 @@ function setSession(session) {
     }
     showScreen('home');
   } else {
+    // Signed out: reset in-memory active state and return to login gate
     isCurrentUserAdmin = false;
     updateAdminPortalVisibility();
     if ($('loginScreen')) $('loginScreen').hidden = false;
     if ($('appMain')) $('appMain').hidden = true;
     if ($('bottomNav')) $('bottomNav').hidden = true;
+    closeProfileDropdown();
+    closeProfileModal();
 
     clearTimeout(syncTimer);
     cloud.changeSession();
+    state = EMPTY();
+    current = null;
     renderAuth();
   }
 }
@@ -1359,8 +1410,20 @@ async function signInWithGoogle() {
   }
 }
 async function signOut() {
-  try {const {error}=await client.auth.signOut();if(error)throw error;setSession(null);}
-  catch {alert('Sign-out failed. Please try again; your account has not been switched.');}
+  try {
+    if (user?.id) {
+      persist(false);
+    }
+    if (client) {
+      const {error}=await client.auth.signOut();
+      if(error) console.warn('Supabase signOut error:', error);
+    }
+    await setSession(null);
+  }
+  catch (err) {
+    console.error('Sign-out error:', err);
+    await setSession(null);
+  }
 }
 async function initAuth() {
   try {
@@ -1442,8 +1505,7 @@ function getUserInfo() {
 function renderProfileAvatar() {
   const info = getUserInfo();
   
-  const avatarContent = $('profileAvatarContent');
-  if (avatarContent) {
+  document.querySelectorAll('.profile-avatar-content').forEach(avatarContent => {
     if (info.avatarUrl) {
       avatarContent.innerHTML = `<img src="${escapeHtml(info.avatarUrl)}" alt="${escapeHtml(info.name)}" class="profile-avatar-img" onerror="this.onerror=null;this.parentElement.innerHTML='<span class=\\'profile-avatar-initial\\'>${escapeHtml(info.initial)}</span>';">`;
     } else if (info.isLoggedIn) {
@@ -1451,7 +1513,7 @@ function renderProfileAvatar() {
     } else {
       avatarContent.innerHTML = `<span style="font-size:18px;">👤</span>`;
     }
-  }
+  });
 
   const ddAvatar = $('dropdownAvatar');
   if (ddAvatar) {
@@ -1532,7 +1594,10 @@ function openProfileModal() {
   const authBtn = $('modalAuthActionBtn');
   if (authBtn) {
     authBtn.textContent = info.isLoggedIn ? 'Sign Out' : 'Sign in with Google';
-    authBtn.className = info.isLoggedIn ? 'action secondary' : 'action primary';
+    authBtn.className = info.isLoggedIn ? 'action danger-btn' : 'action primary';
+    authBtn.style.background = info.isLoggedIn ? '#dc2626' : 'var(--primary)';
+    authBtn.style.color = '#ffffff';
+    authBtn.style.fontWeight = '700';
   }
 
   modal.hidden = false;

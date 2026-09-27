@@ -8,16 +8,68 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
       while(requested) {
         requested=false;
         const token=generation, context=getContext();
-        if(!client || !context.userId) continue;
+        const activeClient = typeof client === 'function' ? client() : client;
+        if(!activeClient || !context.userId) continue;
         onStatus('Syncing…');
+        let mergedData = null;
+
+        // 1. Try atomic merge RPC
         try {
-          const {data,error}=await client.rpc('merge_learning_progress',{incoming:context.state,expected_user:context.userId});
-          if(token!==generation || context.userId!==getContext().userId) continue;
-          if(error) {onStatus('Saved on this device. Cloud sync unavailable; retry after setup or reconnection.');continue;}
-          onMerged(data,context.userId);
+          if (typeof activeClient.rpc === 'function') {
+            const {data, error} = await activeClient.rpc('merge_learning_progress', {
+              incoming: context.state,
+              expected_user: context.userId
+            });
+            if (!error && data) {
+              mergedData = data;
+            }
+          }
+        } catch (rpcErr) {
+          console.warn('merge_learning_progress RPC notice:', rpcErr);
+        }
+
+        // 2. Direct table fallback if RPC was unavailable or did not return data
+        if (!mergedData && typeof activeClient.from === 'function') {
+          try {
+            const { data: row, error: fetchErr } = await activeClient
+              .from('learning_progress')
+              .select('state')
+              .eq('user_id', context.userId)
+              .maybeSingle();
+
+            if (!fetchErr) {
+              const remoteEntries = (row?.state && typeof row.state.entries === 'object') ? row.state.entries : {};
+              const localEntries = (context.state && typeof context.state.entries === 'object') ? context.state.entries : {};
+
+              const mergedEntries = { ...remoteEntries, ...localEntries };
+              const mergedState = {
+                version: 2,
+                resetAt: Math.max(context.state?.resetAt || 0, row?.state?.resetAt || 0),
+                entries: mergedEntries
+              };
+
+              if (Object.keys(localEntries).length > 0) {
+                await activeClient
+                  .from('learning_progress')
+                  .upsert({
+                    user_id: context.userId,
+                    state: mergedState,
+                    updated_at: new Date().toISOString()
+                  });
+              }
+              mergedData = mergedState;
+            }
+          } catch (tableErr) {
+            console.warn('learning_progress table fallback notice:', tableErr);
+          }
+        }
+
+        if(token!==generation || context.userId!==getContext().userId) continue;
+        if(mergedData) {
+          onMerged(mergedData, context.userId);
           onStatus('Progress synced');
-        } catch {
-          if(token===generation) onStatus('Saved on this device. Cloud sync failed; retry when connected.');
+        } else {
+          onStatus('Saved on this device. Cloud sync unavailable; retry when connected.');
         }
       }
     } finally {running=false;}
