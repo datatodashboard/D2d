@@ -107,12 +107,13 @@ function persist(sync=true, immediateSync=true) {
       syncTimer=setTimeout(()=>cloud.request(),100);
     }
   }
+  updateProgress();
 }
 function entry() { return current ? state.entries[current.id] || {} : {}; }
 function changeEntry(patch, immediateSync=true) {
   if(!current) return;
   state.entries[current.id]={...entry(),...patch,updatedAt:nextTimestamp(state)};
-  persist(true, immediateSync); updateProgress();
+  persist(true, immediateSync);
 }
 function readThinking() {
   return {response:$('thinking').value};
@@ -551,22 +552,8 @@ async function resetCurrentSqlSession() {
 function renderScenario() {
   if (!current) return;
   const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
-  const e = entry();
-  if (typeof e.variantIndex !== 'number' && typeof effective.variantIndex === 'number') {
-    e.variantIndex = effective.variantIndex;
-  }
-  if (!e.skill && effective.skill) {
-    e.skill = effective.skill;
-  }
+  let entryNeedsSave = false;
 
-  $('home').classList.remove('active');$('progressScreen').classList.remove('active');$('practice').classList.add('active');
-  if ($('navHome')) { $('navHome').classList.remove('active'); $('navProgress').classList.remove('active'); $('navPractice').classList.add('active'); }
-  $('meta').textContent=effective.domain+' • '+effective.level;
-  $('title').textContent=effective.id;$('question').textContent=effective.question;
-  const pool=scenarios.filter(s=>s.domain===effective.domain&&s.level===effective.level);
-  $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
-  $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
-  renderSchemaCards(effective.schemaText);
   if (!state.entries[current.id]) {
     state.entries[current.id] = {
       thinking: { response: '' },
@@ -578,8 +565,33 @@ function renderScenario() {
       skill: effective.skill,
       updatedAt: nextTimestamp(state)
     };
+    entryNeedsSave = true;
+  } else if (!state.entries[current.id].status || state.entries[current.id].status === 'not_started') {
+    state.entries[current.id].status = 'in_progress';
+    state.entries[current.id].updatedAt = nextTimestamp(state);
+    entryNeedsSave = true;
+  }
+
+  const e = entry();
+  if (typeof e.variantIndex !== 'number' && typeof effective.variantIndex === 'number') {
+    e.variantIndex = effective.variantIndex;
+  }
+  if (!e.skill && effective.skill) {
+    e.skill = effective.skill;
+  }
+
+  if (entryNeedsSave) {
     persist(true, true);
   }
+
+  $('home').classList.remove('active');$('progressScreen').classList.remove('active');$('practice').classList.add('active');
+  if ($('navHome')) { $('navHome').classList.remove('active'); $('navProgress').classList.remove('active'); $('navPractice').classList.add('active'); }
+  $('meta').textContent=effective.domain+' • '+effective.level;
+  $('title').textContent=effective.id;$('question').textContent=effective.question;
+  const pool=scenarios.filter(s=>s.domain===effective.domain&&s.level===effective.level);
+  $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
+  $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
+  renderSchemaCards(effective.schemaText);
   currentSampleTable = null;
   setSchemaTab('schema');
   $('thinking').value=thinkingText(e.thinking);
@@ -1302,30 +1314,57 @@ function renderAuth() {
   renderProfileAvatar();
 }
 
-async function loadUserCloudProgress(userId) {
-  if (!client || !userId || user?.id !== userId) return;
-  try {
-    const { data: row, error } = await client
-      .from('learning_progress')
-      .select('state, updated_at')
-      .eq('user_id', userId)
-      .maybeSingle();
+async function loadAndRestoreUserProgress(userId) {
+  if (!userId) return;
 
-    if (!error && row && row.state) {
-      const cloudState = sanitize(row.state, ids);
-      if (cloudState && Object.keys(cloudState.entries).length > 0) {
-        state = mergeProgress(state, cloudState, ids);
-        saveProgress(storage, userId, state);
-        updateProgress();
-        if (current) renderScenario();
-      }
-    }
-  } catch (err) {
-    console.warn('Error loading cloud progress on login:', err);
+  // 1. Read existing local progress for this user from localStorage
+  const local = readProgress(storage, userId, ids);
+  const localHasEntries = local && Object.keys(local.entries).length > 0;
+  if (localHasEntries) {
+    state = local;
+    updateProgress();
+    if (current) renderScenario();
   }
 
-  // Also trigger cloud merge sync
-  cloud.request();
+  // 2. Load the user's existing progress from Supabase
+  if (client) {
+    try {
+      const { data: row, error } = await client
+        .from('learning_progress')
+        .select('state, updated_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (!error && row && row.state) {
+        const cloudState = sanitize(row.state, ids);
+        const cloudHasEntries = cloudState && Object.keys(cloudState.entries).length > 0;
+        if (cloudHasEntries) {
+          // Merge safely: preserves all completed (score >= 7) and in-progress attempts
+          state = mergeProgress(state, cloudState, ids);
+          saveProgress(storage, userId, state);
+          updateProgress();
+          if (current) renderScenario();
+        }
+      }
+    } catch (err) {
+      console.warn('Error loading cloud progress from Supabase on login:', err);
+    }
+  }
+
+  // 3. Only initialize empty state for a genuinely new user who has neither local nor cloud progress
+  if (!localHasEntries && Object.keys(state.entries).length === 0) {
+    state = EMPTY();
+  }
+
+  renderAuth();
+  updateProgress();
+  renderScenarioCatalog();
+  if (current) renderScenario();
+
+  // 4. Trigger cloud sync only if there are entries to sync
+  if (Object.keys(state.entries).length > 0) {
+    cloud.request();
+  }
 }
 
 async function setSession(session) {
@@ -1342,19 +1381,9 @@ async function setSession(session) {
     if (previousUserId !== user.id) {
       clearTimeout(syncTimer);
       cloud.changeSession();
-      // 1. Restore local progress for this user from localStorage
-      const local = readProgress(storage, user.id, ids);
-      if (local && Object.keys(local.entries).length > 0) {
-        state = local;
-      } else {
-        state = EMPTY();
-      }
       renderAuth();
-      updateProgress();
-      if(current)renderScenario();
-
-      // 2. Automatically load saved cloud progress from Supabase
-      await loadUserCloudProgress(user.id);
+      // Load user's existing progress from Supabase, restore, and update Progress page
+      await loadAndRestoreUserProgress(user.id);
       void checkAdminStatus();
     } else {
       renderAuth();
@@ -1430,7 +1459,7 @@ async function initAuth() {
     client=window.supabase?.createClient('https://qklnaqfspvmnlequqagf.supabase.co','sb_publishable_dthVX8zmvd1HvWaYWBaojA_2YbvHWe1')||null;
     renderAuth();
     if(!client) {
-      setSession(null);
+      await setSession(null);
       return;
     }
     const callback=new URLSearchParams(location.hash.slice(1));
@@ -1440,17 +1469,19 @@ async function initAuth() {
       if(message)message.textContent=authNotice;
       history.replaceState(null,'',location.pathname+location.search);
     }
-    // Register first, and do database work only after the auth callback returns.
     let authEventSeen=false;
-    client.auth.onAuthStateChange((_event,session)=>{authEventSeen=true;setTimeout(()=>setSession(session),0);});
+    client.auth.onAuthStateChange(async (_event,session)=>{
+      authEventSeen=true;
+      await setSession(session);
+    });
     const {data:auth,error}=await client.auth.getSession();
     if(error)throw error;
     if(!authEventSeen) {
-      setSession(auth?.session || null);
+      await setSession(auth?.session || null);
     }
   } catch (err) {
     console.warn('Auth initialization error:', err);
-    setSession(null);
+    await setSession(null);
   }
 }
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredPrompt=event;$('installBanner').classList.add('show');});

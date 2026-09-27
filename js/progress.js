@@ -3,7 +3,8 @@ export const EMPTY = () => ({version:2, resetAt:0, entries:{}});
 export const storageKey = userId => 'crackSqlProgress:v2:' + (userId ? 'user:' + userId : 'guest');
 export function sanitize(value, ids) {
   const result = EMPTY();
-  if (!value || value.version !== 2 || typeof value.entries !== 'object' || !value.entries || Array.isArray(value.entries)) return result;
+  if (!value || typeof value !== 'object' || typeof value.entries !== 'object' || !value.entries || Array.isArray(value.entries)) return result;
+  result.version = 2;
   result.resetAt = Number.isFinite(value.resetAt) ? Math.max(0,value.resetAt) : 0;
   for (const [id,entry] of Object.entries(value.entries)) {
     if ((ids && ids.size > 0 && !ids.has(id)) || !entry || typeof entry !== 'object' || !Number.isFinite(entry.updatedAt) || entry.updatedAt <= result.resetAt) continue;
@@ -41,9 +42,6 @@ export function isCompleted(scenario, entry) {
   }
   if (entry.completed === true) {
     return true;
-  }
-  if (scenario && entry.thinking) {
-    return thinkingIsReady(scenario, entry);
   }
   return false;
 }

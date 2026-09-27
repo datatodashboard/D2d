@@ -342,4 +342,120 @@ describe('Thinking Score Completion & Progress Logic', () => {
     const restoredFromCloud = mergeProgress(emptyLocal, cloudState, ids);
     assert.strictEqual(isCompleted(scenarios[0], restoredFromCloud.entries[scenarios[0].id]), true, 'Cloud progress restored onto empty local state');
   });
+
+  it('exact verification test: completes/attempts 3 scenarios, refreshes, logs out, logs in and restores without returning to zero', () => {
+    const memoryStorage = (() => {
+      const store = new Map();
+      return {
+        getItem: k => store.get(k) || null,
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: k => store.delete(k)
+      };
+    })();
+
+    // Simulated Supabase Database row
+    let remoteDatabaseRow = null;
+
+    const testUserId = 'test-user-3-scenarios-uuid';
+    const s0 = scenarios[0]; // e.g. Banking 1
+    const s1 = scenarios[1]; // e.g. Banking 2
+    const s2 = scenarios[2]; // e.g. Banking 3
+
+    // 1. User logs in
+    let currentSessionUser = { id: testUserId, email: 'learner@datatodashboard.com' };
+    let activeState = EMPTY();
+
+    // 2. Scenario 1 is opened and completed with score 9 (Score >= 7 -> Completed)
+    activeState.entries[s0.id] = {
+      thinking: { response: 'Correct join logic for question 1' },
+      assessment: { score: 9, ready: true },
+      completed: true,
+      status: 'completed',
+      attempts: 1,
+      updatedAt: 1000
+    };
+
+    // Scenario 2 is opened and attempted with score 5 (Score < 7 -> Attempted / In Progress)
+    activeState.entries[s1.id] = {
+      thinking: { response: 'Partial plan for question 2' },
+      assessment: { score: 5, ready: false },
+      completed: false,
+      status: 'attempted',
+      attempts: 1,
+      updatedAt: 1010
+    };
+
+    // Scenario 3 is opened and started (Started -> In Progress)
+    activeState.entries[s2.id] = {
+      thinking: { response: '' },
+      sql: '',
+      completed: false,
+      status: 'in_progress',
+      attempts: 0,
+      updatedAt: 1020
+    };
+
+    // Auto-save: save immediately to localStorage and Supabase
+    memoryStorage.setItem('crackSqlProgress:v2:user:' + currentSessionUser.id, JSON.stringify(activeState));
+    // Simulated cloud row in Supabase:
+    remoteDatabaseRow = {
+      user_id: currentSessionUser.id,
+      state: JSON.parse(JSON.stringify(activeState)),
+      updated_at: new Date().toISOString()
+    };
+
+    // 3. Confirm Progress shows 3 attempted/completed as appropriate
+    const compCount1 = [s0, s1, s2].filter(s => isCompleted(s, activeState.entries[s.id])).length;
+    const inProgCount1 = [s0, s1, s2].filter(s => isAttempted(s, activeState.entries[s.id]) && !isCompleted(s, activeState.entries[s.id])).length;
+    const totalAttempted1 = [s0, s1, s2].filter(s => isAttempted(s, activeState.entries[s.id])).length;
+
+    assert.strictEqual(compCount1, 1, 'Exactly 1 completed scenario (score 9 >= 7)');
+    assert.strictEqual(inProgCount1, 2, 'Exactly 2 in-progress/attempted scenarios');
+    assert.strictEqual(totalAttempted1, 3, 'Total 3 scenarios attempted or in-progress');
+
+    // 4. Refresh the page: simulate fresh browser context load
+    activeState = EMPTY(); // In-memory state clears on page reload
+    // Simulation of loadAndRestoreUserProgress on refresh:
+    const localRefreshed = sanitize(JSON.parse(memoryStorage.getItem('crackSqlProgress:v2:user:' + currentSessionUser.id)), ids);
+    const cloudRefreshed = sanitize(remoteDatabaseRow.state, ids);
+    activeState = mergeProgress(localRefreshed, cloudRefreshed, ids);
+
+    // Confirm progress is still present after refresh
+    const compCount2 = [s0, s1, s2].filter(s => isCompleted(s, activeState.entries[s.id])).length;
+    const inProgCount2 = [s0, s1, s2].filter(s => isAttempted(s, activeState.entries[s.id]) && !isCompleted(s, activeState.entries[s.id])).length;
+    assert.strictEqual(compCount2, 1, 'Progress still 1 completed after refresh');
+    assert.strictEqual(inProgCount2, 2, 'Progress still 2 in-progress after refresh');
+
+    // 5. Logout
+    currentSessionUser = null;
+    activeState = EMPTY(); // UI cleared to empty on sign out
+    assert.strictEqual(Object.keys(activeState.entries).length, 0, 'Active UI cleared on logout');
+
+    // 6. Login with the same account
+    currentSessionUser = { id: testUserId, email: 'learner@datatodashboard.com' };
+    
+    // Simulate login restoration: loads from Supabase, restores into state
+    const localOnLogin = sanitize(JSON.parse(memoryStorage.getItem('crackSqlProgress:v2:user:' + currentSessionUser.id)), ids);
+    const cloudOnLogin = sanitize(remoteDatabaseRow.state, ids);
+    activeState = mergeProgress(localOnLogin, cloudOnLogin, ids);
+
+    // 7. Confirm the same 3 scenarios and scores are restored
+    assert.strictEqual(activeState.entries[s0.id].assessment.score, 9, 'Scenario 0 score restored to 9');
+    assert.strictEqual(isCompleted(s0, activeState.entries[s0.id]), true, 'Scenario 0 is completed');
+
+    assert.strictEqual(activeState.entries[s1.id].assessment.score, 5, 'Scenario 1 score restored to 5');
+    assert.strictEqual(isAttempted(s1, activeState.entries[s1.id]), true, 'Scenario 1 is attempted');
+    assert.strictEqual(isCompleted(s1, activeState.entries[s1.id]), false, 'Scenario 1 is not completed (score < 7)');
+
+    assert.strictEqual(isAttempted(s2, activeState.entries[s2.id]), true, 'Scenario 2 is in-progress');
+
+    // 8. Confirm Progress does NOT return to zero
+    const finalCompCount = [s0, s1, s2].filter(s => isCompleted(s, activeState.entries[s.id])).length;
+    const finalInProgCount = [s0, s1, s2].filter(s => isAttempted(s, activeState.entries[s.id]) && !isCompleted(s, activeState.entries[s.id])).length;
+    const finalTotal = [s0, s1, s2].filter(s => isAttempted(s, activeState.entries[s.id])).length;
+
+    assert.strictEqual(finalCompCount, 1, 'Final completed count is 1 (NOT zero)');
+    assert.strictEqual(finalInProgCount, 2, 'Final in-progress count is 2');
+    assert.strictEqual(finalTotal, 3, 'Final total attempted is 3 (NOT zero)');
+  });
 });

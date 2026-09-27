@@ -10,6 +10,36 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
         const token=generation, context=getContext();
         const activeClient = typeof client === 'function' ? client() : client;
         if(!activeClient || !context.userId) continue;
+
+        const localEntries = (context.state && typeof context.state.entries === 'object' && context.state.entries) ? context.state.entries : {};
+        const localCount = Object.keys(localEntries).length;
+
+        // RULE 9: NEVER replace existing saved cloud progress with an empty progress state
+        if (localCount === 0) {
+          try {
+            if (typeof activeClient.from === 'function') {
+              const { data: row, error: fetchErr } = await activeClient
+                .from('learning_progress')
+                .select('state')
+                .eq('user_id', context.userId)
+                .maybeSingle();
+
+              if (!fetchErr && row?.state) {
+                const remoteEntries = (typeof row.state.entries === 'object' && row.state.entries) ? row.state.entries : {};
+                if (Object.keys(remoteEntries).length > 0) {
+                  if (token === generation && context.userId === getContext().userId) {
+                    onMerged(row.state, context.userId);
+                    onStatus('Progress synced');
+                  }
+                }
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('Fetch remote check warning:', fetchErr);
+          }
+          continue;
+        }
+
         onStatus('Syncing…');
         let mergedData = null;
 
@@ -22,13 +52,15 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
             });
             if (!error && data) {
               mergedData = data;
+            } else if (error) {
+              console.warn('merge_learning_progress RPC notice:', error.message || error);
             }
           }
         } catch (rpcErr) {
-          console.warn('merge_learning_progress RPC notice:', rpcErr);
+          console.warn('merge_learning_progress RPC exception:', rpcErr);
         }
 
-        // 2. Direct table fallback if RPC was unavailable or did not return data
+        // 2. Direct table fallback if RPC did not return data
         if (!mergedData && typeof activeClient.from === 'function') {
           try {
             const { data: row, error: fetchErr } = await activeClient
@@ -39,8 +71,6 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
 
             if (!fetchErr) {
               const remoteEntries = (row?.state && typeof row.state.entries === 'object') ? row.state.entries : {};
-              const localEntries = (context.state && typeof context.state.entries === 'object') ? context.state.entries : {};
-
               const mergedEntries = { ...remoteEntries, ...localEntries };
               const mergedState = {
                 version: 2,
@@ -48,16 +78,19 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
                 entries: mergedEntries
               };
 
-              if (Object.keys(localEntries).length > 0) {
-                await activeClient
-                  .from('learning_progress')
-                  .upsert({
-                    user_id: context.userId,
-                    state: mergedState,
-                    updated_at: new Date().toISOString()
-                  });
+              const { error: upsertErr } = await activeClient
+                .from('learning_progress')
+                .upsert({
+                  user_id: context.userId,
+                  state: mergedState,
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'user_id' });
+
+              if (!upsertErr) {
+                mergedData = mergedState;
+              } else {
+                console.warn('Direct learning_progress upsert notice:', upsertErr);
               }
-              mergedData = mergedState;
             }
           } catch (tableErr) {
             console.warn('learning_progress table fallback notice:', tableErr);
