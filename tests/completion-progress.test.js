@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
-import { isCompleted, sanitize, EMPTY, chooseNext } from '../js/progress.js';
+import { isCompleted, isAttempted, sanitize, EMPTY, chooseNext } from '../js/progress.js';
 
 const data = JSON.parse(fs.readFileSync('./data/scenarios.json', 'utf8'));
 const scenarios = data.scenarios;
@@ -162,5 +162,62 @@ describe('Thinking Score Completion & Progress Logic', () => {
     }
     const avgScore = countWithScore ? (totalScore / countWithScore).toFixed(1) : '0.0';
     assert.strictEqual(avgScore, '7.5', 'Average score should be 7.5');
+  });
+
+  it('correctly tracks attempted and in-progress scenarios', () => {
+    // 1. Started / in progress without score
+    const inProgressEntry = {
+      thinking: { response: '' },
+      sql: '',
+      status: 'in_progress',
+      attempts: 0,
+      completed: false,
+      updatedAt: 1000
+    };
+    assert.strictEqual(isAttempted(s1, inProgressEntry), true, 'In progress scenario must be attempted');
+    assert.strictEqual(isCompleted(s1, inProgressEntry), false, 'In progress scenario without score is not completed');
+
+    // 2. Submitted thinking with low score (< 7)
+    const lowScoreEntry = {
+      thinking: { response: 'filter active' },
+      assessment: { score: 5, ready: false },
+      status: 'attempted',
+      attempts: 1,
+      completed: false,
+      updatedAt: 2000
+    };
+    assert.strictEqual(isAttempted(s1, lowScoreEntry), true, 'Submitted thinking is attempted');
+    assert.strictEqual(isCompleted(s1, lowScoreEntry), false, 'Score < 7 is not completed');
+
+    // 3. Submitted thinking with passing score (>= 7)
+    const passingEntry = {
+      thinking: { response: 'Use customers and filter status active' },
+      assessment: { score: 9, ready: true },
+      status: 'completed',
+      attempts: 1,
+      completed: true,
+      updatedAt: 3000
+    };
+    assert.strictEqual(isAttempted(s1, passingEntry), true, 'Passing score is attempted');
+    assert.strictEqual(isCompleted(s1, passingEntry), true, 'Passing score is completed');
+
+    // 4. Untouched scenario
+    assert.strictEqual(isAttempted(s1, null), false, 'Null entry is not attempted');
+    assert.strictEqual(isCompleted(s1, null), false, 'Null entry is not completed');
+
+    // 5. In-progress count calculation (attempted && !completed)
+    const mockState = {
+      entries: {
+        [scenarios[0].id]: inProgressEntry,
+        [scenarios[1].id]: lowScoreEntry,
+        [scenarios[2].id]: passingEntry,
+        [scenarios[3].id]: null
+      }
+    };
+    const testList = scenarios.slice(0, 4);
+    const completed = testList.filter(s => isCompleted(s, mockState.entries[s.id])).length;
+    const inProgress = testList.filter(s => isAttempted(s, mockState.entries[s.id]) && !isCompleted(s, mockState.entries[s.id])).length;
+    assert.strictEqual(completed, 1, 'Only passing score is completed');
+    assert.strictEqual(inProgress, 2, 'In progress and low score are counted as in-progress');
   });
 });

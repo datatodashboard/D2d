@@ -1,5 +1,5 @@
 import {evaluateThinking, thinkingIsReady, thinkingText} from './thinking.js';
-import {EMPTY, readProgress, saveProgress, mergeProgress, nextTimestamp, workFingerprint, stage, isCompleted, chooseNext, importLegacy, storageKey} from './progress.js';
+import {EMPTY, readProgress, saveProgress, mergeProgress, nextTimestamp, workFingerprint, stage, isCompleted, isAttempted, chooseNext, importLegacy, storageKey} from './progress.js';
 import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
 import {renderSchemaCards} from './schema.js';
@@ -88,20 +88,24 @@ const cloud=createCloudSync({
   },
   onStatus:message=>{ $('syncStatus').textContent=message; }
 });
-function persist(sync=true) {
+function persist(sync=true, immediateSync=true) {
   const saved=saveProgress(storage,user?.id,state);
   if(!saved) $('syncStatus').textContent='Browser storage is unavailable. Keep this page open; local progress cannot be saved.';
   else if(!user) $('syncStatus').textContent='Guest progress saved on this device.';
   if(sync && user && client) {
     clearTimeout(syncTimer);
-    syncTimer=setTimeout(()=>cloud.request(),500);
+    if (immediateSync) {
+      cloud.request();
+    } else {
+      syncTimer=setTimeout(()=>cloud.request(),100);
+    }
   }
 }
 function entry() { return current ? state.entries[current.id] || {} : {}; }
-function changeEntry(patch) {
+function changeEntry(patch, immediateSync=true) {
   if(!current) return;
   state.entries[current.id]={...entry(),...patch,updatedAt:nextTimestamp(state)};
-  persist(); updateProgress();
+  persist(true, immediateSync); updateProgress();
 }
 function readThinking() {
   return {response:$('thinking').value};
@@ -129,23 +133,39 @@ function updateProgress() {
     ? scenarios.filter(s => CORE_DOMAINS.includes(s.domain))
     : scenarios;
   const completed = activeScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+  const inProgress = activeScenarios.filter(s => isAttempted(s, state.entries[s.id]) && !isCompleted(s, state.entries[s.id])).length;
   if ($('progressCount')) $('progressCount').textContent = completed + ' / ' + activeScenarios.length;
   if ($('progressFill')) $('progressFill').style.width = (activeScenarios.length ? (completed / activeScenarios.length * 100) : 0) + '%';
   if ($('progressStages')) {
-    const started = activeScenarios.filter(s => {
-      const e = state.entries[s.id];
-      return e && (e.updatedAt || e.thinking?.response || e.assessment);
-    }).length;
-    $('progressStages').textContent = `${started} started · ${completed} completed (score ≥ 7)`;
+    const started = activeScenarios.filter(s => isAttempted(s, state.entries[s.id])).length;
+    $('progressStages').textContent = `${completed} completed (score ≥ 7) · ${inProgress} in progress · ${activeScenarios.length - started} not started`;
   }
   if (current) {
-    const isCurCompleted = isCompleted(current, entry());
+    const e = entry();
+    const isCurCompleted = isCompleted(current, e);
+    const isCurAttempted = isAttempted(current, e);
     if ($('learningStage')) {
-      $('learningStage').textContent = isCurCompleted ? 'Thinking ready (Score ≥ 7)' : labels[stage(current, entry())];
+      if (isCurCompleted) {
+        $('learningStage').textContent = 'Completed (Score ≥ 7)';
+      } else if (isCurAttempted) {
+        $('learningStage').textContent = (typeof e.assessment?.score === 'number') 
+          ? `Attempted • Thinking Score: ${e.assessment.score}/10` 
+          : 'In progress';
+      } else {
+        $('learningStage').textContent = 'Not started';
+      }
     }
     if ($('doneTag')) {
-      $('doneTag').classList.toggle('show', isCurCompleted);
-      $('doneTag').textContent = isCurCompleted ? 'Completed ✓' : 'SQL verified';
+      $('doneTag').classList.toggle('show', isCurCompleted || isCurAttempted);
+      if (isCurCompleted) {
+        $('doneTag').textContent = 'Completed ✓';
+        $('doneTag').style.background = '#dcfce7';
+        $('doneTag').style.color = '#15803d';
+      } else if (isCurAttempted) {
+        $('doneTag').textContent = (typeof e.assessment?.score === 'number') ? 'Attempted' : 'In Progress';
+        $('doneTag').style.background = '#fef3c7';
+        $('doneTag').style.color = '#b45309';
+      }
     }
   }
   renderProgressScreen();
@@ -540,6 +560,19 @@ function renderScenario() {
   $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
   $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
   renderSchemaCards(effective.schemaText);
+  if (!state.entries[current.id]) {
+    state.entries[current.id] = {
+      thinking: { response: '' },
+      sql: '',
+      status: 'in_progress',
+      attempts: 0,
+      completed: false,
+      variantIndex: effective.variantIndex,
+      skill: effective.skill,
+      updatedAt: nextTimestamp(state)
+    };
+    persist(true, true);
+  }
   currentSampleTable = null;
   setSchemaTab('schema');
   $('thinking').value=thinkingText(e.thinking);
@@ -570,14 +603,19 @@ function evaluatePlan() {
   const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
   const thinking = readThinking();
   const assessment = evaluateThinking(effective, thinking);
-  const completed = typeof assessment?.score === 'number' && assessment.score >= 7;
+  const score = typeof assessment?.score === 'number' ? assessment.score : 0;
+  const completed = score >= 7;
+  const curAttempts = (entry().attempts || 0) + 1;
+  const status = completed ? 'completed' : 'attempted';
   changeEntry({
     thinking,
     assessment,
     completed,
+    status,
+    attempts: curAttempts,
     variantIndex: effective.variantIndex,
     skill: effective.skill
-  });
+  }, true);
   renderAssessment(assessment);
   updateGates();
   if (completed && $('nextButton')) {
@@ -941,17 +979,17 @@ function renderScenarioCatalog() {
     const e = state.entries[s.id] || {};
     const effective = getEffectiveScenario(s, user?.id || 'guest_user', state);
     const completed = isCompleted(s, e);
-    const stg = stage(s, e);
+    const attempted = isAttempted(s, e);
     const isCurrent = current && current.id === s.id;
     let badgeClass = 'status-pill not-started';
     let badgeText = 'Not started';
     if (completed) {
       badgeClass = 'status-pill verified';
       badgeText = '✓ Completed';
-    } else if (stg === 'thinking_ready' || stg === 'thinking') {
+    } else if (attempted) {
       badgeClass = 'status-pill thinking';
-      badgeText = '🧠 Ready';
-    } else if (stg === 'sql_written') {
+      badgeText = (typeof e.assessment?.score === 'number') ? `Attempted (${e.assessment.score}/10)` : 'In Progress';
+    } else if (e.sql && String(e.sql).trim()) {
       badgeClass = 'status-pill draft';
       badgeText = '📝 Draft';
     }
@@ -976,6 +1014,7 @@ function renderProgressScreen() {
   
   const totalQuestions = trackScenarios.length;
   const completedCount = trackScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+  const inProgressCount = trackScenarios.filter(s => isAttempted(s, state.entries[s.id]) && !isCompleted(s, state.entries[s.id])).length;
   const completionPct = totalQuestions > 0 ? Math.round((completedCount / totalQuestions) * 100) : 0;
 
   let totalScore = 0, countWithScore = 0;
@@ -989,9 +1028,10 @@ function renderProgressScreen() {
   const avgScore = countWithScore ? (totalScore / countWithScore).toFixed(1) : '0.0';
 
   if ($('progressTrackSubtitle')) {
-    $('progressTrackSubtitle').textContent = currentDomainTrack === 'core' 
+    const trackTitle = currentDomainTrack === 'core' 
       ? '4 Core Domains Track (240 questions)' 
       : 'All Domains Track (420 questions)';
+    $('progressTrackSubtitle').textContent = `${trackTitle} • ${completedCount} Completed • ${inProgressCount} In Progress`;
   }
   if ($('progressTotalQuestions')) $('progressTotalQuestions').textContent = String(totalQuestions);
   if ($('progressCompletedQuestions')) $('progressCompletedQuestions').textContent = String(completedCount);
@@ -1596,7 +1636,7 @@ Object.assign(window,{
   setDomainTrack,openOnboarding,closeOnboarding,toggleLandscapeMode,
   toggleProfileDropdown,closeProfileDropdown,openProfileModal,closeProfileModal,
   handleModalAuthAction,openMyProgress,handleProfileSignOut,openAdminPortal,
-  copySchemaAndOpenFiddle,isCompleted,
+  copySchemaAndOpenFiddle,isCompleted,isAttempted,
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   sqlEngineManager
 });
@@ -1614,8 +1654,19 @@ try {
   const thinkingEl = $('thinking');
   if (thinkingEl) {
     thinkingEl.addEventListener('input',()=>{
-      changeEntry({thinking:readThinking(),assessment:null,completed:false,fiddleFingerprint:null,evaluationFingerprint:null,evaluationResult:null});
-      renderAssessment(null);if(typeof renderSqlEvaluation==='function')renderSqlEvaluation(null);updateGates();
+      const cur = entry();
+      changeEntry({
+        thinking: readThinking(),
+        assessment: cur.assessment || null,
+        completed: false,
+        status: 'in_progress',
+        fiddleFingerprint: null,
+        evaluationFingerprint: null,
+        evaluationResult: null
+      }, false);
+      renderAssessment(null);
+      if(typeof renderSqlEvaluation==='function') renderSqlEvaluation(null);
+      updateGates();
     });
   }
   const sqlInput = $('learnerSql');

@@ -10,16 +10,21 @@ export function sanitize(value, ids) {
     const thinking = {response:String(entry.thinking?.response||'').slice(0,8000)};
     // Keep earlier four-box answers readable after upgrading to the single-box UI.
     for(const k of ['goal','sources','steps','check'])thinking[k]=String(entry.thinking?.[k]||'').slice(0,4000);
+    const score = (typeof entry.assessment?.score === 'number') ? entry.assessment.score : null;
+    const completed = score !== null ? score >= 7 : !!entry.completed;
+    const attempts = Number.isFinite(entry.attempts) ? Math.max(0, Math.floor(entry.attempts)) : (entry.assessment ? 1 : 0);
+    const status = typeof entry.status === 'string' ? entry.status : (completed ? 'completed' : (attempts > 0 || score !== null) ? 'attempted' : 'in_progress');
     result.entries[id] = {thinking, sql:String(entry.sql || '').slice(0,20000),
       variantIndex: Number.isFinite(entry.variantIndex) ? entry.variantIndex : null,
       skill: typeof entry.skill === 'string' ? entry.skill : null,
       assessment: entry.assessment && typeof entry.assessment === 'object' ? entry.assessment : null,
-      completed: (typeof entry.assessment?.score === 'number') ? entry.assessment.score >= 7 : !!entry.completed,
+      completed,
+      status,
       fiddleFingerprint: typeof entry.fiddleFingerprint === 'string' ? entry.fiddleFingerprint : null,
       evaluationFingerprint: typeof entry.evaluationFingerprint === 'string' ? entry.evaluationFingerprint : null,
       evaluationResult: entry.evaluationResult && typeof entry.evaluationResult === 'object' ? entry.evaluationResult : null,
       evaluationAt: Number.isFinite(entry.evaluationAt) ? entry.evaluationAt : null,
-      attempts: Number.isFinite(entry.attempts) ? Math.max(0,Math.floor(entry.attempts)) : 0,
+      attempts,
       validationNotes:String(entry.validationNotes || '').slice(0,4000),
       answerViewed:!!entry.answerViewed, legacyViewed:!!entry.legacyViewed,
       updatedAt:entry.updatedAt};
@@ -40,6 +45,17 @@ export function isCompleted(scenario, entry) {
   if (scenario && entry.thinking) {
     return thinkingIsReady(scenario, entry);
   }
+  return false;
+}
+export function isAttempted(scenario, entry) {
+  if (!entry) return false;
+  if (isCompleted(scenario, entry)) return true;
+  if (entry.status === 'attempted' || entry.status === 'in_progress') return true;
+  if (Number.isFinite(entry.attempts) && entry.attempts > 0) return true;
+  if (entry.assessment && typeof entry.assessment.score === 'number') return true;
+  if (entry.thinking && (Boolean(entry.thinking.response && String(entry.thinking.response).trim()) || Boolean(entry.thinking.steps))) return true;
+  if (entry.sql && String(entry.sql).trim().length > 0) return true;
+  if (Number.isFinite(entry.updatedAt) && entry.updatedAt > 0) return true;
   return false;
 }
 export function readProgress(storage, userId, ids) {

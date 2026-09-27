@@ -1,6 +1,6 @@
 // Think and Crack SQL — Admin Dashboard Controller
 // Reads existing Supabase learner data from public.profiles and public.learning_progress
-import { stage, isCompleted } from './progress.js';
+import { stage, isCompleted, isAttempted } from './progress.js';
 import { escapeHtml } from './util.js';
 
 const SUPABASE_URL = 'https://qklnaqfspvmnlequqagf.supabase.co';
@@ -384,14 +384,9 @@ async function loadDashboardData() {
 
         // Evaluate solved/completed status: Thinking Score >= 7/10
         const isSolved = isCompleted(scenario, entry);
-        const isAttempted = isSolved ||
-          ['thinking', 'thinking_ready', 'sql_written', 'fiddle_opened', 'answer_viewed', 'verified'].includes(stg) ||
-          (Number.isFinite(entry.attempts) && entry.attempts > 0) ||
-          Boolean(entry.sql && String(entry.sql).trim()) ||
-          Boolean(entry.thinking && (entry.thinking.response || entry.thinking.steps)) ||
-          (entry.assessment && typeof entry.assessment.score === 'number');
+        const isAtt = isAttempted(scenario, entry);
 
-        if (isAttempted) {
+        if (isAtt) {
           userAttemptedCount++;
           domainAttempted[domain] = (domainAttempted[domain] || 0) + 1;
         }
