@@ -1,6 +1,7 @@
 // Crack SQL Thinking Contest — Participant Client Controller
 // Completely isolated module for Admin-controlled thinking contests
 import { escapeHtml } from './util.js';
+import { parseSchema, inferReference, TABLE_ICONS } from './schema.js';
 
 let activeClient = null;
 let activeUser = null;
@@ -302,6 +303,221 @@ export function closeContestModal() {
   stopTimers();
 }
 
+export function parseContestTestContent(contest) {
+  const c = contest || {};
+  let question = (c.question || '').trim();
+  let scenarioDesc = '';
+  let expectedOutput = c.expected_output || c.expected_columns || null;
+  let schemaText = (c.schema_text || c.schema || '').trim();
+
+  const rawScenario = (c.scenario_text || '').trim();
+
+  // If rawScenario contains explicit section markers:
+  if (rawScenario) {
+    const hasQuestionMarker = /^(?:Question|Problem Statement|Task|Challenge Question):\s*/im.test(rawScenario);
+    const hasScenarioMarker = /(?:Scenario|Background|Business Context|Scenario Description):\s*/im.test(rawScenario);
+    const hasOutputMarker = /(?:Expected Output|Expected Output Columns|Output Columns|Target Columns):\s*/im.test(rawScenario);
+    const hasSchemaMarker = /(?:Database Schema|Schema|Tables):\s*/im.test(rawScenario);
+
+    if (hasQuestionMarker || hasScenarioMarker || hasOutputMarker || hasSchemaMarker) {
+      const lines = rawScenario.split('\n');
+      let currentSection = 'scenario';
+      const sectionBuffers = { question: [], scenario: [], output: [], schema: [] };
+
+      for (const line of lines) {
+        if (/^(?:Question|Problem Statement|Task|Challenge Question):\s*/i.test(line)) {
+          currentSection = 'question';
+          const rem = line.replace(/^(?:Question|Problem Statement|Task|Challenge Question):\s*/i, '').trim();
+          if (rem) sectionBuffers.question.push(rem);
+        } else if (/^(?:Scenario|Background|Business Context|Scenario Description):\s*/i.test(line)) {
+          currentSection = 'scenario';
+          const rem = line.replace(/^(?:Scenario|Background|Business Context|Scenario Description):\s*/i, '').trim();
+          if (rem) sectionBuffers.scenario.push(rem);
+        } else if (/^(?:Expected Output|Expected Output Columns|Output Columns|Target Columns):\s*/i.test(line)) {
+          currentSection = 'output';
+          const rem = line.replace(/^(?:Expected Output|Expected Output Columns|Output Columns|Target Columns):\s*/i, '').trim();
+          if (rem) sectionBuffers.output.push(rem);
+        } else if (/^(?:Database Schema|Schema|Tables):\s*/i.test(line)) {
+          currentSection = 'schema';
+          const rem = line.replace(/^(?:Database Schema|Schema|Tables):\s*/i, '').trim();
+          if (rem) sectionBuffers.schema.push(rem);
+        } else {
+          sectionBuffers[currentSection].push(line);
+        }
+      }
+
+      if (sectionBuffers.question.length && !question) question = sectionBuffers.question.join('\n').trim();
+      if (sectionBuffers.scenario.length) scenarioDesc = sectionBuffers.scenario.join('\n').trim();
+      if (sectionBuffers.output.length && !expectedOutput) expectedOutput = sectionBuffers.output.join('\n').trim();
+      if (sectionBuffers.schema.length && !schemaText) schemaText = sectionBuffers.schema.join('\n').trim();
+    } else {
+      // Plain text scenario:
+      // Separate background narrative and the specific operational question
+      const questionRegex = /(?:Explain step by step how you would|Your task is to|Identify all|Calculate the|Find the|Determine the)[\s\S]+$/i;
+      const qMatch = rawScenario.match(questionRegex);
+      if (qMatch && !question) {
+        question = qMatch[0].trim();
+        scenarioDesc = rawScenario.substring(0, qMatch.index).trim();
+      } else {
+        scenarioDesc = rawScenario;
+      }
+    }
+  }
+
+  // Fallbacks if missing
+  if (!question) {
+    question = c.title ? `Contest Challenge: ${c.title}` : 'Explain step by step how you would identify the required data, join keys, filtering logic, and calculate the final expected results.';
+  }
+  if (!scenarioDesc) {
+    scenarioDesc = rawScenario || 'You are presented with a real-world enterprise database challenge. Carefully examine the problem statement and database schema below to formulate your solution strategy.';
+  }
+
+  // Deduce or provide standard schema and expected output if not provided
+  if (!schemaText) {
+    const combined = (rawScenario + ' ' + question).toLowerCase();
+    if (combined.includes('patient') || combined.includes('appointment') || combined.includes('doctor') || combined.includes('clinic')) {
+      schemaText = 'patients(patient_id PK, patient_name, city, segment, joined_date); doctors(doctor_id PK, doctor_name, category, status, base_value); appointments(appointment_id PK, patient_id FK, doctor_id FK, appointment_date, status, bill_amount); visits(visit_id PK, appointment_id FK, visit_date, visit_type, quantity, amount, status)';
+      if (!expectedOutput) {
+        expectedOutput = [
+          { column: 'patient_id', description: 'Unique patient identifier' },
+          { column: 'patient_name', description: 'Full name of the patient' },
+          { column: 'total_appointments', description: 'Total scheduled appointments' },
+          { column: 'cancelled_appointments', description: 'Total number of cancelled appointments' },
+          { column: 'cancellation_rate', description: 'Calculated cancellation percentage' }
+        ];
+      }
+    } else {
+      // Default Banking / Financial Fraud scenario
+      schemaText = 'customers(customer_id PK, customer_name, city, segment, joined_date); accounts(account_id PK, customer_id FK, product_id FK, open_date, status, balance); transactions(transaction_id PK, account_id FK, transaction_date, transaction_type, quantity, amount, status); account_products(product_id PK, product_name, category, status, base_value)';
+      if (!expectedOutput) {
+        expectedOutput = [
+          { column: 'account_id', description: 'Unique account identifier' },
+          { column: 'customer_name', description: 'Name of the impacted account holder' },
+          { column: 'compromised_transactions', description: 'Count of abnormal or flagged transactions' },
+          { column: 'total_financial_exposure', description: 'Sum total of compromised transaction amounts in INR' },
+          { column: 'first_incident_at', description: 'Timestamp of earliest detected anomalous transaction' }
+        ];
+      }
+    }
+  }
+
+  return {
+    title: c.title || 'Crack SQL Thinking Contest',
+    question,
+    scenarioDescription: scenarioDesc,
+    expectedOutput,
+    schemaText,
+    instructions: c.instructions
+  };
+}
+
+function renderExpectedOutputBlock(expectedOutput) {
+  if (!expectedOutput) return '';
+
+  if (Array.isArray(expectedOutput) && expectedOutput.length > 0) {
+    return `
+      <div class="test-expected-output-card">
+        <div class="expected-output-heading">
+          <span class="out-icon">📋</span>
+          <strong>Expected Output Columns:</strong>
+        </div>
+        <table class="test-columns-table">
+          <thead>
+            <tr>
+              <th style="width:38%;">Column Name</th>
+              <th>Description / Expectation</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${expectedOutput.map(col => `
+              <tr>
+                <td class="col-name-cell font-mono"><code>${escapeHtml(col.column || col.name || '')}</code></td>
+                <td class="col-desc-cell">${escapeHtml(col.description || col.desc || 'Required output attribute')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  if (typeof expectedOutput === 'string' && expectedOutput.trim()) {
+    const lines = expectedOutput.trim().split('\n').filter(Boolean);
+    return `
+      <div class="test-expected-output-card">
+        <div class="expected-output-heading">
+          <span class="out-icon">📋</span>
+          <strong>Expected Output Columns:</strong>
+        </div>
+        <ul style="margin: 0; padding-left: 20px; font-size: 0.9rem; color: #334155; line-height: 1.6;">
+          ${lines.map(line => `<li>${escapeHtml(line.replace(/^[-*•]\s*/, ''))}</li>`).join('')}
+        </ul>
+      </div>
+    `;
+  }
+
+  return '';
+}
+
+function renderContestSchemaBlock(schemaText) {
+  const tables = parseSchema(schemaText);
+  if (!tables.length) {
+    return `<div class="test-schema-empty text-muted">No explicit schema defined.</div>`;
+  }
+
+  const tableNames = tables.map(t => t.name);
+
+  return `
+    <div class="test-schema-intro">The following database tables and attributes are available to construct your solution:</div>
+    <div class="test-schema-grid">
+      ${tables.map(t => {
+        const icon = TABLE_ICONS[t.name] || '🗂️';
+        return `
+          <div class="test-schema-card">
+            <div class="test-schema-card-head">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="test-table-icon">${icon}</span>
+                <span class="test-table-name font-mono">${escapeHtml(t.name)}</span>
+              </div>
+              <span class="test-table-count">${t.columns.length} columns</span>
+            </div>
+            <div class="test-schema-card-body">
+              <table class="test-schema-table">
+                <thead>
+                  <tr>
+                    <th>Column</th>
+                    <th>Key / Relationship</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${t.columns.map(c => {
+                    let keyBadge = '';
+                    if (c.key === 'PK') {
+                      keyBadge = '<span class="test-badge-pk" title="Primary Key">PK</span>';
+                    } else if (c.key === 'FK') {
+                      const refTarget = inferReference(c.name, tableNames, t.name);
+                      keyBadge = `<span class="test-badge-fk" title="Foreign Key">FK</span> ${refTarget ? `<span class="test-fk-ref">→ ${escapeHtml(refTarget)}</span>` : ''}`;
+                    } else {
+                      keyBadge = '<span class="test-badge-none">—</span>';
+                    }
+
+                    return `
+                      <tr>
+                        <td class="test-col-name font-mono" style="font-weight:600;">${escapeHtml(c.name)}</td>
+                        <td class="test-col-key">${keyBadge}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
 function renderModalContent(stage) {
   if (!currentContest) return '';
 
@@ -473,13 +689,15 @@ function renderModalContent(stage) {
   }
 
   if (stage === 'active') {
+    const testData = parseContestTestContent(currentContest);
+
     return `
       <div class="contest-modal-window contest-fullscreen-mode">
         <div class="contest-active-topbar">
           <div class="contest-topbar-left">
             <span class="contest-live-dot"></span>
             <strong>🏆 CRACK SQL THINKING CHALLENGE</strong>
-            <span class="text-muted" style="margin-left:8px;">| ${escapeHtml(currentContest.title)}</span>
+            <span class="text-muted" style="margin-left:8px;">| ${escapeHtml(testData.title)}</span>
           </div>
           <div class="contest-topbar-right">
             <div class="contest-timer-pill" id="contestTimerDisplay">
@@ -490,35 +708,127 @@ function renderModalContent(stage) {
         </div>
 
         <div class="contest-active-content">
-          <div class="contest-scenario-panel">
-            <div class="scenario-panel-title">Business Challenge &amp; Problem Statement</div>
-            <div class="scenario-panel-body">
-              ${escapeHtml(currentContest.scenario_text || '')}
-            </div>
-          </div>
+          <div class="contest-test-paper">
 
-          <div class="contest-editor-panel">
-            <div class="editor-panel-instruction">
-              <span class="inst-icon">💡</span>
-              <div>
-                <strong>Instructions:</strong> Explain step by step how you would solve this problem. Do not write SQL.
+            <!-- 1. Question / Scenario block -->
+            <div class="contest-test-block test-block-question">
+              <div class="test-block-header">
+                <div class="test-block-num-badge">1</div>
+                <div>
+                  <h3 class="test-block-title">Question &amp; Business Scenario</h3>
+                  <div class="test-block-subtitle">Understand the problem context, objectives, and expected output</div>
+                </div>
+              </div>
+
+              <div class="test-block-content">
+                <div class="test-question-box">
+                  <div class="test-question-label">CONTEST QUESTION</div>
+                  <div class="test-question-text">${escapeHtml(testData.question)}</div>
+                </div>
+
+                <div class="test-scenario-box">
+                  <div class="test-scenario-label">SCENARIO DESCRIPTION</div>
+                  <div class="test-scenario-body">${escapeHtml(testData.scenarioDescription)}</div>
+                </div>
+
+                ${renderExpectedOutputBlock(testData.expectedOutput)}
               </div>
             </div>
 
-            <textarea
-              id="contestThinkingInput"
-              class="contest-thinking-textarea"
-              placeholder="Explain your approach step by step. Consider the required data, tables, filters, relationships, calculations and expected result."
-            >${escapeHtml(currentAttempt?.draft_response || '')}</textarea>
-
-            <div class="contest-active-footer">
-              <div class="footer-left text-muted small">
-                Locked contest mode • One attempt per user • Auto-saved to cloud
+            <!-- 2. Database Schema block -->
+            <div class="contest-test-block test-block-schema">
+              <div class="test-block-header">
+                <div class="test-block-num-badge">2</div>
+                <div>
+                  <h3 class="test-block-title">Database Schema</h3>
+                  <div class="test-block-subtitle">Review available database tables, columns, and relationships</div>
+                </div>
               </div>
-              <button id="btnSubmitContest" class="action primary">
-                SUBMIT FINAL ANSWER 🏁
-              </button>
+
+              <div class="test-block-content">
+                ${renderContestSchemaBlock(testData.schemaText)}
+              </div>
             </div>
+
+            <!-- 3. How to Write Your Answer block -->
+            <div class="contest-test-block test-block-instructions">
+              <div class="test-block-header">
+                <div class="test-block-num-badge">3</div>
+                <div>
+                  <h3 class="test-block-title">How to Write Your Answer</h3>
+                  <div class="test-block-subtitle">Submission instructions and guidelines</div>
+                </div>
+              </div>
+
+              <div class="test-block-content">
+                <div class="test-instructions-box">
+                  <p class="test-instructions-intro">
+                    Please write your solution approach clearly and step-by-step. Your answer is evaluated on your procedural logic and data thinking:
+                  </p>
+                  <div class="test-instructions-grid">
+                    <div class="inst-item">
+                      <span class="inst-badge">1</span>
+                      <div>
+                        <strong>Write your solution approach clearly:</strong>
+                        <span>Describe your step-by-step methodology from source data to the final result.</span>
+                      </div>
+                    </div>
+                    <div class="inst-item">
+                      <span class="inst-badge">2</span>
+                      <div>
+                        <strong>Specify Tables &amp; Columns:</strong>
+                        <span>Explicitly mention which tables and columns are required for each step.</span>
+                      </div>
+                    </div>
+                    <div class="inst-item">
+                      <span class="inst-badge">3</span>
+                      <div>
+                        <strong>Explain Logic &amp; Operations:</strong>
+                        <span>Detail your filtering criteria, join conditions, aggregations, and business calculations.</span>
+                      </div>
+                    </div>
+                    <div class="inst-item highlight-item">
+                      <span class="inst-badge">★</span>
+                      <div>
+                        <strong>A full SQL query is NOT required:</strong>
+                        <span>Focus on your thinking, procedural steps, and logical reasoning. You do not need to write raw SQL syntax.</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Answer box block -->
+            <div class="contest-test-block test-block-answer">
+              <div class="test-block-header">
+                <div class="test-block-num-badge">4</div>
+                <div>
+                  <h3 class="test-block-title">Answer Box</h3>
+                  <div class="test-block-subtitle">Write your answer / thinking approach below</div>
+                </div>
+              </div>
+
+              <div class="test-block-content">
+                <textarea
+                  id="contestThinkingInput"
+                  class="contest-test-textarea"
+                  placeholder="Explain your approach step by step. Consider the required data, tables, filters, relationships, calculations and expected result..."
+                >${escapeHtml(currentAttempt?.draft_response || '')}</textarea>
+
+                <div class="test-answer-footer">
+                  <div class="test-footer-notes">
+                    <span>🔒 Single official attempt</span>
+                    <span class="footer-note-sep">•</span>
+                    <span>Auto-saved to cloud</span>
+                  </div>
+                  <button id="btnSubmitContest" class="action primary contest-submit-btn">
+                    Submit Answer
+                  </button>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -871,5 +1181,7 @@ function formatSeconds(secs) {
 }
 
 // Global modal close hook
-window.closeContestModal = closeContestModal;
-window.openContestModal = openContestModal;
+if (typeof window !== 'undefined') {
+  window.closeContestModal = closeContestModal;
+  window.openContestModal = openContestModal;
+}

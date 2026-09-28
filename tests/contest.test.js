@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { evaluateContestSubmission } from '../js/contest-ai-evaluator.js';
+import { parseContestTestContent } from '../js/contest.js';
 
 describe('Admin-Controlled Crack SQL Thinking Contest Feature', () => {
 
@@ -250,6 +251,89 @@ describe('Admin-Controlled Crack SQL Thinking Contest Feature', () => {
 
       assert.strictEqual(ranked[3].userId, 'u4'); // 78 pts -> 4th
       assert.strictEqual(ranked[3].rank, 4);
+    });
+  });
+
+  describe('6. SQL Contest Test Screen & Participant-Facing Structure', () => {
+    it('correctly extracts Question, Scenario, Expected Output, and Schema blocks from structured contest document', () => {
+      const contestDoc = {
+        title: 'Q1 Thinking Contest: Healthcare Retention',
+        scenario_text: `Question:
+Identify recurring cancellations by patient and calculate each patient's cancellation rate and lost billings.
+
+Scenario:
+A premier hospital network is experiencing high rates of appointment cancellations. Clinical coordinators need proactive alerts to reach out to at-risk patients and reassign doctor slots.
+
+Expected Output Columns:
+patient_id
+patient_name
+total_appointments
+cancelled_count
+lost_amount
+
+Database Schema:
+patients(patient_id PK, patient_name, city, segment, joined_date); appointments(appointment_id PK, patient_id FK, doctor_id FK, appointment_date, status, bill_amount)`
+      };
+
+      const parsed = parseContestTestContent(contestDoc);
+
+      // 1. Question / Scenario block content
+      assert(parsed.question.includes('Identify recurring cancellations by patient'));
+      assert(parsed.scenarioDescription.includes('hospital network is experiencing high rates'));
+      assert(typeof parsed.expectedOutput === 'string');
+      assert(parsed.expectedOutput.includes('patient_id'));
+      assert(parsed.expectedOutput.includes('lost_amount'));
+
+      // 2. Database Schema block content
+      assert(parsed.schemaText.includes('patients('));
+      assert(parsed.schemaText.includes('appointments('));
+    });
+
+    it('gracefully handles plain text business problems and provides clear defaults', () => {
+      const plainContest = {
+        title: 'ATM Withdrawal Anomaly Challenge',
+        scenario_text: 'You are the lead data architect for a high-volume financial institution. Fraud detection algorithms have flagged an abnormal cluster of international transactions occurring within minutes of local account ATM withdrawals. Explain step by step how you would identify all compromised accounts, the corresponding transaction details, and calculate the total financial exposure across all impacted customers.'
+      };
+
+      const parsed = parseContestTestContent(plainContest);
+
+      // Question separated from narrative
+      assert(parsed.question.includes('Explain step by step how you would identify all compromised accounts'));
+      assert(parsed.scenarioDescription.includes('lead data architect for a high-volume financial institution'));
+
+      // Expected output columns present
+      assert(Array.isArray(parsed.expectedOutput));
+      assert(parsed.expectedOutput.some(col => col.column === 'account_id'));
+      assert(parsed.expectedOutput.some(col => col.column === 'total_financial_exposure'));
+
+      // Banking schema assigned
+      assert(parsed.schemaText.includes('accounts('));
+      assert(parsed.schemaText.includes('transactions('));
+    });
+
+    it('enforces participant-facing view boundaries with zero confidential judge information', () => {
+      // Judge-side items that must NEVER leak to participant
+      const judgeKeywords = [
+        'answer key',
+        'model sql query',
+        'solution approach',
+        'scoring rubric',
+        'marks breakdown',
+        'judging notes',
+        'hidden traps'
+      ];
+
+      const sampleDoc = {
+        title: 'Enterprise Test',
+        scenario_text: 'Question: Find high value users.\nScenario: Analyze transactions.\nExpected Output Columns:\nuser_id\ntotal_spent'
+      };
+
+      const parsed = parseContestTestContent(sampleDoc);
+      const textDump = JSON.stringify(parsed).toLowerCase();
+
+      for (const forbidden of judgeKeywords) {
+        assert(!textDump.includes(forbidden), `Found forbidden judge keyword in participant content: ${forbidden}`);
+      }
     });
   });
 
