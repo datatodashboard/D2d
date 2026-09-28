@@ -536,7 +536,7 @@ function renderLearnersTable() {
   }
 
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">No matching learners found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty">No matching learners found.</td></tr>';
     return;
   }
 
@@ -546,7 +546,7 @@ function renderLearnersTable() {
     const pct = Math.min(100, Math.round((l.solved / totalScenariosCount) * 100));
 
     const usernameHtml = l.username 
-      ? `<strong style="font-size:0.92rem;color:var(--ink);font-weight:700;">@${escapeHtml(l.username)}</strong>`
+      ? `<strong style="font-size:0.92rem;color:var(--ink);font-weight:700;">${escapeHtml(l.username)}</strong>`
       : `<span style="color:var(--muted);font-style:italic;font-size:0.85rem;">Username not set</span>`;
 
     const emailDisplay = (l.email && l.email !== '—') ? l.email : 'No email';
@@ -563,13 +563,15 @@ function renderLearnersTable() {
       <tr class="${isEligible ? 'elig' : ''}">
         <td class="num" style="color:var(--muted); font-size:0.8rem;">${idx + 1}</td>
         <td>
-          <div class="learner-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             ${usernameHtml}
             ${l.isAdmin ? '<span class="badge admin">Admin</span>' : ''}
             ${l.contestEligible ? '<span class="badge" style="background:#fef3c7;color:#92400e;">🏆 Eligible</span>' : ''}
           </div>
-          <div class="learner-email" style="font-size:0.82rem;color:var(--muted);margin-top:2px;">
-            ✉️ ${escapeHtml(emailDisplay)}${l.name && l.name !== l.email && l.name !== l.username ? ` • <span style="color:#475569;">${escapeHtml(l.name)}</span>` : ''}
+        </td>
+        <td>
+          <div class="learner-email" style="font-size:0.85rem;color:var(--ink);">
+            ${escapeHtml(emailDisplay)}${l.name && l.name !== l.email && l.name !== l.username ? ` <span style="color:var(--muted);font-size:0.78rem;">(${escapeHtml(l.name)})</span>` : ''}
           </div>
         </td>
         <td class="num">

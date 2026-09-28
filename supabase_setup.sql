@@ -29,6 +29,9 @@ alter table public.profiles
 
 create unique index if not exists idx_profiles_username on public.profiles (lower(trim(username))) where username is not null;
 
+-- Reload PostgREST schema cache so username column is immediately recognized
+notify pgrst, 'reload schema';
+
 alter table public.profiles enable row level security;
 
 -- Auto-create profile trigger on auth.users insert

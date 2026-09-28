@@ -2742,56 +2742,46 @@ body.landscape-layout .practice-container {
 
 <!-- First-Time Username Setup Modal (Permanent Supabase Profile Handle) -->
 <div id="usernameSetupModal" class="modal-backdrop" hidden style="z-index: 100000; background: rgba(15,23,42,0.75); backdrop-filter: blur(4px);">
-  <div class="modal-dialog" style="max-width: 440px; box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.35); border-radius: 18px; border: 1.5px solid var(--line);">
+  <div class="modal-dialog" style="max-width: 420px; box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.35); border-radius: 18px; border: 1.5px solid var(--line);">
     <div class="modal-header" style="border-bottom: 1px solid var(--line); padding-bottom: 14px;">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div style="width:40px;height:40px;border-radius:10px;background:#eff6ff;color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;">@</div>
-        <div>
-          <div style="font-weight: 800; font-size: 17px; color: var(--ink);">Create Your Username</div>
-          <div style="font-size: 12px; color: var(--muted);">One-time permanent setup for Crack SQL</div>
-        </div>
+      <div>
+        <div style="font-weight: 800; font-size: 18px; color: var(--ink);">Create Username</div>
+        <div style="font-size: 12px; color: var(--muted);">One-time setup for your account</div>
       </div>
     </div>
     
-    <div style="padding: 18px 0 10px;">
-      <p style="font-size: 13.5px; color: var(--ink); margin: 0 0 14px; line-height: 1.5;">
-        Welcome to Crack SQL! Please choose a unique <strong>Username</strong>. This permanent handle links to your Supabase User ID, tracks your learning progress, and identifies your contest submissions.
-      </p>
-
+    <div style="padding: 16px 0 10px;">
       <div style="margin-bottom: 14px;">
-        <label for="usernameInput" style="display: block; font-size: 11.5px; font-weight: 800; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.6px;">
-          Choose Username
+        <label for="usernameInput" style="display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
+          Username
         </label>
-        <div style="position: relative;">
-          <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 800; color: var(--primary); font-size: 16px;">@</span>
-          <input 
-            type="text" 
-            id="usernameInput" 
-            placeholder="username" 
-            maxlength="20"
-            autocomplete="off"
-            spellcheck="false"
-            style="width: 100%; padding: 11px 12px 11px 32px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 15px; font-weight: 700; color: var(--ink); background: var(--surface); box-sizing: border-box; outline: none; transition: border-color 0.2s;"
-            oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_-]/g,''); if(window.validateUsernameField) window.validateUsernameField();"
-            onkeydown="if(event.key==='Enter') saveFirstTimeUsername();"
-          />
-        </div>
-        <div id="usernameInputHelp" style="font-size: 11.5px; color: var(--muted); margin-top: 5px;">
-          3–20 characters. Letters, numbers, underscores (_), and hyphens (-) only.
+        <input 
+          type="text" 
+          id="usernameInput" 
+          placeholder="e.g. Sundar" 
+          maxlength="30"
+          autocomplete="off"
+          spellcheck="false"
+          style="width: 100%; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 15px; font-weight: 600; color: var(--ink); background: var(--surface); box-sizing: border-box; outline: none; transition: border-color 0.2s;"
+          oninput="this.value=this.value.replace(/[^A-Za-z]/g,''); if(window.validateUsernameField) window.validateUsernameField();"
+          onkeydown="if(event.key==='Enter') saveFirstTimeUsername();"
+        />
+        <div id="usernameInputHelp" style="font-size: 11.5px; color: var(--muted); margin-top: 6px;">
+          Only normal English letters (A-Z, a-z). No numbers, spaces, or symbols.
         </div>
         <div id="usernameInputError" style="display: none; font-size: 12px; color: #dc2626; font-weight: 600; margin-top: 6px;"></div>
       </div>
 
-      <div style="background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; padding: 11px 14px; font-size: 12px; color: var(--muted); margin-bottom: 16px; line-height: 1.5;">
-        🔒 <strong>Permanent Setting:</strong> Saved permanently in your profile and linked to <strong id="usernameModalEmail" style="color:var(--ink);">your account</strong>. Every future login, refresh, or login from another device will keep this Username.
+      <div style="background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-size: 12px; color: var(--muted); margin-bottom: 16px; line-height: 1.5;">
+        🔒 Saved permanently to your account (<span id="usernameModalEmail" style="color:var(--ink);font-weight:600;"></span>). You will not be asked again on future logins.
       </div>
 
       <button 
         id="saveUsernameBtn" 
         class="action primary" 
         onclick="saveFirstTimeUsername()" 
-        style="width: 100%; padding: 12px; font-size: 14.5px; font-weight: 800; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
-        Save Username &amp; Continue
+        style="width: 100%; padding: 12px; font-size: 14.5px; font-weight: 800; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+        Save Username
       </button>
     </div>
   </div>

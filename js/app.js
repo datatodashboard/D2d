@@ -612,13 +612,30 @@ async function checkUserAccessStatus(userId) {
   if (!userId || !client) return;
 
   try {
-    const { data: profile, error: profErr } = await client
+    let profile = null;
+    const { data: profData, error: profErr } = await client
       .from('profiles')
       .select('paid_unlocked, contest_eligible, completed_count, username')
       .eq('id', userId)
       .maybeSingle();
 
-    if (!profErr && profile) {
+    if (profErr) {
+      if (profErr.message && profErr.message.includes("Could not find the 'username' column")) {
+        console.warn('[Access] Schema cache notice: retrying select without username column.');
+        const { data: fallbackData } = await client
+          .from('profiles')
+          .select('paid_unlocked, contest_eligible, completed_count')
+          .eq('id', userId)
+          .maybeSingle();
+        profile = fallbackData;
+      } else {
+        console.warn('[Access] Profiles query notice:', profErr.message);
+      }
+    } else {
+      profile = profData;
+    }
+
+    if (profile) {
       if (profile.username && !currentUsername) {
         currentUsername = profile.username.trim();
         try { localStorage.setItem(`cracksql_username_${userId}`, currentUsername); } catch (e) {}
@@ -1838,14 +1855,10 @@ function closeUsernameModal() {
 function validateUsernameField() {
   const input = $('usernameInput');
   const errorEl = $('usernameInputError');
-  if (!input || !errorEl) return;
-  const val = input.value.trim();
-  if (val.length > 0 && val.length < 3) {
-    errorEl.textContent = 'Username must be at least 3 characters.';
-    errorEl.style.display = 'block';
-  } else {
-    errorEl.style.display = 'none';
-  }
+  if (!input) return;
+  // Allow only normal English letters: A-Z, a-z. No numbers, no spaces, no symbols.
+  input.value = input.value.replace(/[^A-Za-z]/g, '');
+  if (errorEl) errorEl.style.display = 'none';
 }
 
 async function checkAndEnforceUsername(userId, userEmail) {
@@ -1866,27 +1879,59 @@ async function checkAndEnforceUsername(userId, userEmail) {
       currentUsername = cached.trim();
       renderProfileAvatar();
       renderAuth();
+      closeUsernameModal();
     }
 
-    // 3. Query the single source of truth: public.profiles table in Supabase
-    let { data: profile, error } = await client
-      .from('profiles')
-      .select('id, email, username')
-      .eq('id', userId)
-      .maybeSingle();
+    // 3. Check Supabase auth user metadata (syncs across devices for the same Google account)
+    const metaUsername = user?.user_metadata?.username;
+    if (metaUsername && typeof metaUsername === 'string' && metaUsername.trim()) {
+      currentUsername = metaUsername.trim();
+      try {
+        localStorage.setItem(`cracksql_username_${userId}`, currentUsername);
+      } catch (e) {}
+      renderProfileAvatar();
+      renderAuth();
+      closeUsernameModal();
+    }
 
-    if (error) {
-      console.warn('[Username] Profile query notice:', error);
+    // 4. Query the single source of truth: public.profiles table in Supabase
+    let profile = null;
+    try {
+      const { data, error } = await client
+        .from('profiles')
+        .select('id, email, username')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn('[Username] Profile query notice:', error.message || error);
+        if (error.message && error.message.includes("Could not find the 'username' column")) {
+          const { data: fallbackData } = await client
+            .from('profiles')
+            .select('id, email')
+            .eq('id', userId)
+            .maybeSingle();
+          profile = fallbackData;
+        }
+      } else {
+        profile = data;
+      }
+    } catch (queryErr) {
+      console.warn('[Username] Profile query exception:', queryErr);
     }
 
     // If profile row doesn't exist yet, insert it
     if (!profile) {
-      const { data: newProf } = await client
-        .from('profiles')
-        .upsert({ id: userId, email: userEmail, last_active: new Date().toISOString() }, { onConflict: 'id' })
-        .select('id, email, username')
-        .maybeSingle();
-      if (newProf) profile = newProf;
+      try {
+        const { data: newProf } = await client
+          .from('profiles')
+          .upsert({ id: userId, email: userEmail, last_active: new Date().toISOString() }, { onConflict: 'id' })
+          .select('id, email')
+          .maybeSingle();
+        if (newProf) profile = newProf;
+      } catch (insErr) {
+        console.warn('[Username] Insert profile notice:', insErr);
+      }
     }
 
     const dbUsername = (profile?.username || '').trim();
@@ -1901,14 +1946,18 @@ async function checkAndEnforceUsername(userId, userEmail) {
       return dbUsername;
     }
 
-    // If we had a locally cached username that wasn't saved in DB, push it to DB
+    // If we have currentUsername from auth metadata/cache, ensure it's saved to profiles table
     if (currentUsername) {
-      await client.from('profiles').update({ username: currentUsername }).eq('id', userId);
+      try {
+        await client.from('profiles').update({ username: currentUsername }).eq('id', userId);
+      } catch (syncErr) {
+        console.warn('[Username] Background sync to profiles notice:', syncErr);
+      }
       closeUsernameModal();
       return currentUsername;
     }
 
-    // 4. No permanent username exists -> Show permanent username setup modal
+    // 5. No permanent username exists -> Show simple Create Username box
     openUsernameModal(userId, userEmail);
   } catch (err) {
     console.error('[Username] Error checking username status:', err);
@@ -1921,23 +1970,14 @@ async function saveFirstTimeUsername() {
   const btn = $('saveUsernameBtn');
   if (!input || !client || !user) return;
 
-  const raw = input.value.trim().toLowerCase();
-  const clean = raw.replace(/[^a-z0-9_-]/g, '');
+  // Allow only normal English letters: A-Z, a-z (preserve case, e.g. Sundar, DataDashboard)
+  const clean = input.value.trim().replace(/[^A-Za-z]/g, '');
 
   if (errorEl) errorEl.style.display = 'none';
 
-  if (!clean || clean.length < 3) {
+  if (!clean || !/^[A-Za-z]+$/.test(clean)) {
     if (errorEl) {
-      errorEl.textContent = 'Username must be at least 3 characters.';
-      errorEl.style.display = 'block';
-    }
-    input.focus();
-    return;
-  }
-
-  if (clean.length > 20) {
-    if (errorEl) {
-      errorEl.textContent = 'Username cannot exceed 20 characters.';
+      errorEl.textContent = 'Please enter a username using only letters (A-Z, a-z).';
       errorEl.style.display = 'block';
     }
     input.focus();
@@ -1950,51 +1990,32 @@ async function saveFirstTimeUsername() {
   }
 
   try {
-    // Check if another user has already taken this username
-    const { data: existing, error: checkErr } = await client
-      .from('profiles')
-      .select('id, username')
-      .ilike('username', clean)
-      .neq('id', user.id)
-      .maybeSingle();
+    // 1. Check if another user has already taken this username (case-insensitive)
+    try {
+      const { data: existing } = await client
+        .from('profiles')
+        .select('id, username')
+        .ilike('username', clean)
+        .neq('id', user.id)
+        .maybeSingle();
 
-    if (checkErr) {
+      if (existing && existing.id && existing.id !== user.id) {
+        if (errorEl) {
+          errorEl.textContent = `The username "${clean}" is already taken. Please choose another.`;
+          errorEl.style.display = 'block';
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = 'Save Username';
+        }
+        input.focus();
+        return;
+      }
+    } catch (checkErr) {
       console.warn('[Username] Uniqueness check notice:', checkErr);
     }
 
-    if (existing && existing.id && existing.id !== user.id) {
-      if (errorEl) {
-        errorEl.textContent = `The username "@${clean}" is already taken. Please choose another.`;
-        errorEl.style.display = 'block';
-      }
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = 'Save Username & Continue';
-      }
-      input.focus();
-      return;
-    }
-
-    // Save permanently in the existing Supabase profile linked to user.id
-    const { error: saveErr } = await client
-      .from('profiles')
-      .upsert({
-        id: user.id,
-        email: user.email,
-        username: clean,
-        last_active: new Date().toISOString()
-      }, { onConflict: 'id' });
-
-    if (saveErr) throw saveErr;
-
-    // Cache in localStorage
-    try {
-      localStorage.setItem(`cracksql_username_${user.id}`, clean);
-    } catch (e) {}
-
-    currentUsername = clean;
-
-    // Best-effort update to Supabase auth user metadata
+    // 2. Persist to Supabase auth user metadata (guarantees cross-device permanence for Google account)
     try {
       await client.auth.updateUser({
         data: { username: clean }
@@ -2003,10 +2024,63 @@ async function saveFirstTimeUsername() {
       console.warn('[Username] Auth user metadata notice:', metaErr);
     }
 
+    // 3. Save permanently to user's existing Supabase profile linked to User ID
+    try {
+      const { error: saveErr } = await client
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          email: user.email,
+          username: clean,
+          last_active: new Date().toISOString()
+        }, { onConflict: 'id' });
+
+      if (saveErr) {
+        if (saveErr.code === '23505' || (saveErr.message && saveErr.message.includes('unique'))) {
+          if (errorEl) {
+            errorEl.textContent = `The username "${clean}" is already taken. Please choose another.`;
+            errorEl.style.display = 'block';
+          }
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = 'Save Username';
+          }
+          input.focus();
+          return;
+        }
+
+        if (saveErr.message && saveErr.message.includes("Could not find the 'username' column")) {
+          console.warn("[Username] Database schema cache notice: 'username' column not in schema cache. Run `NOTIFY pgrst, 'reload schema';`");
+        } else {
+          throw saveErr;
+        }
+      }
+    } catch (dbErr) {
+      console.warn('[Username] Database save notice:', dbErr);
+      if (!dbErr.message || !dbErr.message.includes("Could not find the 'username' column")) {
+        if (errorEl) {
+          errorEl.textContent = 'Failed to save username: ' + (dbErr.message || 'Please retry.');
+          errorEl.style.display = 'block';
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = 'Save Username';
+        }
+        return;
+      }
+    }
+
+    // 4. Cache in localStorage for immediate future page loads on this device
+    try {
+      localStorage.setItem(`cracksql_username_${user.id}`, clean);
+    } catch (e) {}
+
+    currentUsername = clean;
+
     closeUsernameModal();
     renderProfileAvatar();
     renderAuth();
-    console.log(`[Username] Successfully saved permanent username "@${clean}" for user ${user.id}`);
+    console.log(`[Username] Successfully saved permanent username "${clean}" for user ${user.id}`);
   } catch (err) {
     console.error('[Username] Error saving username:', err);
     if (errorEl) {
@@ -2015,7 +2089,7 @@ async function saveFirstTimeUsername() {
     }
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = 'Save Username & Continue';
+      btn.innerHTML = 'Save Username';
     }
   }
 }
@@ -2033,7 +2107,7 @@ function getUserInfo() {
   }
   const meta = user.user_metadata || {};
   const metaName = meta.full_name || meta.name;
-  const name = currentUsername ? `@${currentUsername}` : (metaName || (user.email ? user.email.split('@')[0] : 'Learner'));
+  const name = currentUsername ? currentUsername : (metaName || (user.email ? user.email.split('@')[0] : 'Learner'));
   const email = user.email || 'learner@local';
   const initial = (currentUsername ? currentUsername[0] : (name[0] || email[0] || 'U')).toUpperCase();
   const avatarUrl = meta.avatar_url || meta.picture || null;
