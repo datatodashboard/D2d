@@ -3,9 +3,10 @@
 -- Run this in: Supabase Dashboard -> SQL Editor -> New query -> Run
 -- ============================================================
 
--- 1. Profiles Table with paid_unlocked, contest_eligible, completed_count
+-- 1. Profiles Table with paid_unlocked, contest_eligible, completed_count, and username
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
+  username text unique,
   email text,
   is_admin boolean default false,
   paid_unlocked boolean default false,
@@ -17,6 +18,7 @@ create table if not exists public.profiles (
 
 -- Ensure columns exist if table was created earlier
 alter table public.profiles
+  add column if not exists username text,
   add column if not exists email text,
   add column if not exists is_admin boolean default false,
   add column if not exists paid_unlocked boolean default false,
@@ -24,6 +26,8 @@ alter table public.profiles
   add column if not exists completed_count integer default 0,
   add column if not exists created_at timestamptz default now(),
   add column if not exists last_active timestamptz default now();
+
+create unique index if not exists idx_profiles_username on public.profiles (lower(trim(username))) where username is not null;
 
 alter table public.profiles enable row level security;
 

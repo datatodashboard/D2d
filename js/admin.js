@@ -418,16 +418,18 @@ async function loadDashboardData() {
         return s > 0 ? `${d} (${s})` : d;
       }).join(', ') || 'None yet';
 
-      // Name & email formatting
+      // Username, Name & email formatting
+      const username = p.username ? String(p.username).trim() : null;
       const name = p.full_name || p.display_name || p.name || null;
       const email = p.email || null;
-      const displayName = name || email || 'Anonymous Learner';
+      const displayName = username ? `@${username}` : (name || email || 'Anonymous Learner');
 
       // Last active date from profiles.last_active, progressRow.updated_at, or profiles.created_at
       const lastActivity = p.last_active || (progressRow?.updated_at ? new Date(progressRow.updated_at).getTime() : null) || p.created_at || null;
 
       return {
         id: userId,
+        username,
         name,
         email: email || '—',
         displayName,
@@ -475,6 +477,7 @@ function renderLearnersTable() {
   const filtered = learnersData.filter(l => {
     if (!searchQuery) return true;
     return (
+      (l.username && l.username.toLowerCase().includes(searchQuery)) ||
       l.displayName.toLowerCase().includes(searchQuery) ||
       l.email.toLowerCase().includes(searchQuery) ||
       l.id.toLowerCase().includes(searchQuery)
@@ -509,8 +512,8 @@ function renderLearnersTable() {
       return sortAsc ? (timeA - timeB) : (timeB - timeA);
     }
 
-    valA = String(a.displayName || a.email || '').toLowerCase();
-    valB = String(b.displayName || b.email || '').toLowerCase();
+    valA = String(a.username || a.displayName || a.email || '').toLowerCase();
+    valB = String(b.username || b.displayName || b.email || '').toLowerCase();
 
     if (valA < valB) return sortAsc ? -1 : 1;
     if (valA > valB) return sortAsc ? 1 : -1;
@@ -542,7 +545,11 @@ function renderLearnersTable() {
     const isEligible = (currentThreshold > 0 && l.solved >= currentThreshold) || l.contestEligible;
     const pct = Math.min(100, Math.round((l.solved / totalScenariosCount) * 100));
 
-    const subText = (l.name && l.email && l.email !== '—') ? l.email : l.id;
+    const usernameHtml = l.username 
+      ? `<strong style="font-size:0.92rem;color:var(--ink);font-weight:700;">@${escapeHtml(l.username)}</strong>`
+      : `<span style="color:var(--muted);font-style:italic;font-size:0.85rem;">Username not set</span>`;
+
+    const emailDisplay = (l.email && l.email !== '—') ? l.email : 'No email';
 
     const paidBadge = l.paidUnlocked 
       ? '<span class="badge verified">✓ Unlocked (₹49)</span>' 
@@ -556,12 +563,14 @@ function renderLearnersTable() {
       <tr class="${isEligible ? 'elig' : ''}">
         <td class="num" style="color:var(--muted); font-size:0.8rem;">${idx + 1}</td>
         <td>
-          <div class="learner-name">
-            ${escapeHtml(l.displayName)}
+          <div class="learner-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            ${usernameHtml}
             ${l.isAdmin ? '<span class="badge admin">Admin</span>' : ''}
             ${l.contestEligible ? '<span class="badge" style="background:#fef3c7;color:#92400e;">🏆 Eligible</span>' : ''}
           </div>
-          <div class="learner-email">${escapeHtml(subText)}</div>
+          <div class="learner-email" style="font-size:0.82rem;color:var(--muted);margin-top:2px;">
+            ✉️ ${escapeHtml(emailDisplay)}${l.name && l.name !== l.email && l.name !== l.username ? ` • <span style="color:#475569;">${escapeHtml(l.name)}</span>` : ''}
+          </div>
         </td>
         <td class="num">
           <div style="font-weight:700;">${l.solved} <span class="of-total">/ ${totalScenariosCount}</span> (${pct}%)</div>
@@ -625,17 +634,18 @@ function exportCSV() {
     return;
   }
 
-  let csv = 'Index,User ID,Name,Email,Role,Solved,Attempted,Completion %,Top Domains,Reached Threshold,Last Active\n';
+  let csv = 'Index,User ID,Username,Name,Email,Role,Solved,Attempted,Completion %,Top Domains,Reached Threshold,Last Active\n';
   learnersData.forEach((l, idx) => {
     const pct = Math.min(100, Math.round((l.solved / totalScenariosCount) * 100));
     const role = l.isAdmin ? 'Admin' : 'Learner';
+    const cleanUsername = (l.username || 'Username not set').replace(/"/g, '""');
     const cleanName = (l.name || '').replace(/"/g, '""');
     const cleanEmail = (l.email || '').replace(/"/g, '""');
     const cleanDomains = (l.topDomains || '').replace(/"/g, '""');
     const reachedStr = l.reachedAt ? new Date(l.reachedAt).toISOString() : '';
     const activeStr = l.lastActivity ? new Date(l.lastActivity).toISOString() : '';
 
-    csv += `"${idx + 1}","${l.id}","${cleanName}","${cleanEmail}","${role}",${l.solved},${l.attempted},"${pct}%","${cleanDomains}","${reachedStr}","${activeStr}"\n`;
+    csv += `"${idx + 1}","${l.id}","${cleanUsername}","${cleanName}","${cleanEmail}","${role}",${l.solved},${l.attempted},"${pct}%","${cleanDomains}","${reachedStr}","${activeStr}"\n`;
   });
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -1053,6 +1063,8 @@ function renderContestsList() {
           ${c.status !== 'ARCHIVED' ? `
             <button class="action danger sm" style="margin-left:auto;" onclick="window.updateContestStatus('${c.id}', 'ARCHIVED')">Archive</button>
           ` : ''}
+
+          <button class="action danger sm" style="${c.status === 'ARCHIVED' ? 'margin-left:auto;' : ''}" onclick="window.deleteContest('${c.id}')" title="Permanently delete this contest">🗑️ Delete</button>
         </div>
       </div>
     `;
@@ -1090,6 +1102,8 @@ export function openContestEditor(contestId = null) {
     scen.value = c.scenario_text || '';
     inst.value = c.instructions || '';
     rules.value = c.rules || '';
+    const btnDel = $('btnDeleteContestFromEditor');
+    if (btnDel) btnDel.style.display = 'inline-block';
   } else {
     titleEl.textContent = 'Create New Contest (Starts as DRAFT)';
     idEl.value = '';
@@ -1102,6 +1116,8 @@ export function openContestEditor(contestId = null) {
     scen.value = 'You are the lead data architect for a high-volume financial institution. Fraud detection algorithms have flagged an abnormal cluster of international transactions occurring within minutes of local account ATM withdrawals. Explain step by step how you would identify all compromised accounts, the corresponding transaction details, and calculate the total financial exposure across all impacted customers.';
     inst.value = 'Explain step by step how you would solve this problem. Do not write SQL. Consider the required data, tables, filters, relationships, calculations and expected result.';
     rules.value = '1. Each participant receives exactly ONE official attempt.\n2. Official timer begins immediately upon start and cannot be reset.\n3. Procedural answers are auto-saved in draft mode.\n4. Admin evaluation score out of 100 determines official rankings.';
+    const btnDel = $('btnDeleteContestFromEditor');
+    if (btnDel) btnDel.style.display = 'none';
   }
 
   modal.style.display = 'flex';
@@ -1234,6 +1250,53 @@ export async function updateContestStatus(contestId, newStatus) {
   } catch (err) {
     alert('Status update error: ' + err.message);
   }
+}
+
+// 4b. Delete Contest
+export async function deleteContest(contestId) {
+  if (!client || !contestId) return;
+
+  const contest = contestsData.find(c => c.id === contestId);
+  const title = contest ? contest.title : 'this contest';
+
+  const confirmed = confirm(
+    `Are you sure you want to permanently delete "${title}"?\n\n` +
+    `• Only this selected contest and its related contest data (eligibility, registrations, attempts, evaluations) will be permanently deleted.\n` +
+    `• Users, authentication accounts, normal Practice progress, and learning progress will NOT be touched.\n` +
+    `• Other contests will not be affected.\n\n` +
+    `Click OK to proceed with deletion.`
+  );
+  if (!confirmed) return;
+
+  try {
+    // 1. Delete dependent contest data explicitly to guarantee clean deletion
+    await client.from('contest_evaluations').delete().eq('contest_id', contestId);
+    await client.from('contest_attempts').delete().eq('contest_id', contestId);
+    await client.from('contest_registrations').delete().eq('contest_id', contestId);
+    await client.from('contest_eligibility').delete().eq('contest_id', contestId);
+
+    // 2. Delete the contest record itself
+    const { error } = await client.from('contests').delete().eq('id', contestId);
+    if (error) throw error;
+
+    // 3. If currently viewing details for this contest, switch back to list view
+    if (selectedContestId === contestId) {
+      backToContestsList();
+    }
+
+    // 4. Refresh contest list so the deleted contest disappears
+    await loadContests();
+  } catch (err) {
+    console.error('Error deleting contest:', err);
+    alert('Failed to delete contest: ' + (err.message || err));
+  }
+}
+
+export async function deleteContestFromEditor() {
+  const id = $('editContestId')?.value;
+  if (!id) return;
+  closeEditorModal();
+  await deleteContest(id);
 }
 
 // 5. Audience Selector Modal
@@ -1802,6 +1865,8 @@ Object.assign(window, {
   saveContestForm,
   duplicateContest,
   updateContestStatus,
+  deleteContest,
+  deleteContestFromEditor,
   openAudienceSelector,
   closeAudienceModal,
   filterAudienceList,

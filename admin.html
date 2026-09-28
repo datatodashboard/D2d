@@ -151,7 +151,7 @@ textarea.form-control{min-height:90px;font-family:inherit;}
           <thead>
             <tr>
               <th class="num">#</th>
-              <th data-sort="email">Learner</th>
+              <th data-sort="email">Learner (Username &amp; Email)</th>
               <th class="num" data-sort="solved">Solved / Progress</th>
               <th class="num" data-sort="attempted">Attempted</th>
               <th>Course Access (₹49)</th>
@@ -346,9 +346,12 @@ textarea.form-control{min-height:90px;font-family:inherit;}
         <textarea id="contestRulesInput" class="form-control" rows="3" placeholder="One attempt per user. Timer starts immediately upon launch."></textarea>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="action secondary" onclick="window.closeEditorModal()">Cancel</button>
-      <button class="action primary" onclick="window.saveContestForm()">Save Contest</button>
+    <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+      <button id="btnDeleteContestFromEditor" class="action danger" style="display:none;" onclick="window.deleteContestFromEditor()">🗑️ Delete Contest</button>
+      <div style="display:flex;gap:8px;margin-left:auto;">
+        <button class="action secondary" onclick="window.closeEditorModal()">Cancel</button>
+        <button class="action primary" onclick="window.saveContestForm()">Save Contest</button>
+      </div>
     </div>
   </div>
 </div>

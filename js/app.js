@@ -12,6 +12,7 @@ let data, scenarios=[], ids=new Set(), state=EMPTY(), current=null, user=null;
 let selectedDomain=null, selectedLevel=null, client=null, deferredPrompt=null, syncTimer=null;
 let isPaidUnlocked = false, userPendingPayment = null;
 let authNotice='';
+let currentUsername = null;
 let storage;
 try { storage=window.localStorage; } catch { storage={getItem(){return null;},setItem(){throw Error('Storage unavailable');}}; }
 
@@ -613,11 +614,17 @@ async function checkUserAccessStatus(userId) {
   try {
     const { data: profile, error: profErr } = await client
       .from('profiles')
-      .select('paid_unlocked, contest_eligible, completed_count')
+      .select('paid_unlocked, contest_eligible, completed_count, username')
       .eq('id', userId)
       .maybeSingle();
 
     if (!profErr && profile) {
+      if (profile.username && !currentUsername) {
+        currentUsername = profile.username.trim();
+        try { localStorage.setItem(`cracksql_username_${userId}`, currentUsername); } catch (e) {}
+        renderProfileAvatar();
+        renderAuth();
+      }
       if (profile.paid_unlocked === true) {
         isPaidUnlocked = true;
       }
@@ -1564,7 +1571,9 @@ function renderAuth() {
   const loginMsg = $('loginErrorMessage');
   if (loginMsg && authNotice) loginMsg.textContent = authNotice;
 
-  $('authBox').innerHTML=user?'<div class="auth-row"><span>Signed in as '+escapeHtml(user.email||'learner')+'</span><button class="linkbtn" onclick="signOut()">Sign out</button></div>':'';
+  const displayHandle = currentUsername ? `@${currentUsername}` : (user?.email || 'learner');
+  const emailSub = currentUsername && user?.email ? ` <span style="font-size:0.85em;color:var(--muted);">(${escapeHtml(user.email)})</span>` : '';
+  $('authBox').innerHTML=user?'<div class="auth-row"><span>Signed in as <strong>'+escapeHtml(displayHandle)+'</strong>'+emailSub+'</span><button class="linkbtn" onclick="signOut()">Sign out</button></div>':'';
   if($('authMessage'))$('authMessage').textContent=authNotice;
   $('importGuest').hidden=!user;
   $('importCloud').hidden=!user;
@@ -1650,10 +1659,12 @@ async function setSession(session) {
       // Load user's existing progress from Supabase, restore, and update Progress page
       await loadAndRestoreUserProgress(user.id);
       await checkUserAccessStatus(user.id);
+      await checkAndEnforceUsername(user.id, user.email);
       void checkAdminStatus();
     } else {
       renderAuth();
       await checkUserAccessStatus(user.id);
+      await checkAndEnforceUsername(user.id, user.email);
       void checkAdminStatus();
     }
     showScreen('home');
@@ -1663,6 +1674,8 @@ async function setSession(session) {
     isCurrentUserAdmin = false;
     isPaidUnlocked = false;
     userPendingPayment = null;
+    currentUsername = null;
+    closeUsernameModal();
     closePaywallModal();
     updateAdminPortalVisibility();
     if ($('loginScreen')) $('loginScreen').hidden = false;
@@ -1782,24 +1795,252 @@ function initLandscapeMode() {
   document.querySelectorAll('.btn-landscape-toggle').forEach(btn => btn.remove());
 }
 
+// -----------------------------------------------------------------------------
+// Permanent First-Time Username System
+// -----------------------------------------------------------------------------
+function openUsernameModal(userId, userEmail) {
+  const modal = $('usernameSetupModal');
+  if (!modal) return;
+  modal.hidden = false;
+
+  const emailEl = $('usernameModalEmail');
+  if (emailEl) emailEl.textContent = userEmail || 'your Google account';
+
+  const input = $('usernameInput');
+  const errorEl = $('usernameInputError');
+  const btn = $('saveUsernameBtn');
+
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.style.display = 'none';
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = 'Save Username & Continue';
+  }
+
+  if (input) {
+    if (!input.value && userEmail) {
+      const suggested = userEmail.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 15);
+      input.value = suggested;
+    }
+    setTimeout(() => {
+      try { input.focus(); } catch (e) {}
+    }, 150);
+  }
+}
+
+function closeUsernameModal() {
+  const modal = $('usernameSetupModal');
+  if (modal) modal.hidden = true;
+}
+
+function validateUsernameField() {
+  const input = $('usernameInput');
+  const errorEl = $('usernameInputError');
+  if (!input || !errorEl) return;
+  const val = input.value.trim();
+  if (val.length > 0 && val.length < 3) {
+    errorEl.textContent = 'Username must be at least 3 characters.';
+    errorEl.style.display = 'block';
+  } else {
+    errorEl.style.display = 'none';
+  }
+}
+
+async function checkAndEnforceUsername(userId, userEmail) {
+  if (!userId || !client) return;
+
+  try {
+    // 1. If already known in-memory, ensure UI is synced and modal is closed
+    if (currentUsername) {
+      renderProfileAvatar();
+      renderAuth();
+      closeUsernameModal();
+      return currentUsername;
+    }
+
+    // 2. Check local storage cache for instant rendering
+    const cached = localStorage.getItem(`cracksql_username_${userId}`);
+    if (cached && cached.trim()) {
+      currentUsername = cached.trim();
+      renderProfileAvatar();
+      renderAuth();
+    }
+
+    // 3. Query the single source of truth: public.profiles table in Supabase
+    let { data: profile, error } = await client
+      .from('profiles')
+      .select('id, email, username')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Username] Profile query notice:', error);
+    }
+
+    // If profile row doesn't exist yet, insert it
+    if (!profile) {
+      const { data: newProf } = await client
+        .from('profiles')
+        .upsert({ id: userId, email: userEmail, last_active: new Date().toISOString() }, { onConflict: 'id' })
+        .select('id, email, username')
+        .maybeSingle();
+      if (newProf) profile = newProf;
+    }
+
+    const dbUsername = (profile?.username || '').trim();
+    if (dbUsername) {
+      currentUsername = dbUsername;
+      try {
+        localStorage.setItem(`cracksql_username_${userId}`, dbUsername);
+      } catch (e) {}
+      renderProfileAvatar();
+      renderAuth();
+      closeUsernameModal();
+      return dbUsername;
+    }
+
+    // If we had a locally cached username that wasn't saved in DB, push it to DB
+    if (currentUsername) {
+      await client.from('profiles').update({ username: currentUsername }).eq('id', userId);
+      closeUsernameModal();
+      return currentUsername;
+    }
+
+    // 4. No permanent username exists -> Show permanent username setup modal
+    openUsernameModal(userId, userEmail);
+  } catch (err) {
+    console.error('[Username] Error checking username status:', err);
+  }
+}
+
+async function saveFirstTimeUsername() {
+  const input = $('usernameInput');
+  const errorEl = $('usernameInputError');
+  const btn = $('saveUsernameBtn');
+  if (!input || !client || !user) return;
+
+  const raw = input.value.trim().toLowerCase();
+  const clean = raw.replace(/[^a-z0-9_-]/g, '');
+
+  if (errorEl) errorEl.style.display = 'none';
+
+  if (!clean || clean.length < 3) {
+    if (errorEl) {
+      errorEl.textContent = 'Username must be at least 3 characters.';
+      errorEl.style.display = 'block';
+    }
+    input.focus();
+    return;
+  }
+
+  if (clean.length > 20) {
+    if (errorEl) {
+      errorEl.textContent = 'Username cannot exceed 20 characters.';
+      errorEl.style.display = 'block';
+    }
+    input.focus();
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>Saving Username…</span>';
+  }
+
+  try {
+    // Check if another user has already taken this username
+    const { data: existing, error: checkErr } = await client
+      .from('profiles')
+      .select('id, username')
+      .ilike('username', clean)
+      .neq('id', user.id)
+      .maybeSingle();
+
+    if (checkErr) {
+      console.warn('[Username] Uniqueness check notice:', checkErr);
+    }
+
+    if (existing && existing.id && existing.id !== user.id) {
+      if (errorEl) {
+        errorEl.textContent = `The username "@${clean}" is already taken. Please choose another.`;
+        errorEl.style.display = 'block';
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = 'Save Username & Continue';
+      }
+      input.focus();
+      return;
+    }
+
+    // Save permanently in the existing Supabase profile linked to user.id
+    const { error: saveErr } = await client
+      .from('profiles')
+      .upsert({
+        id: user.id,
+        email: user.email,
+        username: clean,
+        last_active: new Date().toISOString()
+      }, { onConflict: 'id' });
+
+    if (saveErr) throw saveErr;
+
+    // Cache in localStorage
+    try {
+      localStorage.setItem(`cracksql_username_${user.id}`, clean);
+    } catch (e) {}
+
+    currentUsername = clean;
+
+    // Best-effort update to Supabase auth user metadata
+    try {
+      await client.auth.updateUser({
+        data: { username: clean }
+      });
+    } catch (metaErr) {
+      console.warn('[Username] Auth user metadata notice:', metaErr);
+    }
+
+    closeUsernameModal();
+    renderProfileAvatar();
+    renderAuth();
+    console.log(`[Username] Successfully saved permanent username "@${clean}" for user ${user.id}`);
+  } catch (err) {
+    console.error('[Username] Error saving username:', err);
+    if (errorEl) {
+      errorEl.textContent = 'Failed to save username: ' + (err.message || 'Please retry.');
+      errorEl.style.display = 'block';
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = 'Save Username & Continue';
+    }
+  }
+}
+
 function getUserInfo() {
   if (!user) {
     return {
       isLoggedIn: false,
       name: 'Guest Learner',
+      username: null,
       email: 'Practicing on this device',
       initial: 'G',
       avatarUrl: null
     };
   }
   const meta = user.user_metadata || {};
-  const name = meta.full_name || meta.name || (user.email ? user.email.split('@')[0] : 'Learner');
+  const metaName = meta.full_name || meta.name;
+  const name = currentUsername ? `@${currentUsername}` : (metaName || (user.email ? user.email.split('@')[0] : 'Learner'));
   const email = user.email || 'learner@local';
-  const initial = (name[0] || email[0] || 'U').toUpperCase();
+  const initial = (currentUsername ? currentUsername[0] : (name[0] || email[0] || 'U')).toUpperCase();
   const avatarUrl = meta.avatar_url || meta.picture || null;
   return {
     isLoggedIn: true,
     name,
+    username: currentUsername || null,
     email,
     initial,
     avatarUrl
@@ -1879,8 +2120,17 @@ function openProfileModal() {
     }
   }
 
-  if ($('modalProfileName')) $('modalProfileName').textContent = info.name;
+  if ($('modalProfileName')) $('modalProfileName').textContent = currentUsername ? `@${currentUsername}` : info.name;
   if ($('modalProfileEmail')) $('modalProfileEmail').textContent = info.email;
+  const uBadge = $('modalProfileUsernameBadge');
+  if (uBadge) {
+    if (currentUsername) {
+      uBadge.style.display = 'inline-block';
+      uBadge.textContent = `@${currentUsername}`;
+    } else {
+      uBadge.style.display = 'none';
+    }
+  }
   if ($('modalProfileStatus')) {
     $('modalProfileStatus').textContent = info.isLoggedIn ? '✓ Google Account Connected' : 'Guest Mode (Local Practice)';
     $('modalProfileStatus').style.background = info.isLoggedIn ? '#dcfce7' : '#eff6ff';
@@ -2007,6 +2257,7 @@ Object.assign(window,{
   handleModalAuthAction,openMyProgress,handleProfileSignOut,openAdminPortal,
   copySchemaAndOpenFiddle,isCompleted,isAttempted,
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
+  saveFirstTimeUsername,validateUsernameField,closeUsernameModal,
   sqlEngineManager
 });
 try {
