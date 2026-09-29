@@ -647,58 +647,124 @@ async function checkUserAccessStatus(userId) {
   if (!userId || !client) return;
 
   try {
-    let profile = null;
-    const { data: profData, error: profErr } = await client
-      .from('profiles')
-      .select('paid_unlocked, contest_eligible, completed_count, username')
-      .eq('id', userId)
-      .maybeSingle();
+    const activeUser = (user && user.id === userId) ? user : (await client.auth.getUser())?.data?.user;
+    const userEmail = activeUser?.email || '';
 
-    if (profErr) {
-      if (profErr.message && profErr.message.includes("Could not find the 'username' column")) {
-        console.warn('[Access] Schema cache notice: retrying select without username column.');
-        const { data: fallbackData } = await client
+    // Helper to query the profile row from public.profiles
+    async function fetchProfile() {
+      // Primary select: get existing profile fields
+      const { data, error } = await client
+        .from('profiles')
+        .select('id, email, username, is_admin, paid_unlocked, contest_eligible, completed_count')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (!error) return { profile: data, error: null };
+
+      // Schema cache fallback if 'username' column is not in PostgREST cache
+      if (error && (error.message?.includes('username') || error.code === 'PGRST204')) {
+        console.warn('[Access] Retrying profiles select without username column.');
+        const { data: fbData, error: fbErr } = await client
           .from('profiles')
-          .select('paid_unlocked, contest_eligible, completed_count')
+          .select('id, email, is_admin, paid_unlocked, contest_eligible, completed_count')
           .eq('id', userId)
           .maybeSingle();
-        profile = fallbackData;
-      } else {
-        console.warn('[Access] Profiles query notice:', profErr.message);
-        showAccessCheckError('Could not verify account profile. Click Retry to check again.');
+
+        if (!fbErr) return { profile: fbData, error: null };
+        return { profile: null, error: fbErr };
       }
-    } else {
-      profile = profData;
+
+      return { profile: null, error };
     }
 
+    let { profile, error: profErr } = await fetchProfile();
+
+    // If profile does not exist: create profile using existing profile system (authenticated user ID and email)
+    if (!profile && !profErr) {
+      console.log('[Access] No profile row found for user; creating profile row for', userId);
+      try {
+        const { error: insErr } = await client
+          .from('profiles')
+          .upsert({
+            id: userId,
+            email: userEmail,
+            last_active: new Date().toISOString()
+          }, { onConflict: 'id', ignoreDuplicates: true });
+
+        if (insErr) {
+          console.warn('[Access] Insert profile notice:', insErr.message || insErr);
+        }
+      } catch (insEx) {
+        console.warn('[Access] Insert profile exception:', insEx);
+      }
+
+      // Then load the profile again
+      const recheck = await fetchProfile();
+      profile = recheck.profile;
+      profErr = recheck.error;
+    }
+
+    // If the profile exists:
+    // - Load the profile normally.
+    // - Load username.
+    // - Load is_admin.
+    // - Continue into the app normally.
+    // - Do not show the profile verification error.
     if (profile) {
-      if (profile.username && !currentUsername) {
-        currentUsername = profile.username.trim();
-        try { localStorage.setItem(`cracksql_username_${userId}`, currentUsername); } catch (e) {}
+      hideAccessError();
+
+      // Load username (do not overwrite existing username with empty value)
+      const dbUsername = (profile.username || '').trim();
+      if (dbUsername) {
+        currentUsername = dbUsername;
+        try { localStorage.setItem(`cracksql_username_${userId}`, dbUsername); } catch (e) {}
         renderProfileAvatar();
         renderAuth();
+      } else if (!currentUsername) {
+        const cached = localStorage.getItem(`cracksql_username_${userId}`);
+        if (cached) {
+          currentUsername = cached.trim();
+          renderProfileAvatar();
+          renderAuth();
+        }
       }
+
+      // Load is_admin normally
+      if (profile.is_admin === true) {
+        isCurrentUserAdmin = true;
+        updateAdminPortalVisibility();
+      }
+
+      // Load paid_unlocked normally
       if (profile.paid_unlocked === true) {
         isPaidUnlocked = true;
       }
+    } else if (profErr) {
+      console.warn('[Access] Could not verify account profile:', profErr.message || profErr);
+      showAccessCheckError('Could not verify account profile. Click Retry to check again.');
     }
 
-    const { data: payments, error: payErr } = await client
-      .from('payments')
-      .select('*')
-      .eq('user_id', userId)
-      .order('submitted_at', { ascending: false })
-      .limit(1);
+    // Check payment status
+    try {
+      const { data: payments, error: payErr } = await client
+        .from('payments')
+        .select('*')
+        .eq('user_id', userId)
+        .order('submitted_at', { ascending: false })
+        .limit(1);
 
-    if (payErr) {
-      console.warn('[Access] Payments query notice:', payErr.message);
-    } else if (payments && payments.length > 0) {
-      const latestPay = payments[0];
-      if (latestPay.status === 'verified') {
-        isPaidUnlocked = true;
-      } else if (latestPay.status === 'pending') {
-        userPendingPayment = latestPay;
+      if (payErr) {
+        console.warn('[Access] Payments query notice:', payErr.message);
+      } else if (payments && payments.length > 0) {
+        const latestPay = payments[0];
+        if (latestPay.status === 'verified') {
+          isPaidUnlocked = true;
+        } else if (latestPay.status === 'pending') {
+          userPendingPayment = latestPay;
+        }
       }
+    } catch (payEx) {
+      console.warn('[Access] Payments check exception:', payEx);
     }
 
     const currentCompleted = getCompletedCount();
@@ -707,23 +773,29 @@ async function checkUserAccessStatus(userId) {
     try {
       await client.rpc('sync_user_progress');
     } catch (e) {
-      if (isCurrentUserAdmin) {
-        await client.from('profiles').update({
-          completed_count: currentCompleted,
-          contest_eligible: currentCompleted >= 18,
-          last_active: new Date().toISOString()
-        }).eq('id', userId);
-      } else {
-        await client.from('profiles').update({
-          last_active: new Date().toISOString()
-        }).eq('id', userId);
+      try {
+        if (isCurrentUserAdmin) {
+          await client.from('profiles').update({
+            completed_count: currentCompleted,
+            contest_eligible: currentCompleted >= 18,
+            last_active: new Date().toISOString()
+          }).eq('id', userId);
+        } else {
+          await client.from('profiles').update({
+            last_active: new Date().toISOString()
+          }).eq('id', userId);
+        }
+      } catch (updErr) {
+        console.warn('[Access] Progress update notice:', updErr);
       }
     }
 
     void initContest(client, user, currentCompleted, isCurrentUserAdmin);
   } catch (err) {
     console.warn('checkUserAccessStatus warning:', err);
-    showAccessCheckError('Could not verify account access status. Click Retry to check again.');
+    if (!currentUsername && !isCurrentUserAdmin && !isPaidUnlocked) {
+      showAccessCheckError('Could not verify account profile. Click Retry to check again.');
+    }
   }
 }
 
@@ -1770,11 +1842,6 @@ async function setSession(session) {
     await checkUserAccessStatus(user.id);
     if (currentAuthToken !== authSessionCounter) return;
 
-    // If both admin check and profile query had issues and user is not verified, show retryable banner
-    if (adminCheckResult && adminCheckResult.error && !isCurrentUserAdmin && !isPaidUnlocked) {
-      showAccessCheckError('Could not verify account permissions. Click Retry to check again.');
-    }
-
     // 4. Username setup
     await checkAndEnforceUsername(user.id, user.email);
     if (currentAuthToken !== authSessionCounter) return;
@@ -2022,7 +2089,7 @@ async function checkAndEnforceUsername(userId, userEmail) {
       try {
         const { data: newProf } = await client
           .from('profiles')
-          .upsert({ id: userId, email: userEmail, last_active: new Date().toISOString() }, { onConflict: 'id' })
+          .upsert({ id: userId, email: userEmail, last_active: new Date().toISOString() }, { onConflict: 'id', ignoreDuplicates: true })
           .select('id, email')
           .maybeSingle();
         if (newProf) profile = newProf;
