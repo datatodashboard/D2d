@@ -1048,63 +1048,365 @@ function evaluatePlan() {
   openMotivationPopup(score);
 }
 
+const MOTIVATION_STATES = {
+  5: {
+    scoreDisplay: '5 / 10',
+    title: 'Keep Going!',
+    subtitle: "You're on the right track!",
+    tip: 'A little more thinking will make it even better!',
+    theme: {
+      scoreColor: '#ea580c',
+      titleColor: '#ea580c',
+      tipBg: '#fff7ed',
+      tipBorder: '#ffedd5',
+      tipText: '#9a3412',
+      cardBorder: '#fdba74',
+      cardGlow: '0 0 35px rgba(249, 115, 22, 0.28), 0 20px 45px rgba(15, 23, 42, 0.18)',
+      starColor: '#f97316'
+    },
+    showNext: false
+  },
+  6: {
+    scoreDisplay: '6 / 10',
+    title: 'Getting Better!',
+    subtitle: "You're making progress!",
+    tip: 'Try to explain a bit more for an even stronger answer!',
+    theme: {
+      scoreColor: '#d97706',
+      titleColor: '#d97706',
+      tipBg: '#fefce8',
+      tipBorder: '#fef08a',
+      tipText: '#854d0e',
+      cardBorder: '#fde047',
+      cardGlow: '0 0 35px rgba(245, 158, 11, 0.28), 0 20px 45px rgba(15, 23, 42, 0.18)',
+      starColor: '#f59e0b'
+    },
+    showNext: false
+  },
+  7: {
+    scoreDisplay: '7 / 10',
+    title: 'Good Job!',
+    subtitle: 'Well thought out!',
+    tip: 'Nice thinking! Keep this level and aim higher!',
+    theme: {
+      scoreColor: '#15803d',
+      titleColor: '#15803d',
+      tipBg: '#f0fdf4',
+      tipBorder: '#bbf7d0',
+      tipText: '#166534',
+      cardBorder: '#86efac',
+      cardGlow: '0 0 35px rgba(34, 197, 94, 0.28), 0 20px 45px rgba(15, 23, 42, 0.18)',
+      starColor: '#22c55e'
+    },
+    showNext: true
+  },
+  8: {
+    scoreDisplay: '8 / 10',
+    title: 'Great Thinking!',
+    subtitle: "You're doing really well!",
+    tip: 'Clear and logical thinking! Keep it up!',
+    theme: {
+      scoreColor: '#0284c7',
+      titleColor: '#1d4ed8',
+      tipBg: '#f0f9ff',
+      tipBorder: '#bae6fd',
+      tipText: '#0369a1',
+      cardBorder: '#7dd3fc',
+      cardGlow: '0 0 35px rgba(14, 165, 233, 0.32), 0 20px 45px rgba(15, 23, 42, 0.18)',
+      starColor: '#38bdf8'
+    },
+    showNext: true
+  },
+  9: {
+    scoreDisplay: '9 / 10',
+    title: 'Excellent Work!',
+    subtitle: "You're almost there!",
+    tip: 'Very strong thinking! Just a bit more to reach perfection!',
+    theme: {
+      scoreColor: '#7c3aed',
+      titleColor: '#6d28d9',
+      tipBg: '#faf5ff',
+      tipBorder: '#e9d5ff',
+      tipText: '#6b21a8',
+      cardBorder: '#d8b4fe',
+      cardGlow: '0 0 35px rgba(147, 51, 234, 0.32), 0 20px 45px rgba(15, 23, 42, 0.18)',
+      starColor: '#a855f7'
+    },
+    showNext: true
+  },
+  10: {
+    scoreDisplay: '10 / 10',
+    title: 'Perfect!',
+    subtitle: 'Outstanding Thinking!',
+    tip: "Amazing! You've got a clear and complete understanding!",
+    theme: {
+      scoreColor: '#d97706',
+      titleColor: '#b45309',
+      tipBg: '#fefce8',
+      tipBorder: '#fef08a',
+      tipText: '#92400e',
+      cardBorder: '#fde047',
+      cardGlow: '0 0 45px rgba(245, 158, 11, 0.42), 0 20px 45px rgba(15, 23, 42, 0.18)',
+      starColor: '#fbbf24'
+    },
+    showNext: true
+  }
+};
+
+function getMotivationMascotSvg(score) {
+  if (score >= 10) {
+    return `<svg viewBox="0 0 120 120" width="115" height="115" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="18" y="32" width="5" height="5" rx="1" fill="#EF4444" transform="rotate(25 18 32)"/>
+      <rect x="98" y="24" width="5" height="5" rx="1" fill="#3B82F6" transform="rotate(40 98 24)"/>
+      <circle cx="26" cy="54" r="2.5" fill="#22C55E"/>
+      <circle cx="102" cy="48" r="3" fill="#F59E0B"/>
+      <path d="M12 42L14 38L16 42L20 43.5L16 45L14 49L12 45L8 43.5L12 42Z" fill="#FBBF24"/>
+      <path d="M96 68L97.5 64L99 68L103 69.5L99 71L97.5 75L96 71L92 69.5L96 68Z" fill="#FBBF24"/>
+      <path d="M38 38L34 25L43 30L52 20L61 30L70 25L66 38H38Z" fill="#FBBF24" stroke="#0F172A" stroke-width="2.5" stroke-linejoin="round"/>
+      <circle cx="52" cy="20" r="2" fill="#EF4444"/>
+      <circle cx="34" cy="25" r="1.5" fill="#3B82F6"/>
+      <circle cx="70" cy="25" r="1.5" fill="#3B82F6"/>
+      <path d="M30 84C22 66 30 46 54 46C74 46 84 64 78 84C76 94 66 98 54 98C42 98 34 94 30 84Z" fill="#FFFFFF" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <ellipse cx="42" cy="99" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="66" cy="99" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="38" cy="69" rx="4.5" ry="3" fill="#FCA5A5"/>
+      <ellipse cx="68" cy="69" rx="4.5" ry="3" fill="#FCA5A5"/>
+      <path d="M38 59C40 56 44 56 46 59" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="62" cy="58" r="3.2" fill="#0F172A"/>
+      <path d="M46 67C46 74 60 74 60 67Z" fill="#EF4444" stroke="#0F172A" stroke-width="2"/>
+      <g transform="translate(68, 44)">
+        <path d="M10 2C18 2 24 6 24 16C24 24 18 28 10 28C2 28 -4 24 -4 16C-4 6 2 2 10 2Z" fill="#FBBF24" stroke="#0F172A" stroke-width="2"/>
+        <path d="M-4 6C-9 6 -11 12 -8 16C-6 19 -4 18 -4 18" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/>
+        <path d="M24 6C29 6 31 12 28 16C26 19 24 18 24 18" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/>
+        <rect x="8" y="28" width="4" height="6" fill="#F59E0B" stroke="#0F172A" stroke-width="1.5"/>
+        <rect x="4" y="34" width="12" height="5" rx="1.5" fill="#D97706" stroke="#0F172A" stroke-width="2"/>
+        <line x1="0" y1="8" x2="20" y2="8" stroke="#FEF08A" stroke-width="1.5" stroke-linecap="round"/>
+      </g>
+      <path d="M30 68C24 70 24 76 30 78" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <ellipse cx="68" cy="68" rx="4.5" ry="3.5" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+    </svg>`;
+  } else if (score === 9) {
+    return `<svg viewBox="0 0 120 120" width="115" height="115" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M60 12L62 18L68 20L62 22L60 28L58 22L52 20L58 18L60 12Z" fill="#A855F7"/>
+      <path d="M26 28L28 34L34 36L28 38L26 44L24 38L18 36L24 34L26 28Z" fill="#F59E0B"/>
+      <path d="M94 28L96 34L102 36L96 38L94 44L92 38L86 36L92 34L94 28Z" fill="#F59E0B"/>
+      <circle cx="16" cy="62" r="3" fill="#C084FC"/>
+      <circle cx="104" cy="62" r="3" fill="#C084FC"/>
+      <path d="M34 82C26 62 34 42 60 42C86 42 94 62 86 82C82 92 72 96 60 96C48 96 38 92 34 82Z" fill="#FFFFFF" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <ellipse cx="48" cy="97" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="72" cy="97" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="42" cy="68" rx="5" ry="3" fill="#FCA5A5"/>
+      <ellipse cx="78" cy="68" rx="5" ry="3" fill="#FCA5A5"/>
+      <path d="M48 52L50 58L56 60L50 62L48 68L46 62L40 60L46 58L48 52Z" fill="#F59E0B" stroke="#0F172A" stroke-width="1.2"/>
+      <path d="M72 52L74 58L80 60L74 62L72 68L70 62L64 60L70 58L72 52Z" fill="#F59E0B" stroke="#0F172A" stroke-width="1.2"/>
+      <ellipse cx="60" cy="68" rx="4.5" ry="5.5" fill="#EF4444" stroke="#0F172A" stroke-width="2"/>
+      <ellipse cx="53" cy="80" rx="5.5" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="67" cy="80" rx="5.5" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+    </svg>`;
+  } else if (score === 8) {
+    return `<svg viewBox="0 0 120 120" width="115" height="115" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M60 10L62 16L68 18L62 20L60 26L58 20L52 18L58 16L60 10Z" fill="#38BDF8"/>
+      <path d="M34 22L35.5 26L40 27.5L35.5 29L34 33L32.5 29L28 27.5L32.5 26L34 22Z" fill="#F59E0B"/>
+      <path d="M86 22L87.5 26L92 27.5L87.5 29L86 33L84.5 29L80 27.5L84.5 26L86 22Z" fill="#F59E0B"/>
+      <circle cx="22" cy="50" r="3" fill="#7DD3FC"/>
+      <circle cx="98" cy="50" r="3" fill="#7DD3FC"/>
+      <path d="M36 86C28 66 36 46 60 46C84 46 92 66 84 86C80 96 70 100 60 100C48 100 40 96 36 86Z" fill="#FFFFFF" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <ellipse cx="48" cy="101" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="72" cy="101" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <path d="M36 56C28 50 22 42 20 36C20 34 24 34 26 38L34 50" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M84 56C92 50 98 42 100 36C100 34 96 34 94 38L86 50" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5" stroke-linejoin="round"/>
+      <ellipse cx="44" cy="71" rx="4.5" ry="3" fill="#FCA5A5"/>
+      <ellipse cx="76" cy="71" rx="4.5" ry="3" fill="#FCA5A5"/>
+      <path d="M46 62C48 59 52 59 54 62" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M66 62C68 59 72 59 74 62" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M52 69C52 76 68 76 68 69Z" fill="#EF4444" stroke="#0F172A" stroke-width="2"/>
+    </svg>`;
+  } else if (score === 7) {
+    return `<svg viewBox="0 0 120 120" width="115" height="115" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 42L20 36L22 42L28 44L22 46L20 52L18 46L12 44L18 42Z" fill="#4ADE80"/>
+      <path d="M96 28L98 22L100 28L106 30L100 32L98 38L96 32L90 30L96 28Z" fill="#22C55E"/>
+      <circle cx="28" cy="74" r="3" fill="#86EFAC"/>
+      <circle cx="94" cy="68" r="2.5" fill="#FDE047"/>
+      <path d="M40 84C32 64 40 42 64 42C86 42 94 64 88 84C86 94 76 98 64 98C50 98 42 94 40 84Z" fill="#FFFFFF" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <ellipse cx="52" cy="99" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="76" cy="99" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="48" cy="69" rx="4.5" ry="3" fill="#FCA5A5"/>
+      <ellipse cx="78" cy="69" rx="4.5" ry="3" fill="#FCA5A5"/>
+      <circle cx="53" cy="59" r="3.2" fill="#0F172A"/>
+      <circle cx="73" cy="59" r="3.2" fill="#0F172A"/>
+      <path d="M57 68C57 73 69 73 69 68" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <g transform="translate(24, 58)">
+        <path d="M16 14C12 14 8 12 6 8" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+        <ellipse cx="8" cy="10" rx="5" ry="4.5" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+        <path d="M8 8V2C8 0.5 6.5 0 5 0C3.5 0 3 1.5 3 3V8" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5" stroke-linejoin="round"/>
+      </g>
+      <path d="M88 72C92 74 94 78 91 82" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>`;
+  } else if (score === 6) {
+    return `<svg viewBox="0 0 120 120" width="115" height="115" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M22 36L24 30L26 36L32 38L26 40L24 46L22 40L16 38L22 36Z" fill="#FBBF24"/>
+      <path d="M30 75L31.5 71L33 75L37 76.5L33 78L31.5 82L30 78L26 76.5L30 75Z" fill="#F59E0B"/>
+      <circle cx="88" cy="24" r="3" fill="#FDE047"/>
+      <path d="M32 82C26 62 34 40 56 40C76 40 84 60 80 82C78 92 68 96 56 96C44 96 34 92 32 82Z" fill="#FFFFFF" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <ellipse cx="44" cy="97" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="68" cy="97" rx="7" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+      <ellipse cx="40" cy="66" rx="4.5" ry="3" fill="#FCA5A5"/>
+      <ellipse cx="66" cy="66" rx="4.5" ry="3" fill="#FCA5A5"/>
+      <path d="M41 57C43 54 47 54 49 57" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="63" cy="56" r="3" fill="#0F172A"/>
+      <path d="M49 66C49 71 57 71 57 66Z" fill="#EF4444" stroke="#0F172A" stroke-width="2"/>
+      <path d="M32 70C28 72 28 77 34 78" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <g transform="rotate(-15 80 65)">
+        <rect x="76" y="24" width="16" height="8" rx="3" fill="#F472B6" stroke="#0F172A" stroke-width="2"/>
+        <rect x="76" y="32" width="16" height="6" fill="#94A3B8" stroke="#0F172A" stroke-width="2"/>
+        <rect x="76" y="38" width="16" height="38" fill="#F59E0B" stroke="#0F172A" stroke-width="2"/>
+        <line x1="81" y1="38" x2="81" y2="76" stroke="#D97706" stroke-width="1.5"/>
+        <line x1="87" y1="38" x2="87" y2="76" stroke="#D97706" stroke-width="1.5"/>
+        <polygon points="76,76 92,76 84,94" fill="#FDE68A" stroke="#0F172A" stroke-width="2"/>
+        <polygon points="81,87 87,87 84,94" fill="#0F172A"/>
+      </g>
+      <ellipse cx="74" cy="70" rx="5" ry="4" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+    </svg>`;
+  } else {
+    // 5 / 10 and below
+    return `<svg viewBox="0 0 120 120" width="115" height="115" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M60 6C54.5 6 50 10.5 50 16C50 19.5 52 22.5 55 24.5V28H65V24.5C68 22.5 70 19.5 70 16C70 10.5 65.5 6 60 6Z" fill="#FBBF24"/>
+      <path d="M57 28H63V30C63 30.5 62.5 31 62 31H58C57.5 31 57 30.5 57 30V28Z" fill="#94A3B8"/>
+      <circle cx="60" cy="16" r="4.5" fill="#FEF08A"/>
+      <line x1="60" y1="2" x2="60" y2="0" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+      <line x1="48" y1="8" x2="45" y2="5" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+      <line x1="72" y1="8" x2="75" y2="5" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+      <line x1="43" y1="18" x2="40" y2="18" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+      <line x1="77" y1="18" x2="80" y2="18" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+      <path d="M36 78C32 64 38 46 60 46C82 46 88 64 84 78C82 85 76 88 60 88C44 88 38 85 36 78Z" fill="#FFFFFF" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <ellipse cx="46" cy="67" rx="4" ry="2.5" fill="#FCA5A5" opacity="0.8"/>
+      <ellipse cx="74" cy="67" rx="4" ry="2.5" fill="#FCA5A5" opacity="0.8"/>
+      <path d="M47 59C49 61 51 61 53 59" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M67 59C69 61 71 61 73 59" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M59 67H62" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/>
+      <path d="M37 54C37 54 35 57 35 58C35 59.1 35.9 60 37 60C38.1 60 39 59.1 39 58C39 57 37 54 37 54Z" fill="#38BDF8"/>
+      <rect x="18" y="94" width="22" height="7" rx="2" fill="#0284C7" stroke="#0F172A" stroke-width="2"/>
+      <rect x="19" y="87" width="20" height="7" rx="2" fill="#16A34A" stroke="#0F172A" stroke-width="2"/>
+      <path d="M36 86L58 84V102L36 104Z" fill="#F97316" stroke="#0F172A" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M84 86L62 84V102L84 104Z" fill="#F97316" stroke="#0F172A" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M38 88L58 86V99L38 101Z" fill="#FFF7ED"/>
+      <path d="M82 88L62 86V99L82 101Z" fill="#FFF7ED"/>
+      <line x1="42" y1="91" x2="54" y2="90" stroke="#CBD5E1" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="42" y1="94" x2="52" y2="93" stroke="#CBD5E1" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="66" y1="90" x2="78" y2="91" stroke="#CBD5E1" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="68" y1="93" x2="78" y2="94" stroke="#CBD5E1" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M42 80L38 72L42 70" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+      <rect x="36" y="66" width="4" height="12" rx="1.5" transform="rotate(-30 36 66)" fill="#EAB308" stroke="#0F172A" stroke-width="1.5"/>
+    </svg>`;
+  }
+}
+
+function getPopupStarsHtml(color, isPerfect) {
+  const star = (top, left, size, fill, opacity = 1) => `
+    <svg style="position:absolute;top:${top};left:${left};pointer-events:none;opacity:${opacity};" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${fill}" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 0L14.9 8.5L24 12L14.9 15.5L12 24L9.1 15.5L0 12L9.1 8.5L12 0Z"/>
+    </svg>
+  `;
+  let html = `
+    ${star('-12px', '40px', '22', color, '0.9')}
+    ${star('-8px', 'calc(50% - 11px)', '26', color, '1')}
+    ${star('-14px', 'calc(100% - 55px)', '18', color, '0.85')}
+    ${star('28px', '-10px', '16', color, '0.75')}
+    ${star('34px', 'calc(100% - 6px)', '18', color, '0.8')}
+    ${star('calc(100% - 35px)', '-8px', '14', color, '0.7')}
+    ${star('calc(100% - 40px)', 'calc(100% - 4px)', '16', color, '0.75')}
+  `;
+  if (isPerfect) {
+    html += `
+      <span style="position:absolute;top:-10px;left:25%;width:6px;height:6px;background:#ef4444;border-radius:1px;transform:rotate(18deg);"></span>
+      <span style="position:absolute;top:-6px;right:25%;width:6px;height:6px;background:#3b82f6;border-radius:1px;transform:rotate(45deg);"></span>
+      <span style="position:absolute;top:50%;left:-12px;width:7px;height:5px;background:#22c55e;border-radius:1px;transform:rotate(30deg);"></span>
+      <span style="position:absolute;top:60%;right:-10px;width:6px;height:6px;background:#ec4899;border-radius:1px;transform:rotate(12deg);"></span>
+    `;
+  }
+  return html;
+}
+
 function openMotivationPopup(score) {
   const modal = $('motivationModal');
   if (!modal) return;
 
-  const numericScore = typeof score === 'number' ? score : 0;
-  const badge = $('motivationScoreBadge');
-  const msg = $('motivationMessage');
+  const rawScore = typeof score === 'number' ? score : 0;
+  const clampedScore = Math.max(0, Math.min(10, Math.round(rawScore)));
+  const stateKey = clampedScore < 5 ? 5 : clampedScore;
+  const config = MOTIVATION_STATES[stateKey] || MOTIVATION_STATES[5];
+
+  const card = $('motivationCard');
+  const mascot = $('motivationMascot');
+  const scoreNum = $('motivationScoreNum');
+  const title = $('motivationTitle');
+  const subtitle = $('motivationSubtitle');
+  const tipBox = $('motivationTipBox');
+  const tipText = $('motivationTipText');
+  const starsLayer = $('motivationStarsLayer');
   const retryBtn = $('motivationRetryBtn');
   const nextBtn = $('nextButton');
 
-  if (badge) {
-    badge.textContent = `Thinking Score: ${numericScore}/10`;
-    if (numericScore >= 7) {
-      badge.style.background = '#dcfce7';
-      badge.style.color = '#166534';
-    } else if (numericScore >= 5) {
-      badge.style.background = '#fef3c7';
-      badge.style.color = '#92400e';
-    } else {
-      badge.style.background = '#f1f5f9';
-      badge.style.color = '#475569';
-    }
+  // Compatibility elements
+  if ($('motivationScoreBadge')) {
+    $('motivationScoreBadge').textContent = `Thinking Score: ${clampedScore}/10`;
+  }
+  if ($('motivationMessage')) {
+    $('motivationMessage').textContent = config.title;
   }
 
-  if (msg) {
-    if (numericScore === 10) {
-      msg.textContent = 'Outstanding! Perfect intuition and complete breakdown.';
-    } else if (numericScore === 9) {
-      msg.textContent = 'Excellent! Your data engineering plan is spot on.';
-    } else if (numericScore === 8) {
-      msg.textContent = 'Great work! Solid intuition and clear logic.';
-    } else if (numericScore === 7) {
-      msg.textContent = 'Well done! You cracked the intuition to proceed.';
-    } else if (numericScore === 6) {
-      msg.textContent = "Good attempt! You're very close — review the plan and try again to hit 7+.";
-    } else if (numericScore === 5) {
-      msg.textContent = 'Fair effort! You have the basics down. Review the guidance and retry.';
-    } else if (numericScore >= 3) {
-      msg.textContent = 'Keep practicing! Review the tables and filtering logic, then try again.';
-    } else {
-      msg.textContent = 'Keep practicing! Break down the problem step-by-step and try again.';
-    }
+  // Mascot SVG illustration
+  if (mascot) {
+    mascot.innerHTML = getMotivationMascotSvg(clampedScore);
   }
 
+  // Score display
+  if (scoreNum) {
+    scoreNum.textContent = clampedScore < 5 ? `${clampedScore} / 10` : config.scoreDisplay;
+    scoreNum.style.color = config.theme.scoreColor;
+  }
+
+  // Title
+  if (title) {
+    title.textContent = config.title;
+    title.style.color = config.theme.titleColor;
+  }
+
+  // Subtitle
+  if (subtitle) {
+    subtitle.textContent = config.subtitle;
+  }
+
+  // Tip box
+  if (tipBox && tipText) {
+    tipText.textContent = config.tip;
+    tipBox.style.background = config.theme.tipBg;
+    tipBox.style.border = `1px solid ${config.theme.tipBorder}`;
+    tipBox.style.color = config.theme.tipText;
+  }
+
+  // Card border & colored outer glow matching reference image
+  if (card) {
+    card.style.border = `2px solid ${config.theme.cardBorder}`;
+    card.style.boxShadow = config.theme.cardGlow;
+  }
+
+  // Stars & decorative layer
+  if (starsLayer) {
+    starsLayer.innerHTML = getPopupStarsHtml(config.theme.starColor, clampedScore === 10);
+  }
+
+  // Retry is shown for every score (full-width if alone, half-width if next is shown)
   if (retryBtn) {
     retryBtn.hidden = false;
     retryBtn.style.display = 'inline-flex';
-    retryBtn.style.alignItems = 'center';
-    retryBtn.style.justifyContent = 'center';
   }
 
+  // Next Scenario is shown only for scores 7, 8, 9, 10
   if (nextBtn) {
-    if (numericScore >= 7) {
+    if (config.showNext && clampedScore >= 7) {
       nextBtn.hidden = false;
       nextBtn.style.display = 'inline-flex';
-      nextBtn.style.alignItems = 'center';
-      nextBtn.style.justifyContent = 'center';
       nextBtn.disabled = false;
     } else {
       nextBtn.hidden = true;

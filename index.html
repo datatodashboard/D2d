@@ -504,6 +504,174 @@ button:disabled { opacity:.5; cursor:not-allowed; }
   color: var(--muted); cursor: pointer; padding: 4px 8px; border-radius: 8px;
 }
 .modal-close-btn:hover { background: #f1f5f9; color: var(--ink); }
+
+/* Thinking Score Motivation Popup */
+.thinking-modal-dialog {
+  background: #ffffff;
+  border-radius: 28px;
+  max-width: 440px;
+  width: 100%;
+  padding: 24px 22px 20px;
+  position: relative;
+  overflow: visible;
+  animation: popupEntrance 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+@keyframes popupEntrance {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.thinking-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  font-weight: 700;
+  color: #94a3b8;
+  cursor: pointer;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  z-index: 10;
+}
+.thinking-modal-close:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.popup-stars-layer {
+  position: absolute;
+  inset: -16px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.thinking-popup-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+  margin-bottom: 16px;
+  position: relative;
+  z-index: 2;
+}
+.thinking-popup-character {
+  flex-shrink: 0;
+  width: 125px;
+  height: 125px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.thinking-popup-info {
+  flex: 1;
+  text-align: left;
+}
+.thinking-popup-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 2px;
+  letter-spacing: 0.2px;
+}
+.thinking-popup-score {
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1.1;
+  margin-bottom: 2px;
+  letter-spacing: -0.5px;
+}
+.thinking-popup-title {
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.2;
+  margin-bottom: 3px;
+}
+.thinking-popup-subtitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.3;
+}
+
+.thinking-popup-tip-box {
+  border-radius: 14px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 18px;
+  text-align: left;
+  position: relative;
+  z-index: 2;
+}
+.thinking-popup-tip-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.thinking-popup-actions {
+  display: flex;
+  gap: 10px;
+  position: relative;
+  z-index: 2;
+}
+.thinking-retry-btn {
+  background: #f1f5f9;
+  border: 1.5px solid #e2e8f0;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 12px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+  transition: background 0.15s, border-color 0.15s;
+}
+.thinking-retry-btn:hover {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+}
+.thinking-next-btn {
+  background: #1d4ed8;
+  border: none;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 12px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+  transition: background 0.15s;
+}
+.thinking-next-btn:hover {
+  background: #1e40af;
+}
 .onboard-step { display: flex; gap: 14px; margin-bottom: 14px; align-items: flex-start; }
 .onboard-num {
   width: 32px; height: 32px; border-radius: 50%; background: var(--soft);
@@ -2828,14 +2996,49 @@ body.landscape-layout .practice-container {
   </div>
 </div>
 
-<!-- Motivation Popup Modal -->
+<!-- Motivation Popup Modal (Thinking Score Result) -->
 <div id="motivationModal" class="modal-backdrop" hidden onclick="if(event.target===this)closeMotivationModal()">
-  <div class="modal-dialog" style="max-width: 380px; text-align: center; padding: 24px 20px;">
-    <div id="motivationScoreBadge" style="display: inline-block; font-size: 13px; font-weight: 800; padding: 4px 14px; border-radius: 999px; margin-bottom: 12px;"></div>
-    <div id="motivationMessage" style="font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.5; margin-bottom: 20px;"></div>
-    <div id="motivationActions" style="display: flex; gap: 10px; justify-content: center;">
-      <button class="action secondary" id="motivationRetryBtn" onclick="handleMotivationRetry()" style="flex: 1; height: 42px; font-size: 14px; font-weight: 700; border-radius: 10px;">Retry</button>
-      <button class="action primary sql-next-btn" id="nextButton" onclick="handleMotivationNext()" style="flex: 1; height: 42px; font-size: 14px; font-weight: 700; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+  <div id="motivationCard" class="modal-dialog thinking-modal-dialog">
+    <!-- Close Button -->
+    <button class="thinking-modal-close" onclick="closeMotivationModal()" aria-label="Close" type="button">✕</button>
+
+    <!-- Floating Decorative Stars / Confetti Layer -->
+    <div id="motivationStarsLayer" class="popup-stars-layer" aria-hidden="true"></div>
+
+    <!-- Character & Score Row -->
+    <div class="thinking-popup-body">
+      <!-- Mascot Illustration -->
+      <div id="motivationMascot" class="thinking-popup-character"></div>
+
+      <!-- Score & Motivation Text -->
+      <div class="thinking-popup-info">
+        <div class="thinking-popup-label">Thinking Score</div>
+        <div id="motivationScoreNum" class="thinking-popup-score"></div>
+        <div id="motivationTitle" class="thinking-popup-title"></div>
+        <div id="motivationSubtitle" class="thinking-popup-subtitle"></div>
+      </div>
+    </div>
+
+    <!-- Hidden compatibility elements for existing test/DOM lookups -->
+    <div id="motivationScoreBadge" style="display:none;" hidden></div>
+    <div id="motivationMessage" style="display:none;" hidden></div>
+
+    <!-- Tip / Guidance Box -->
+    <div id="motivationTipBox" class="thinking-popup-tip-box">
+      <span class="thinking-popup-tip-icon">💡</span>
+      <span id="motivationTipText"></span>
+    </div>
+
+    <!-- Actions (Retry & Next Scenario) -->
+    <div class="thinking-popup-actions" id="motivationActions">
+      <button class="thinking-retry-btn" id="motivationRetryBtn" onclick="handleMotivationRetry()" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+        </svg>
+        <span>Retry</span>
+      </button>
+      <button class="thinking-next-btn sql-next-btn" id="nextButton" onclick="handleMotivationNext()" type="button">
         <span>Next Scenario</span>
         <span class="btn-icon">→</span>
       </button>

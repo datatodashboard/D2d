@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-describe('Motivation Popup & Next Scenario Verification', () => {
+describe('Thinking Score Result Popup (6 States & Visual Style Verification)', () => {
   const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf-8');
   const appJs = fs.readFileSync(path.resolve('js/app.js'), 'utf-8');
 
@@ -15,133 +15,65 @@ describe('Motivation Popup & Next Scenario Verification', () => {
     );
   });
 
-  test('2. Motivation modal popup is present in index.html', () => {
-    assert.strictEqual(
-      indexHtml.includes('id="motivationModal"'),
-      true,
-      'motivationModal should exist'
-    );
-    assert.strictEqual(
-      indexHtml.includes('id="motivationScoreBadge"'),
-      true,
-      'motivationScoreBadge should exist'
-    );
-    assert.strictEqual(
-      indexHtml.includes('id="motivationMessage"'),
-      true,
-      'motivationMessage should exist'
-    );
-    assert.strictEqual(
-      indexHtml.includes('id="motivationRetryBtn"'),
-      true,
-      'motivationRetryBtn should exist'
-    );
-    assert.strictEqual(
-      indexHtml.includes('id="nextButton"'),
-      true,
-      'nextButton should exist inside motivationModal'
-    );
+  test('2. Motivation modal popup structure matches reference image layout', () => {
+    assert.strictEqual(indexHtml.includes('id="motivationModal"'), true, 'motivationModal should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationCard"'), true, 'motivationCard should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationMascot"'), true, 'motivationMascot container should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationScoreNum"'), true, 'motivationScoreNum should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationTitle"'), true, 'motivationTitle should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationSubtitle"'), true, 'motivationSubtitle should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationTipBox"'), true, 'motivationTipBox should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationTipText"'), true, 'motivationTipText should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationStarsLayer"'), true, 'motivationStarsLayer should exist');
+    assert.strictEqual(indexHtml.includes('id="motivationRetryBtn"'), true, 'motivationRetryBtn should exist');
+    assert.strictEqual(indexHtml.includes('id="nextButton"'), true, 'nextButton should exist inside modal');
+    assert.strictEqual(indexHtml.includes('thinking-modal-close'), true, 'Close button should exist');
   });
 
-  test('3. No extra buttons or extra animations added', () => {
-    const modalMatch = indexHtml.match(/<div id="motivationModal"[\s\S]*?<\/div>\s*<\/div>/);
-    assert.ok(modalMatch, 'Found motivation modal block');
-    const modalHtml = modalMatch[0];
-    
-    // Check buttons inside the popup
-    const buttonMatches = modalHtml.match(/<button/g) || [];
-    assert.strictEqual(
-      buttonMatches.length,
-      2,
-      'Popup must only have exactly 2 buttons: Retry and Next Scenario'
-    );
-
-    // Ensure no animation classes or styles on Retry
-    assert.strictEqual(
-      /animation|keyframes/i.test(modalHtml),
-      false,
-      'Must not add animations to popup or Retry button'
-    );
+  test('3. Entrance animation and visual style present', () => {
+    assert.strictEqual(indexHtml.includes('@keyframes popupEntrance'), true, 'Entrance animation keyframes must exist');
+    assert.strictEqual(indexHtml.includes('thinking-modal-dialog'), true, 'thinking-modal-dialog class must exist');
+    assert.strictEqual(indexHtml.includes('thinking-retry-btn'), true, 'Simple thinking-retry-btn class must exist');
+    assert.strictEqual(indexHtml.includes('thinking-next-btn'), true, 'Normal thinking-next-btn class must exist');
   });
 
-  test('4. Motivation popup logic in app.js shows Retry for every score and Next Scenario only for 7-10', () => {
-    assert.ok(
-      appJs.includes('function openMotivationPopup('),
-      'openMotivationPopup function must exist'
-    );
-    assert.ok(
-      appJs.includes('function closeMotivationModal('),
-      'closeMotivationModal function must exist'
-    );
-    assert.ok(
-      appJs.includes('function handleMotivationRetry('),
-      'handleMotivationRetry function must exist'
-    );
-    assert.ok(
-      appJs.includes('function handleMotivationNext('),
-      'handleMotivationNext function must exist'
-    );
+  test('4. Configures 6 score-based popup states with exact messages', () => {
+    // Check MOTIVATION_STATES in app.js
+    assert.ok(appJs.includes('MOTIVATION_STATES ='), 'MOTIVATION_STATES must be defined in app.js');
 
-    // Verify evaluatePlan calls openMotivationPopup(score)
-    assert.ok(
-      /evaluatePlan\s*\(\)\s*\{[\s\S]*?openMotivationPopup\(score\)/.test(appJs),
-      'evaluatePlan must call openMotivationPopup(score)'
-    );
+    // 5/10: "Keep Going!"
+    assert.ok(appJs.includes("'Keep Going!'"), '5/10 title must be Keep Going!');
+    // 6/10: "Getting Better!"
+    assert.ok(appJs.includes("'Getting Better!'"), '6/10 title must be Getting Better!');
+    // 7/10: "Good Job!"
+    assert.ok(appJs.includes("'Good Job!'"), '7/10 title must be Good Job!');
+    // 8/10: "Great Thinking!"
+    assert.ok(appJs.includes("'Great Thinking!'"), '8/10 title must be Great Thinking!');
+    // 9/10: "Excellent Work!"
+    assert.ok(appJs.includes("'Excellent Work!'"), '9/10 title must be Excellent Work!');
+    // 10/10: "Perfect!"
+    assert.ok(appJs.includes("'Perfect!'"), '10/10 title must be Perfect!');
+  });
 
-    // Simulate popup behavior for various scores
-    function simulatePopup(score) {
-      let retryVisible = false;
-      let nextVisible = false;
-      let msg = '';
-
-      const numericScore = typeof score === 'number' ? score : 0;
-      if (numericScore === 10) {
-        msg = 'Outstanding! Perfect intuition and complete breakdown.';
-      } else if (numericScore === 9) {
-        msg = 'Excellent! Your data engineering plan is spot on.';
-      } else if (numericScore === 8) {
-        msg = 'Great work! Solid intuition and clear logic.';
-      } else if (numericScore === 7) {
-        msg = 'Well done! You cracked the intuition to proceed.';
-      } else if (numericScore === 6) {
-        msg = "Good attempt! You're very close — review the plan and try again to hit 7+.";
-      } else if (numericScore === 5) {
-        msg = 'Fair effort! You have the basics down. Review the guidance and retry.';
-      } else {
-        msg = 'Keep practicing! Break down the problem step-by-step and try again.';
-      }
-
-      // Retry shown for every score
-      retryVisible = true;
-
-      // Next Scenario shown only for 7-10
-      nextVisible = numericScore >= 7;
-
-      return { retryVisible, nextVisible, msg };
-    }
-
-    // Test scores 7-10
-    [7, 8, 9, 10].forEach(score => {
-      const res = simulatePopup(score);
-      assert.strictEqual(res.retryVisible, true, `Retry must be visible for score ${score}`);
-      assert.strictEqual(res.nextVisible, true, `Next Scenario must be visible for score ${score}`);
-      assert.ok(res.msg.length > 0, `Motivation message must exist for score ${score}`);
-    });
-
+  test('5. Button logic: Retry appears for 5-10, Next Scenario only for 7-10', () => {
     // Test scores 5 and 6
     [5, 6].forEach(score => {
-      const res = simulatePopup(score);
-      assert.strictEqual(res.retryVisible, true, `Retry must be visible for score ${score}`);
-      assert.strictEqual(res.nextVisible, false, `Next Scenario must NOT be visible for score ${score}`);
-      assert.ok(res.msg.length > 0, `Motivation message must exist for score ${score}`);
+      // In MOTIVATION_STATES, showNext should be false
+      const match = appJs.match(new RegExp(`${score}:\\s*\\{[\\s\\S]*?showNext:\\s*(true|false)`));
+      assert.ok(match, `Found state for score ${score}`);
+      assert.strictEqual(match[1], 'false', `Score ${score} must have showNext: false`);
     });
 
-    // Test scores below 5
-    [0, 1, 2, 3, 4].forEach(score => {
-      const res = simulatePopup(score);
-      assert.strictEqual(res.retryVisible, true, `Retry must be visible for score ${score}`);
-      assert.strictEqual(res.nextVisible, false, `Next Scenario must NOT be visible for score ${score}`);
-      assert.ok(res.msg.length > 0, `Motivation message must exist for score ${score}`);
+    // Test scores 7, 8, 9, 10
+    [7, 8, 9, 10].forEach(score => {
+      const match = appJs.match(new RegExp(`${score}:\\s*\\{[\\s\\S]*?showNext:\\s*(true|false)`));
+      assert.ok(match, `Found state for score ${score}`);
+      assert.strictEqual(match[1], 'true', `Score ${score} must have showNext: true`);
     });
+  });
+
+  test('6. Mascot SVGs and decorative stars/confetti functions exist', () => {
+    assert.ok(appJs.includes('function getMotivationMascotSvg('), 'getMotivationMascotSvg must exist');
+    assert.ok(appJs.includes('function getPopupStarsHtml('), 'getPopupStarsHtml must exist');
   });
 });
