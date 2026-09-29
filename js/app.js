@@ -1005,7 +1005,6 @@ function loadScenario() {
     }
     current=next;
     renderScenario();
-    window.scrollTo(0, 0);
   }
 }
 function selectDomain(domain,el) {
@@ -1470,8 +1469,11 @@ function nextScenario() {
   }
   current=next;
   renderScenario();
-  window.scrollTo(0, 0);
 }
+
+let currentActiveScreen = 'home';
+const pageScrollPositions = { home: 0, practice: 0 };
+
 function showScreen(name) {
   if (name === 'profile') {
     openProfileModal();
@@ -1487,9 +1489,16 @@ function showScreen(name) {
   if ($('appMain')) $('appMain').hidden = false;
   if ($('bottomNav')) $('bottomNav').hidden = false;
 
+  // Preserve scroll position of current screen before navigating away
+  if (currentActiveScreen) {
+    pageScrollPositions[currentActiveScreen] = window.scrollY || window.pageYOffset || 0;
+  }
+
+  const isProgress = name === 'progress' || name === 'progressScreen';
+  const targetScreen = isProgress ? 'progress' : name;
+
   $('home').classList.toggle('active', name === 'home');
   $('practice').classList.toggle('active', name === 'practice');
-  const isProgress = name === 'progress' || name === 'progressScreen';
   $('progressScreen').classList.toggle('active', isProgress);
   if ($('navHome')) $('navHome').classList.toggle('active', name === 'home');
   if ($('navPractice')) $('navPractice').classList.toggle('active', name === 'practice');
@@ -1510,7 +1519,21 @@ function showScreen(name) {
       void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
     }
   }
-  window.scrollTo(0, 0);
+
+  currentActiveScreen = targetScreen;
+
+  // When the Progress page opens, always scroll to the top.
+  // Do NOT force scroll-to-top on Dashboard, Explore, Practice, or any other page.
+  // Preserve the current scroll position on other pages (e.g. returning to Practice).
+  if (isProgress) {
+    window.scrollTo(0, 0);
+  } else {
+    const savedPos = pageScrollPositions[targetScreen] || 0;
+    window.scrollTo(0, savedPos);
+    requestAnimationFrame(() => {
+      window.scrollTo(0, savedPos);
+    });
+  }
 }
 function goHome() { showScreen('home'); }
 function openScenario(id) {
@@ -1535,7 +1558,6 @@ function openScenario(id) {
   });
   renderScenario();
   showScreen('practice');
-  window.scrollTo(0, 0);
 }
 function showSampleThinking() {
   if (!current) return;
