@@ -1045,11 +1045,97 @@ function evaluatePlan() {
     void handleScenarioCompleted(current.id);
   }
 
-  if (completed && $('nextButton')) {
-    $('nextButton').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  openMotivationPopup(score);
+}
+
+function openMotivationPopup(score) {
+  const modal = $('motivationModal');
+  if (!modal) return;
+
+  const numericScore = typeof score === 'number' ? score : 0;
+  const badge = $('motivationScoreBadge');
+  const msg = $('motivationMessage');
+  const retryBtn = $('motivationRetryBtn');
+  const nextBtn = $('nextButton');
+
+  if (badge) {
+    badge.textContent = `Thinking Score: ${numericScore}/10`;
+    if (numericScore >= 7) {
+      badge.style.background = '#dcfce7';
+      badge.style.color = '#166534';
+    } else if (numericScore >= 5) {
+      badge.style.background = '#fef3c7';
+      badge.style.color = '#92400e';
+    } else {
+      badge.style.background = '#f1f5f9';
+      badge.style.color = '#475569';
+    }
+  }
+
+  if (msg) {
+    if (numericScore === 10) {
+      msg.textContent = 'Outstanding! Perfect intuition and complete breakdown.';
+    } else if (numericScore === 9) {
+      msg.textContent = 'Excellent! Your data engineering plan is spot on.';
+    } else if (numericScore === 8) {
+      msg.textContent = 'Great work! Solid intuition and clear logic.';
+    } else if (numericScore === 7) {
+      msg.textContent = 'Well done! You cracked the intuition to proceed.';
+    } else if (numericScore === 6) {
+      msg.textContent = "Good attempt! You're very close — review the plan and try again to hit 7+.";
+    } else if (numericScore === 5) {
+      msg.textContent = 'Fair effort! You have the basics down. Review the guidance and retry.';
+    } else if (numericScore >= 3) {
+      msg.textContent = 'Keep practicing! Review the tables and filtering logic, then try again.';
+    } else {
+      msg.textContent = 'Keep practicing! Break down the problem step-by-step and try again.';
+    }
+  }
+
+  if (retryBtn) {
+    retryBtn.hidden = false;
+    retryBtn.style.display = 'inline-flex';
+    retryBtn.style.alignItems = 'center';
+    retryBtn.style.justifyContent = 'center';
+  }
+
+  if (nextBtn) {
+    if (numericScore >= 7) {
+      nextBtn.hidden = false;
+      nextBtn.style.display = 'inline-flex';
+      nextBtn.style.alignItems = 'center';
+      nextBtn.style.justifyContent = 'center';
+      nextBtn.disabled = false;
+    } else {
+      nextBtn.hidden = true;
+      nextBtn.style.display = 'none';
+      nextBtn.disabled = true;
+    }
+  }
+
+  modal.hidden = false;
+}
+
+function closeMotivationModal() {
+  const modal = $('motivationModal');
+  if (modal) modal.hidden = true;
+}
+
+function handleMotivationRetry() {
+  closeMotivationModal();
+  const input = $('thinking');
+  if (input) {
+    input.focus();
   }
 }
+
+function handleMotivationNext() {
+  closeMotivationModal();
+  nextScenario();
+}
+
 function nextScenario() {
+  closeMotivationModal();
   const e = entry();
   const thinkingScore = typeof e.assessment?.score === 'number' ? e.assessment.score : 0;
   if (!current || thinkingScore < 7) {
@@ -2540,6 +2626,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     closeProfileDropdown();
     closeProfileModal();
+    closeMotivationModal();
   }
 });
 
@@ -2558,6 +2645,7 @@ Object.assign(window,{
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   saveFirstTimeUsername,validateUsernameField,closeUsernameModal,
   checkAdminStatus,retryUserAccessCheck,
+  openMotivationPopup,closeMotivationModal,handleMotivationRetry,handleMotivationNext,
   sqlEngineManager
 });
 try {
