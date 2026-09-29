@@ -101,17 +101,19 @@ async function evaluateAdminStatus() {
   try {
     let isAuthorized = false;
 
-    // 1. Check RPC function is_admin()
+    // 1. Authoritative check via RPC is_admin()
     try {
       const { data: rpcAdmin, error: rpcErr } = await client.rpc('is_admin');
-      if (!rpcErr && rpcAdmin === true) {
-        isAuthorized = true;
+      if (!rpcErr && typeof rpcAdmin === 'boolean') {
+        isAuthorized = rpcAdmin;
+      } else if (rpcErr) {
+        console.warn('RPC is_admin notice:', rpcErr);
       }
     } catch (e) {
-      console.warn('RPC is_admin check warning:', e);
+      console.warn('RPC is_admin check exception:', e);
     }
 
-    // 2. Check admin_users table
+    // 2. Direct protected admin_users table check (protected role source)
     if (!isAuthorized) {
       try {
         const { data: adminRow, error: adminErr } = await client
@@ -122,13 +124,15 @@ async function evaluateAdminStatus() {
 
         if (!adminErr && adminRow) {
           isAuthorized = true;
+        } else if (adminErr) {
+          console.warn('admin_users query notice:', adminErr);
         }
       } catch (e) {
-        console.warn('admin_users check warning:', e);
+        console.warn('admin_users check exception:', e);
       }
     }
 
-    // 3. Check profiles.is_admin
+    // 3. Fallback to protected profiles.is_admin
     if (!isAuthorized) {
       try {
         const { data: profileRow, error: profErr } = await client
@@ -139,20 +143,11 @@ async function evaluateAdminStatus() {
 
         if (!profErr && profileRow?.is_admin === true) {
           isAuthorized = true;
+        } else if (profErr) {
+          console.warn('profiles is_admin query notice:', profErr);
         }
       } catch (e) {
-        console.warn('profiles is_admin check warning:', e);
-      }
-    }
-
-    // 4. Check user app metadata or known admin email
-    if (!isAuthorized) {
-      if (
-        currentUser.app_metadata?.is_admin === true ||
-        currentUser.user_metadata?.is_admin === true ||
-        currentUser.email === 'datatodashboard2@gmail.com'
-      ) {
-        isAuthorized = true;
+        console.warn('profiles is_admin check exception:', e);
       }
     }
 
@@ -166,11 +161,34 @@ async function evaluateAdminStatus() {
     }
   } catch (err) {
     console.error('Authorization check error:', err);
-    showAccessDenied();
+    showGateRetryableError('Unable to verify administrator permissions due to a network or database error. Please retry.');
   }
 }
 
 // UI State Management
+function showGateRetryableError(msg) {
+  const gate = $('gate');
+  const gateMsg = $('gateMsg');
+  const dash = $('dashboard');
+  if (dash) dash.hidden = true;
+  if (gate) gate.hidden = false;
+
+  if (gateMsg) {
+    gateMsg.innerHTML = `
+      <div style="font-size: 1.2rem; font-weight: 800; color: var(--error); margin-bottom: 8px;">Verification Error</div>
+      <p style="margin-bottom: 16px;">
+        ${escapeHtml(msg || 'Unable to verify administrative permissions due to a network or database error.')}
+      </p>
+      <div style="display:flex; justify-content:center; gap:12px;">
+        <button class="action primary" id="retryAdminCheckBtn">Retry Verification</button>
+        <button class="action secondary" id="retrySignOutBtn">Sign Out</button>
+      </div>
+    `;
+
+    $('retryAdminCheckBtn')?.addEventListener('click', evaluateAdminStatus);
+    $('retrySignOutBtn')?.addEventListener('click', signOut);
+  }
+}
 function setGateMessage(msg) {
   const gate = $('gate');
   const gateMsg = $('gateMsg');
@@ -433,7 +451,7 @@ async function loadDashboardData() {
         name,
         email: email || '—',
         displayName,
-        isAdmin: p.is_admin === true || email === 'datatodashboard2@gmail.com',
+        isAdmin: p.is_admin === true,
         paidUnlocked: p.paid_unlocked === true,
         contestEligible: p.contest_eligible === true || userSolvedCount >= 18,
         solved: userSolvedCount,

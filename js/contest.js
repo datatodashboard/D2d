@@ -5,6 +5,8 @@ import { parseSchema, inferReference, TABLE_ICONS } from './schema.js';
 
 let activeClient = null;
 let activeUser = null;
+let activeIsAdmin = false;
+let currentCompletedCount = 0;
 let currentContest = null;
 let currentRegistration = null;
 let currentPayment = null;
@@ -23,14 +25,17 @@ export function getContestState() {
     registration: currentRegistration,
     payment: currentPayment,
     attempt: currentAttempt,
-    evaluation: currentEvaluation
+    evaluation: currentEvaluation,
+    isAdmin: activeIsAdmin
   };
 }
 
 // Initialize Contest on login or refresh
-export async function initContest(client, user, completedCount = 0) {
+export async function initContest(client, user, completedCount = 0, isAdmin = false) {
   activeClient = client;
   activeUser = user;
+  activeIsAdmin = Boolean(isAdmin);
+  currentCompletedCount = Number(completedCount) || 0;
 
   hideContestCard();
   closeContestModal();
@@ -40,22 +45,25 @@ export async function initContest(client, user, completedCount = 0) {
     return;
   }
 
-  // 1. Enforce Requirement 4: Learner is eligible ONLY after completing 18 questions
-  if (completedCount < 18) {
+  // 1. Enforce Qualification: Learners must have completed >= 18 questions.
+  // Admins are exempt from the 18-completion requirement for testing.
+  if (currentCompletedCount < 18 && !activeIsAdmin) {
     currentContest = null;
     hideContestCard();
     return;
   }
 
-  // Learner has completed >= 18 questions: Persist contest_eligible in database
-  try {
-    await client.from('profiles').update({
-      contest_eligible: true,
-      completed_count: completedCount,
-      last_active: new Date().toISOString()
-    }).eq('id', user.id);
-  } catch (profErr) {
-    console.warn('Profile contest_eligible update notice:', profErr);
+  // For legitimate learners with >= 18 completions, persist contest_eligible
+  if (currentCompletedCount >= 18) {
+    try {
+      await client.from('profiles').update({
+        contest_eligible: true,
+        completed_count: currentCompletedCount,
+        last_active: new Date().toISOString()
+      }).eq('id', user.id);
+    } catch (profErr) {
+      console.warn('Profile contest_eligible update notice:', profErr);
+    }
   }
 
   try {
@@ -69,7 +77,11 @@ export async function initContest(client, user, completedCount = 0) {
 
     if (contestErr || !contests || contests.length === 0) {
       currentContest = null;
-      renderContestWaitingCard();
+      if (activeIsAdmin) {
+        renderAdminNoContestCard();
+      } else if (currentCompletedCount >= 18) {
+        renderContestWaitingCard();
+      }
       return;
     }
 
@@ -78,12 +90,16 @@ export async function initContest(client, user, completedCount = 0) {
     // If contest is not published/enabled for participation, and no attempt has been started:
     if (contest.status !== 'PUBLISHED' && contest.status !== 'RESULTS_PUBLISHED') {
       currentContest = null;
-      renderContestWaitingCard();
+      if (activeIsAdmin) {
+        renderAdminNoContestCard();
+      } else if (currentCompletedCount >= 18) {
+        renderContestWaitingCard();
+      }
       return;
     }
 
-    // 3. Check audience eligibility
-    if (contest.audience_type !== 'ALL') {
+    // 3. Check audience eligibility: Admins can access any published contest regardless of audience
+    if (contest.audience_type !== 'ALL' && !activeIsAdmin) {
       const { data: elig, error: eligErr } = await client
         .from('contest_eligibility')
         .select('id')
@@ -113,7 +129,11 @@ export async function initContest(client, user, completedCount = 0) {
     }
   } catch (err) {
     console.warn('[Contest] Initialization check notice:', err);
-    renderContestWaitingCard();
+    if (activeIsAdmin) {
+      renderAdminNoContestCard();
+    } else if (currentCompletedCount >= 18) {
+      renderContestWaitingCard();
+    }
   }
 }
 
@@ -173,6 +193,42 @@ export function renderContestWaitingCard() {
   `;
 }
 
+export function renderAdminNoContestCard() {
+  let wrapper = $('contestCardWrapper');
+  if (!wrapper) {
+    wrapper = document.createElement('div');
+    wrapper.id = 'contestCardWrapper';
+    const home = $('home');
+    const progressCard = document.querySelector('.progress-card');
+    if (home && progressCard) {
+      home.insertBefore(wrapper, progressCard);
+    } else if (home) {
+      home.prepend(wrapper);
+    }
+  }
+
+  wrapper.style.display = 'block';
+  wrapper.innerHTML = `
+    <div class="contest-invitation-card" style="border: 1px solid #cbd5e1; background: #f8fafc;">
+      <div class="contest-card-header">
+        <div class="contest-tag" style="background:#e2e8f0;color:#334155;padding:4px 10px;border-radius:999px;font-weight:800;font-size:0.8rem;">
+          <span>🛠️ Contest Management</span>
+        </div>
+        <div class="contest-fee-badge" style="background:#f1f5f9;color:#64748b;">Admin Mode</div>
+      </div>
+      <h3 class="contest-card-title" style="font-size:1.05rem;margin-top:8px;line-height:1.4;">
+        No contest is currently published for participation.
+      </h3>
+      <p style="font-size:0.88rem;color:var(--muted);margin:8px 0 12px;line-height:1.5;">
+        As an administrator, you can create, publish, and manage contests from the Admin Portal.
+      </p>
+      <button class="action secondary sm" onclick="window.openAdminPortal ? window.openAdminPortal() : (window.location.href='admin.html')" style="font-weight:700;">
+        Open Contest Management →
+      </button>
+    </div>
+  `;
+}
+
 export function renderContestCard() {
   if (!currentContest) {
     hideContestCard();
@@ -197,7 +253,7 @@ export function renderContestCard() {
 
   let btnLabel = 'Join Contest';
   let btnIcon = '🚀';
-  let badgeText = '🏆 Contest Eligible';
+  let badgeText = activeIsAdmin ? 'ADMIN ACCESS' : '🏆 Contest Eligible';
   let badgeClass = 'contest-badge-live';
 
   if (currentAttempt?.status === 'SUBMITTED') {
@@ -210,10 +266,10 @@ export function renderContestCard() {
     btnIcon = '⏱️';
     badgeText = 'IN PROGRESS';
     badgeClass = 'contest-badge-progress';
-  } else if (currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
+  } else if (activeIsAdmin || currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
     btnLabel = 'Join Contest';
     btnIcon = '🚪';
-    badgeText = 'READY';
+    badgeText = activeIsAdmin ? 'ADMIN EXEMPT' : 'READY';
     badgeClass = 'contest-badge-ready';
   } else if (currentRegistration) {
     btnLabel = 'Join Contest';
@@ -222,7 +278,13 @@ export function renderContestCard() {
     badgeClass = 'contest-badge-pending';
   }
 
-  const feeDisplay = Number(currentContest.entry_fee) > 0 ? `₹${currentContest.entry_fee}` : 'FREE ENTRY';
+  const feeDisplay = activeIsAdmin 
+    ? 'ADMIN EXEMPT' 
+    : (Number(currentContest.entry_fee) > 0 ? `₹${currentContest.entry_fee}` : 'FREE ENTRY');
+
+  const subtitleHtml = activeIsAdmin && currentCompletedCount < 18
+    ? 'Administrator Contest Access — Testing Mode (Payment &amp; 18-Question Exempt)'
+    : 'Congratulations! You have completed 18 SQL thinking challenges and are now eligible for Think and Crack SQL contests.';
 
   wrapper.innerHTML = `
     <div class="contest-invitation-card" style="border: 2px solid #2563eb; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);">
@@ -230,14 +292,14 @@ export function renderContestCard() {
       <div class="contest-card-header">
         <div class="contest-tag" style="background:#dcfce7;color:#15803d;padding:4px 10px;border-radius:999px;font-weight:800;font-size:0.8rem;">
           <span class="pulse-dot"></span>
-          <span>🏆 Contest Eligible</span>
+          <span>${activeIsAdmin ? '🛠️ Admin Contest' : '🏆 Contest Eligible'}</span>
           <span class="${badgeClass}" style="margin-left:6px;">${badgeText}</span>
         </div>
         <div class="contest-fee-badge">${feeDisplay}</div>
       </div>
 
       <div style="font-size:0.88rem;font-weight:700;color:#1e40af;margin-top:8px;line-height:1.4;">
-        Congratulations! You have completed 18 SQL thinking challenges and are now eligible for Think and Crack SQL contests.
+        ${subtitleHtml}
       </div>
 
       <h3 class="contest-card-title" style="margin-top:6px;">${escapeHtml(currentContest.title)}</h3>
@@ -269,10 +331,12 @@ function handleContestAction() {
     openContestModal('submitted');
   } else if (currentAttempt?.status === 'IN_PROGRESS') {
     openContestModal('active');
-  } else if (currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
-    openContestModal('ready');
-  } else if (currentRegistration) {
-    openContestModal('payment');
+  } else if (currentRegistration?.agreed_rules) {
+    if (activeIsAdmin || currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
+      openContestModal('ready');
+    } else {
+      openContestModal('payment');
+    }
   } else {
     openContestModal('details');
   }
@@ -933,7 +997,7 @@ function attachModalListeners(stage) {
 
         await refreshUserContestRecords();
 
-        if (Number(currentContest.entry_fee) === 0) {
+        if (Number(currentContest.entry_fee) === 0 || activeIsAdmin) {
           openContestModal('ready');
         } else {
           openContestModal('payment');

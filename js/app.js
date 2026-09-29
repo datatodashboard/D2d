@@ -608,6 +608,41 @@ function getCompletedCount() {
   return scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
 }
 
+function showAccessCheckError(msg) {
+  let errBanner = $('accessErrorBanner');
+  if (!errBanner) {
+    errBanner = document.createElement('div');
+    errBanner.id = 'accessErrorBanner';
+    errBanner.className = 'access-error-banner';
+    errBanner.style.cssText = 'background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 14px; border-radius:8px; margin:10px auto; max-width:960px; display:flex; align-items:center; justify-content:space-between; font-size:13.5px; z-index:100;';
+    const main = $('appMain');
+    if (main) main.insertBefore(errBanner, main.firstChild);
+  }
+  errBanner.style.display = 'flex';
+  errBanner.innerHTML = `
+    <span>⚠️ ${escapeHtml(msg || 'Unable to verify account access status. Access features may be limited.')}</span>
+    <button class="action secondary sm" onclick="window.retryUserAccessCheck ? window.retryUserAccessCheck() : window.location.reload()" style="margin-left:12px; padding:4px 10px; font-size:12px; white-space:nowrap; cursor:pointer;">
+      🔄 Retry
+    </button>
+  `;
+}
+
+function hideAccessError() {
+  const errBanner = $('accessErrorBanner');
+  if (errBanner) errBanner.style.display = 'none';
+}
+
+async function retryUserAccessCheck() {
+  hideAccessError();
+  if (user && client) {
+    await checkAdminStatus();
+    await checkUserAccessStatus(user.id);
+    renderScenarioCatalog();
+    if (current) renderScenario();
+    void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
+  }
+}
+
 async function checkUserAccessStatus(userId) {
   if (!userId || !client) return;
 
@@ -630,6 +665,7 @@ async function checkUserAccessStatus(userId) {
         profile = fallbackData;
       } else {
         console.warn('[Access] Profiles query notice:', profErr.message);
+        showAccessCheckError('Could not verify account profile. Click Retry to check again.');
       }
     } else {
       profile = profData;
@@ -654,7 +690,9 @@ async function checkUserAccessStatus(userId) {
       .order('submitted_at', { ascending: false })
       .limit(1);
 
-    if (!payErr && payments && payments.length > 0) {
+    if (payErr) {
+      console.warn('[Access] Payments query notice:', payErr.message);
+    } else if (payments && payments.length > 0) {
       const latestPay = payments[0];
       if (latestPay.status === 'verified') {
         isPaidUnlocked = true;
@@ -665,16 +703,27 @@ async function checkUserAccessStatus(userId) {
 
     const currentCompleted = getCompletedCount();
 
-    // Persist latest completed count and contest eligibility
-    await client.from('profiles').update({
-      completed_count: currentCompleted,
-      contest_eligible: currentCompleted >= 18,
-      last_active: new Date().toISOString()
-    }).eq('id', userId);
+    // Persist latest completed count via server RPC or safe update
+    try {
+      await client.rpc('sync_user_progress');
+    } catch (e) {
+      if (isCurrentUserAdmin) {
+        await client.from('profiles').update({
+          completed_count: currentCompleted,
+          contest_eligible: currentCompleted >= 18,
+          last_active: new Date().toISOString()
+        }).eq('id', userId);
+      } else {
+        await client.from('profiles').update({
+          last_active: new Date().toISOString()
+        }).eq('id', userId);
+      }
+    }
 
-    void initContest(client, user, currentCompleted);
+    void initContest(client, user, currentCompleted, isCurrentUserAdmin);
   } catch (err) {
     console.warn('checkUserAccessStatus warning:', err);
+    showAccessCheckError('Could not verify account access status. Click Retry to check again.');
   }
 }
 
@@ -690,23 +739,33 @@ async function handleScenarioCompleted(scenarioId) {
         completed_at: new Date().toISOString()
       }, { onConflict: 'user_id,scenario_id' });
 
-      // 2. Update profile completed_count and contest_eligible in public.profiles
-      const isEligible = completedCount >= 18;
-      await client.from('profiles').update({
-        completed_count: completedCount,
-        contest_eligible: isEligible,
-        last_active: new Date().toISOString()
-      }).eq('id', user.id);
+      // 2. Server trigger trg_progress_table_changed automatically syncs completed_count and contest_eligible in profiles.
+      // In addition, call sync_user_progress RPC directly if available:
+      try {
+        await client.rpc('sync_user_progress');
+      } catch (rpcErr) {
+        if (isCurrentUserAdmin) {
+          await client.from('profiles').update({
+            completed_count: completedCount,
+            contest_eligible: completedCount >= 18,
+            last_active: new Date().toISOString()
+          }).eq('id', user.id);
+        } else {
+          await client.from('profiles').update({
+            last_active: new Date().toISOString()
+          }).eq('id', user.id);
+        }
+      }
 
-      // 3. Update contest module
-      void initContest(client, user, completedCount);
+      // 3. Update contest module with authoritative admin status
+      void initContest(client, user, completedCount, isCurrentUserAdmin);
     } catch (err) {
       console.warn('handleScenarioCompleted persistence warning:', err);
     }
   }
 
-  // 4. If learner has completed 5 challenges and has not paid, trigger paywall
-  if (completedCount >= 5 && !isPaidUnlocked) {
+  // 4. If learner has completed 5 challenges and has not paid, trigger paywall (Admins exempt)
+  if (completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
     openPaywallModal();
   }
 }
@@ -719,6 +778,20 @@ function openPaywallModal() {
   const notice = $('paywallNotice');
   const btn = $('submitPaymentBtn');
   const input = $('paywallTxnRef');
+  const payUpiLink = $('payUpiLink');
+
+  if (isCurrentUserAdmin) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#e0f2fe';
+      notice.style.color = '#0369a1';
+      notice.innerHTML = '<strong>Admin access — payment exempt</strong><br><span style="font-size:0.85rem;">As an administrator, you have full access to all practice questions without payment.</span>';
+    }
+    if (btn) btn.style.display = 'none';
+    if (input) input.style.display = 'none';
+    if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'none';
+    return;
+  }
 
   if (isPaidUnlocked) {
     if (notice) {
@@ -729,6 +802,7 @@ function openPaywallModal() {
     }
     if (btn) btn.style.display = 'none';
     if (input) input.style.display = 'none';
+    if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'none';
     return;
   }
 
@@ -843,7 +917,7 @@ function loadScenario() {
   if(next) {
     const isTargetCompleted = isCompleted(next, state.entries[next.id]);
     const completedCount = getCompletedCount();
-    if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked) {
+    if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
       const completedCandidate = pool.find(s => isCompleted(s, state.entries[s.id])) || scenarios.find(s => isCompleted(s, state.entries[s.id]));
       if (completedCandidate) {
         current = completedCandidate;
@@ -905,9 +979,9 @@ function nextScenario() {
     return;
   }
 
-  // Paywall check: After Question 5 completed, do not unlock Question 6 for unpaid learner
+  // Paywall check: After Question 5 completed, do not unlock Question 6 for unpaid learner (Admins exempt)
   const completedCount = getCompletedCount();
-  if (completedCount >= 5 && !isPaidUnlocked) {
+  if (completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
     openPaywallModal();
     return;
   }
@@ -965,7 +1039,7 @@ function showScreen(name) {
   } else if (name === 'home') {
     renderScenarioCatalog();
     if (user && client) {
-      void initContest(client, user, getCompletedCount());
+      void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
     }
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -977,7 +1051,7 @@ function openScenario(id) {
 
   const isTargetCompleted = isCompleted(target, state.entries[target.id]);
   const completedCount = getCompletedCount();
-  if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked) {
+  if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
     openPaywallModal();
     return;
   }
@@ -1281,7 +1355,7 @@ function renderScenarioCatalog() {
     const attempted = isAttempted(s, e);
     const isCurrent = current && current.id === s.id;
     const totalCompleted = getCompletedCount();
-    const isLocked = !completed && totalCompleted >= 5 && !isPaidUnlocked;
+    const isLocked = !completed && totalCompleted >= 5 && !isPaidUnlocked && !isCurrentUserAdmin;
     let badgeClass = 'status-pill not-started';
     let badgeText = 'Not started';
     if (isLocked) {
@@ -1658,34 +1732,56 @@ async function loadAndRestoreUserProgress(userId) {
   }
 }
 
+let authSessionCounter = 0;
+
 async function setSession(session) {
-  const next=session?.user||null;
-  if(next)authNotice='';
+  const currentAuthToken = ++authSessionCounter;
+  const next = session?.user || null;
+  if (next) authNotice = '';
   const previousUserId = user?.id;
-  user=next;
+  user = next;
 
   if (user) {
+    if (previousUserId !== user.id) {
+      isCurrentUserAdmin = false;
+      isPaidUnlocked = false;
+      userPendingPayment = null;
+      updateAdminPortalVisibility();
+      hideAccessError();
+    }
+
     if ($('loginScreen')) $('loginScreen').hidden = true;
     if ($('appMain')) $('appMain').hidden = false;
     if ($('bottomNav')) $('bottomNav').hidden = false;
 
-    if (previousUserId !== user.id) {
-      clearTimeout(syncTimer);
-      cloud.changeSession();
-      renderAuth();
-      // Load user's existing progress from Supabase, restore, and update Progress page
-      await loadAndRestoreUserProgress(user.id);
-      await checkUserAccessStatus(user.id);
-      await checkAndEnforceUsername(user.id, user.email);
-      void checkAdminStatus();
-    } else {
-      renderAuth();
-      await checkUserAccessStatus(user.id);
-      await checkAndEnforceUsername(user.id, user.email);
-      void checkAdminStatus();
+    clearTimeout(syncTimer);
+    cloud.changeSession();
+    renderAuth();
+
+    // 1. Load user's existing progress from Supabase
+    await loadAndRestoreUserProgress(user.id);
+    if (currentAuthToken !== authSessionCounter) return;
+
+    // 2. Authoritative server admin check (awaited before rendering gated features)
+    const adminCheckResult = await checkAdminStatus();
+    if (currentAuthToken !== authSessionCounter) return;
+
+    // 3. User access status (payment & profile) (awaited)
+    await checkUserAccessStatus(user.id);
+    if (currentAuthToken !== authSessionCounter) return;
+
+    // If both admin check and profile query had issues and user is not verified, show retryable banner
+    if (adminCheckResult && adminCheckResult.error && !isCurrentUserAdmin && !isPaidUnlocked) {
+      showAccessCheckError('Could not verify account permissions. Click Retry to check again.');
     }
+
+    // 4. Username setup
+    await checkAndEnforceUsername(user.id, user.email);
+    if (currentAuthToken !== authSessionCounter) return;
+
+    // 5. Render home screen & initialize contest with authoritative admin status
     showScreen('home');
-    void initContest(client, user, getCompletedCount());
+    void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
   } else {
     // Signed out: reset in-memory active state and return to login gate
     isCurrentUserAdmin = false;
@@ -1695,6 +1791,7 @@ async function setSession(session) {
     closeUsernameModal();
     closePaywallModal();
     updateAdminPortalVisibility();
+    hideAccessError();
     if ($('loginScreen')) $('loginScreen').hidden = false;
     if ($('appMain')) $('appMain').hidden = true;
     if ($('bottomNav')) $('bottomNav').hidden = true;
@@ -1707,7 +1804,7 @@ async function setSession(session) {
     state = EMPTY();
     current = null;
     renderAuth();
-    void initContest(null, null, 0);
+    void initContest(null, null, 0, false);
   }
 }
 async function signInWithGoogle() {
@@ -2265,27 +2362,83 @@ async function checkAdminStatus() {
   if (!user || !client) {
     isCurrentUserAdmin = false;
     updateAdminPortalVisibility();
-    return;
+    return { isAdmin: false, error: null };
   }
-  try {
-    const { data: profileRow, error } = await client
-      .from('profiles')
-      .select('is_admin')
-      .eq('id', user.id)
-      .maybeSingle();
 
-    isCurrentUserAdmin = Boolean(!error && profileRow?.is_admin === true);
-  } catch (err) {
-    console.warn('Admin status check warning:', err);
-    isCurrentUserAdmin = false;
+  let isAuthorized = false;
+  let lastError = null;
+
+  // 1. Authoritative check via RPC is_admin()
+  try {
+    const { data: rpcAdmin, error: rpcErr } = await client.rpc('is_admin');
+    if (!rpcErr && typeof rpcAdmin === 'boolean') {
+      isAuthorized = rpcAdmin;
+    } else if (rpcErr) {
+      lastError = rpcErr;
+      console.warn('[AdminCheck] RPC is_admin notice:', rpcErr);
+    }
+  } catch (e) {
+    lastError = e;
+    console.warn('[AdminCheck] RPC is_admin exception:', e);
   }
+
+  // 2. Direct protected admin_users table check (protected role source)
+  if (!isAuthorized) {
+    try {
+      const { data: adminRow, error: adminErr } = await client
+        .from('admin_users')
+        .select('role')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (!adminErr && adminRow) {
+        isAuthorized = true;
+        lastError = null;
+      } else if (adminErr && adminErr.code !== 'PGRST116') {
+        lastError = adminErr;
+        console.warn('[AdminCheck] admin_users query notice:', adminErr);
+      }
+    } catch (e) {
+      lastError = e;
+      console.warn('[AdminCheck] admin_users exception:', e);
+    }
+  }
+
+  // 3. Fallback to protected profiles.is_admin
+  if (!isAuthorized) {
+    try {
+      const { data: profileRow, error: profErr } = await client
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (!profErr && profileRow?.is_admin === true) {
+        isAuthorized = true;
+        lastError = null;
+      } else if (profErr) {
+        lastError = profErr;
+        console.warn('[AdminCheck] profiles is_admin query notice:', profErr);
+      }
+    } catch (e) {
+      lastError = e;
+      console.warn('[AdminCheck] profiles is_admin exception:', e);
+    }
+  }
+
+  isCurrentUserAdmin = isAuthorized;
   updateAdminPortalVisibility();
+  return { isAdmin: isAuthorized, error: lastError };
 }
 
 function updateAdminPortalVisibility() {
   const adminBtn = $('adminPortalBtn');
   if (adminBtn) {
     adminBtn.hidden = !isCurrentUserAdmin;
+  }
+  const headerAdminBtn = $('headerAdminPortalBtn');
+  if (headerAdminBtn) {
+    headerAdminBtn.hidden = !isCurrentUserAdmin;
   }
 }
 
@@ -2332,6 +2485,7 @@ Object.assign(window,{
   copySchemaAndOpenFiddle,isCompleted,isAttempted,
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   saveFirstTimeUsername,validateUsernameField,closeUsernameModal,
+  checkAdminStatus,retryUserAccessCheck,
   sqlEngineManager
 });
 try {
