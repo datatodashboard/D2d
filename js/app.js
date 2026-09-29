@@ -1005,6 +1005,7 @@ function loadScenario() {
     }
     current=next;
     renderScenario();
+    window.scrollTo(0, 0);
   }
 }
 function selectDomain(domain,el) {
@@ -1467,7 +1468,9 @@ function nextScenario() {
   if (!next) {
     next = pool[(currentIndex + 1) % pool.length];
   }
-  current=next;renderScenario();
+  current=next;
+  renderScenario();
+  window.scrollTo(0, 0);
 }
 function showScreen(name) {
   if (name === 'profile') {
@@ -1507,7 +1510,7 @@ function showScreen(name) {
       void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
     }
   }
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo(0, 0);
 }
 function goHome() { showScreen('home'); }
 function openScenario(id) {
@@ -1532,6 +1535,7 @@ function openScenario(id) {
   });
   renderScenario();
   showScreen('practice');
+  window.scrollTo(0, 0);
 }
 function showSampleThinking() {
   if (!current) return;
