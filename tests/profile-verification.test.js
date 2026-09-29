@@ -107,25 +107,29 @@ describe('Profile Verification Flow (Post-Google Login)', () => {
     const userEmail = user.email || '';
 
     async function fetchProfile() {
-      const { data, error } = await client
-        .from('profiles')
-        .select('id, email, username, is_admin, paid_unlocked, contest_eligible, completed_count')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (!error) return { profile: data, error: null };
-
-      if (error && (error.message?.includes('username') || error.code === 'PGRST204')) {
-        const { data: fbData, error: fbErr } = await client
+      try {
+        const { data, error } = await client
           .from('profiles')
-          .select('id, email, is_admin, paid_unlocked, contest_eligible, completed_count')
+          .select('*')
           .eq('id', userId)
           .maybeSingle();
-        if (!fbErr) return { profile: fbData, error: null };
-        return { profile: null, error: fbErr };
-      }
 
-      return { profile: null, error };
+        if (!error && data) return { profile: data, error: null };
+        if (!error && !data) return { profile: null, error: null };
+      } catch (_) {}
+
+      try {
+        const { data: minData, error: minErr } = await client
+          .from('profiles')
+          .select('id, email')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (!minErr) return { profile: minData, error: null };
+        return { profile: null, error: minErr };
+      } catch (ex2) {
+        return { profile: null, error: ex2 };
+      }
     }
 
     let { profile, error: profErr } = await fetchProfile();

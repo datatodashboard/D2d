@@ -644,56 +644,58 @@ async function retryUserAccessCheck() {
 }
 
 async function checkUserAccessStatus(userId) {
-  if (!userId || !client) return;
+  const uid = userId || user?.id;
+  if (!uid || !client) return;
 
   try {
-    const activeUser = (user && user.id === userId) ? user : (await client.auth.getUser())?.data?.user;
+    const activeUser = (user && user.id === uid) ? user : (await client.auth.getUser())?.data?.user;
     const userEmail = activeUser?.email || '';
 
-    // Helper to query the profile row from public.profiles
+    // Helper to query the profile row from public.profiles using the current authenticated user ID
     async function fetchProfile() {
-      // Primary select: get existing profile fields
-      const { data, error } = await client
-        .from('profiles')
-        .select('id, email, username, is_admin, paid_unlocked, contest_eligible, completed_count')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (!error) return { profile: data, error: null };
-
-      // Schema cache fallback if 'username' column is not in PostgREST cache
-      if (error && (error.message?.includes('username') || error.code === 'PGRST204')) {
-        console.warn('[Access] Retrying profiles select without username column.');
-        const { data: fbData, error: fbErr } = await client
+      // Primary select: select * returns all existing columns without failing on column name mismatches
+      try {
+        const { data, error } = await client
           .from('profiles')
-          .select('id, email, is_admin, paid_unlocked, contest_eligible, completed_count')
-          .eq('id', userId)
+          .select('*')
+          .eq('id', uid)
           .maybeSingle();
 
-        if (!fbErr) return { profile: fbData, error: null };
-        return { profile: null, error: fbErr };
+        if (!error && data) return { profile: data, error: null };
+        if (!error && !data) return { profile: null, error: null };
+        console.warn('[Access] Profiles select * notice:', error?.message || error);
+      } catch (ex) {
+        console.warn('[Access] Profiles select * exception:', ex);
       }
 
-      return { profile: null, error };
+      // Fallback: minimal columns (id, email)
+      try {
+        const { data: minData, error: minErr } = await client
+          .from('profiles')
+          .select('id, email')
+          .eq('id', uid)
+          .maybeSingle();
+
+        if (!minErr) return { profile: minData, error: null };
+        return { profile: null, error: minErr };
+      } catch (ex2) {
+        return { profile: null, error: ex2 };
+      }
     }
 
     let { profile, error: profErr } = await fetchProfile();
 
     // If profile does not exist: create profile using existing profile system (authenticated user ID and email)
     if (!profile && !profErr) {
-      console.log('[Access] No profile row found for user; creating profile row for', userId);
+      console.log('[Access] No profile row found for user; creating profile row for', uid);
       try {
-        const { error: insErr } = await client
+        await client
           .from('profiles')
-          .upsert({
-            id: userId,
+          .insert({
+            id: uid,
             email: userEmail,
             last_active: new Date().toISOString()
-          }, { onConflict: 'id', ignoreDuplicates: true });
-
-        if (insErr) {
-          console.warn('[Access] Insert profile notice:', insErr.message || insErr);
-        }
+          });
       } catch (insEx) {
         console.warn('[Access] Insert profile exception:', insEx);
       }
@@ -717,11 +719,11 @@ async function checkUserAccessStatus(userId) {
       const dbUsername = (profile.username || '').trim();
       if (dbUsername) {
         currentUsername = dbUsername;
-        try { localStorage.setItem(`cracksql_username_${userId}`, dbUsername); } catch (e) {}
+        try { localStorage.setItem(`cracksql_username_${uid}`, dbUsername); } catch (e) {}
         renderProfileAvatar();
         renderAuth();
       } else if (!currentUsername) {
-        const cached = localStorage.getItem(`cracksql_username_${userId}`);
+        const cached = localStorage.getItem(`cracksql_username_${uid}`);
         if (cached) {
           currentUsername = cached.trim();
           renderProfileAvatar();
@@ -739,6 +741,9 @@ async function checkUserAccessStatus(userId) {
       if (profile.paid_unlocked === true) {
         isPaidUnlocked = true;
       }
+    } else if (isCurrentUserAdmin) {
+      // If user is already verified admin (e.g. from admin_users table), never block them with an error
+      hideAccessError();
     } else if (profErr) {
       console.warn('[Access] Could not verify account profile:', profErr.message || profErr);
       showAccessCheckError('Could not verify account profile. Click Retry to check again.');
@@ -749,7 +754,7 @@ async function checkUserAccessStatus(userId) {
       const { data: payments, error: payErr } = await client
         .from('payments')
         .select('*')
-        .eq('user_id', userId)
+        .eq('user_id', uid)
         .order('submitted_at', { ascending: false })
         .limit(1);
 
@@ -779,11 +784,11 @@ async function checkUserAccessStatus(userId) {
             completed_count: currentCompleted,
             contest_eligible: currentCompleted >= 18,
             last_active: new Date().toISOString()
-          }).eq('id', userId);
+          }).eq('id', uid);
         } else {
           await client.from('profiles').update({
             last_active: new Date().toISOString()
-          }).eq('id', userId);
+          }).eq('id', uid);
         }
       } catch (updErr) {
         console.warn('[Access] Progress update notice:', updErr);
@@ -793,7 +798,7 @@ async function checkUserAccessStatus(userId) {
     void initContest(client, user, currentCompleted, isCurrentUserAdmin);
   } catch (err) {
     console.warn('checkUserAccessStatus warning:', err);
-    if (!currentUsername && !isCurrentUserAdmin && !isPaidUnlocked) {
+    if (!isCurrentUserAdmin && !currentUsername && !isPaidUnlocked) {
       showAccessCheckError('Could not verify account profile. Click Retry to check again.');
     }
   }
