@@ -119,5 +119,45 @@ describe('Thinking Evaluation', () => {
         assert(badRes.score <= 5, `Expected score <= 5 for patients in Retail, got ${badRes.score}`);
       });
     }
+
+    it('rejects cross-domain reasoning (e.g. Insurance reasoning on BAN_INT_020)', () => {
+      const ban20 = data.scenarios.find(s => s.id === 'BAN_INT_020');
+      assert(ban20, 'BAN_INT_020 must exist');
+      const insText = 'Join policies and claims, filter by policy_date, and aggregate.';
+      const res = evaluateThinking(ban20, insText);
+      assert(res.score <= 5, `Cross-domain text must be capped <= 5, got ${res.score}`);
+      assert.strictEqual(res.ready, false);
+      assert(res.message.includes('policies'), 'Message should identify wrong table');
+    });
+  });
+
+  describe('Curriculum Wide Quality & Integrity Verification', () => {
+    it('every scenario exampleThinking scores >= 7 and is marked ready', () => {
+      for (const s of data.scenarios) {
+        const res = evaluateThinking(s, s.exampleThinking);
+        assert(res.score >= 7, `${s.id} exampleThinking score should be >= 7, got ${res.score}. Message: ${res.message}`);
+        assert.strictEqual(res.ready, true, `${s.id} exampleThinking should be marked ready`);
+      }
+    });
+
+    it('every relevantColumns entry is a real table, column or literal value used in the SQL', () => {
+      for (const s of data.scenarios) {
+        const schemaLines = (s.schemaText || '').split('\n');
+        const validTokens = new Set();
+        for (const line of schemaLines) {
+          const match = line.match(/^(\w+)\s*\((.+)\)/);
+          if (match) {
+            validTokens.add(match[1].toLowerCase());
+            match[2].split(',').forEach(c => validTokens.add(c.trim().toLowerCase()));
+          }
+        }
+        for (const col of s.relevantColumns) {
+          const lower = col.toLowerCase();
+          const isValid = validTokens.has(lower) || s.sql.toLowerCase().includes(lower);
+          assert(isValid, `${s.id} has invalid relevantColumn token: ${col}`);
+        }
+      }
+    });
   });
 });
+

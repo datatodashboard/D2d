@@ -235,4 +235,20 @@ describe('SQL Engine Architecture & Execution Workflow', () => {
 
     await manager.close();
   });
+
+  // 11. Reference SQL non-empty result verification
+  it('11. every reference SQL query returns >= 1 row across all scenarios and domains', async () => {
+    for (const [domain, asset] of Object.entries(data.assets)) {
+      const db = new PGlite();
+      await db.exec(asset.schema);
+      await db.exec(asset.sample);
+      const domainScenarios = data.scenarios.filter(s => s.domain === domain);
+      for (const s of domainScenarios) {
+        const res = await db.query(s.sql);
+        assert(res.rows.length >= 1, `Scenario ${s.id} reference query returned 0 rows: ${s.sql}`);
+      }
+      await db.close();
+    }
+  });
 });
+

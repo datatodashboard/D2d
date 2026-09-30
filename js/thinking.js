@@ -1,16 +1,18 @@
 // Transparent, deterministic human thinking evaluation with dynamic schema validation.
 export const RUBRIC_VERSION = 5;
+export const PASS_THRESHOLD = 8;
 const legacyFields = ['goal', 'sources', 'steps', 'check'];
 
 // All known domain table names across the curriculum (Healthcare, Banking, Insurance, Capital Markets, Semiconductor, Education, Retail)
 const ALL_CURRICULUM_TABLES = [
-  'customers', 'account_products', 'accounts', 'transactions',
+  'account_products', 'insurance_products', 'chip_products', 'production_batches', 'test_results', 'order_items',
+  'customers', 'accounts', 'transactions',
   'patients', 'doctors', 'appointments', 'visits',
-  'insurance_products', 'policies', 'claims',
+  'policies', 'claims',
   'investors', 'securities', 'holdings', 'trades',
-  'clients', 'chip_products', 'production_batches', 'test_results',
+  'clients',
   'students', 'courses', 'enrollments', 'assessments',
-  'products', 'orders', 'order_items'
+  'products', 'orders'
 ];
 
 const STOP_WORDS = new Set([
@@ -19,7 +21,13 @@ const STOP_WORDS = new Set([
   'all', 'only', 'both', 'table', 'tables', 'scratch', 'above', 'below', 'it', 'them',
   'my', 'our', 'what', 'which', 'to', 'for', 'with', 'by', 'as', 'and', 'or', 'in', 'on',
   'filter', 'select', 'need', 'want', 'should', 'have', 'from', 'into', 'join', 'like', 'keep', 'using',
-  'one', 'two', 'three', 'four', 'five', 'multiple', 'several', 'different', 'related', 'these', 'those', 'given', 'either', 'such', 'other', 'another', 'same'
+  'one', 'two', 'three', 'four', 'five', 'multiple', 'several', 'different', 'related', 'these', 'those', 'given', 'either', 'such', 'other', 'another', 'same',
+  'having', 'where', 'group', 'order', 'limit', 'distinct', 'count', 'sum', 'avg', 'min', 'max',
+  'case', 'when', 'then', 'else', 'end', 'cte', 'with', 'partition', 'over', 'lag', 'rank',
+  'dense_rank', 'row_number', 'coalesce', 'nullif', 'round', 'date_trunc', 'exists', 'between',
+  'null', 'not', 'desc', 'asc', 'any', 'window', 'windowed', 'descending', 'ascending',
+  'required', 'target', 'appropriate', 'matching', 'main', 'source', 'primary', 'base', 'specific',
+  'conditional', 'aggregated', 'aggregation', 'subquery', 'condition', 'conditions', 'clause'
 ]);
 
 export function normalize(text) {
@@ -74,38 +82,101 @@ export function parseScenarioSchema(schemaText) {
   return schemaTables;
 }
 
-function extractMentionedTables(normText, schemaTableNames) {
+function extractMentionedTables(normText, schemaTableNames, allSchemaColumns = new Set()) {
   const found = new Set();
   const allCandidateTables = new Set([...ALL_CURRICULUM_TABLES, ...schemaTableNames]);
 
-  // 1. Direct table matches (singular and plural)
-  for (const t of allCandidateTables) {
+  // Sort candidate tables by length descending so compound table names like 'account_products' are matched before 'products'
+  const sortedCandidates = [...allCandidateTables].sort((a, b) => b.length - a.length);
+
+  // Mask out schema column names (e.g. 'account id', 'customer name', 'order total') so column references are not mistaken for tables
+  let workingText = normText;
+  allSchemaColumns.forEach(col => {
+    const colSpace = col.toLowerCase().replaceAll('_', ' ');
+    if (colSpace.includes(' ') || colSpace.endsWith(' id') || colSpace.endsWith(' date') || colSpace.endsWith(' type') || colSpace.endsWith(' name') || colSpace.endsWith(' cost') || colSpace.endsWith(' fee') || colSpace.endsWith(' total') || colSpace.endsWith(' amount') || colSpace.endsWith(' value') || colSpace.endsWith(' band')) {
+      const re = new RegExp('\\b' + colSpace + '\\b', 'gi');
+      workingText = workingText.replace(re, ' ');
+    }
+  });
+
+  // Also mask any general `<word> id` pattern
+  workingText = workingText.replace(/\b[a-z_]+\s+id\b/gi, ' ');
+
+  for (const t of sortedCandidates) {
     const tNorm = t.toLowerCase().replaceAll('_', ' ');
-    const tSingular = tNorm.endsWith('s') ? tNorm.slice(0, -1) : tNorm;
+    let tSingular;
+    if (tNorm.endsWith('ies')) {
+      tSingular = tNorm.slice(0, -3) + 'y';
+    } else if (tNorm.endsWith('es') && (tNorm.endsWith('ches') || tNorm.endsWith('shes') || tNorm.endsWith('sses') || tNorm.endsWith('xes'))) {
+      tSingular = tNorm.slice(0, -2);
+    } else if (tNorm.endsWith('s')) {
+      tSingular = tNorm.slice(0, -1);
+    } else {
+      tSingular = tNorm;
+    }
 
     if (tNorm === 'orders' || tSingular === 'order') {
-      if (/\b(?:orders?\s+table|from\s+orders?|orders?\s+dataset)\b/i.test(normText)) {
+      if (/\b(?:orders?\s+tables?|from\s+orders?|orders?\s+dataset|in\s+orders?|join\s+(?:the\s+)?orders?|use\s+(?:the\s+)?orders?|orders\b(?!\s+(?:by|to|total|date|item)))\b/i.test(workingText)) {
         found.add('orders');
+        workingText = workingText.replace(/\borders\b/gi, ' ');
       }
       continue;
     }
 
-    const re = new RegExp('\\b(' + tNorm + '|' + tSingular + ')(?:s)?\\b', 'i');
-    if (re.test(normText)) {
-      found.add(t.toLowerCase());
+    const forms = new Set([tNorm, tSingular, t.toLowerCase()]);
+    if (t === 'policies') {
+      forms.add('policy');
+      forms.add('policyholder');
+      forms.add('policyholders');
+    }
+    if (t === 'securities') {
+      forms.add('security');
+    }
+    if (t === 'production_batches') {
+      forms.add('production batch');
+      forms.add('production batches');
+      forms.add('wafer batches');
+      forms.add('wafer batch');
+      forms.add('batches');
+      forms.add('batch');
+    }
+    if (t === 'chip_products') {
+      forms.add('chip product');
+      forms.add('chip products');
+      forms.add('chips');
+      forms.add('chip');
+    }
+    if (t === 'account_products') {
+      forms.add('account product');
+      forms.add('account products');
+    }
+    if (t === 'insurance_products') {
+      forms.add('insurance product');
+      forms.add('insurance products');
+    }
+    if (t === 'order_items') {
+      forms.add('order item');
+      forms.add('order items');
+    }
+    if (t === 'test_results') {
+      forms.add('test result');
+      forms.add('test results');
+    }
+
+    for (const f of forms) {
+      const re = new RegExp('\\b' + f + '(?:s)?\\b', 'i');
+      if (re.test(workingText)) {
+        found.add(t.toLowerCase());
+        workingText = workingText.replace(new RegExp('\\b' + f + '(?:s)?\\b', 'gi'), ' ');
+        break;
+      }
     }
   }
 
-  // 2. Syntactic patterns: 'from X', 'use X', 'X table', 'in X'
-  const p1 = /\b(?:from|into|join|update|use|query|access|in)\s+(?:the\s+)?([a-z_][a-z0-9_]*)\b/gi;
+  // Syntactic pattern: 'X table', 'X dataset', 'X entity'
+  const p2 = /\b([a-z_][a-z0-9_]*)\s+(?:table|tables|dataset|datasets|entity|entities)\b/gi;
   let m;
-  while ((m = p1.exec(normText)) !== null) {
-    const w = m[1].toLowerCase();
-    if (!STOP_WORDS.has(w) && w.length > 2) found.add(w);
-  }
-
-  const p2 = /\b([a-z_][a-z0-9_]*)\s+(?:table|tables|dataset|entity|entities)\b/gi;
-  while ((m = p2.exec(normText)) !== null) {
+  while ((m = p2.exec(workingText)) !== null) {
     const w = m[1].toLowerCase();
     if (!STOP_WORDS.has(w) && w.length > 2) found.add(w);
   }
@@ -117,31 +188,51 @@ function extractMentionedColumns(normText, allSchemaColumns) {
   const mentioned = new Set();
   const wrong = new Set();
 
-  // Pattern 1: [where|filter by] [the] <col> [is|=|equals|equal]
+  function checkCol(col) {
+    const colNorm = col.trim().replace(/^(?:and|or|the|a|an)\s+/i, '').toLowerCase();
+    if (!colNorm || STOP_WORDS.has(colNorm)) return;
+    const colUnderscore = colNorm.replaceAll(' ', '_');
+    const colSingular = colNorm.endsWith('s') ? colNorm.slice(0, -1) : colNorm;
+    const colSingularUnderscore = colSingular.replaceAll(' ', '_');
+    const colStemmed = colNorm.replace(/ing\b/g, '').replace(/s\b/g, '').replaceAll(' ', '_');
+    const colStemmedWithUnderscore = colNorm.replace(/ing\b/g, '').replace(/s\b/g, '').trim().replaceAll(' ', '_');
+
+    if (allSchemaColumns.has(colNorm) || allSchemaColumns.has(colUnderscore)) {
+      mentioned.add(colUnderscore);
+    } else if (allSchemaColumns.has(colSingular) || allSchemaColumns.has(colSingularUnderscore)) {
+      mentioned.add(colSingularUnderscore);
+    } else if (allSchemaColumns.has(colStemmed) || allSchemaColumns.has(colStemmedWithUnderscore)) {
+      mentioned.add(allSchemaColumns.has(colStemmed) ? colStemmed : colStemmedWithUnderscore);
+    } else if (colNorm.includes('bill') && (allSchemaColumns.has('bill_amount') || allSchemaColumns.has('bill amount'))) {
+      mentioned.add('bill_amount');
+    } else if (colNorm.includes('cost') && (allSchemaColumns.has('batch_cost') || allSchemaColumns.has('batch cost'))) {
+      mentioned.add('batch_cost');
+    } else if (colNorm.includes('fee') && (allSchemaColumns.has('course_fee') || allSchemaColumns.has('course fee'))) {
+      mentioned.add('course_fee');
+    } else if (colNorm.includes('premium') && (allSchemaColumns.has('premium_amount') || allSchemaColumns.has('premium amount'))) {
+      mentioned.add('premium_amount');
+    } else if (colNorm.includes('market') && (allSchemaColumns.has('market_value') || allSchemaColumns.has('market value'))) {
+      mentioned.add('market_value');
+    } else if (colNorm.includes('total') && (allSchemaColumns.has('order_total') || allSchemaColumns.has('order total'))) {
+      mentioned.add('order_total');
+    } else if (colNorm.includes('balance') && allSchemaColumns.has('balance')) {
+      mentioned.add('balance');
+    } else {
+      wrong.add(colNorm);
+    }
+  }
+
+  // Pattern 1: [where|filter by] [the] <col> [is|=|equals|equal|like|in|between|>|<]
   const p1 = /\b(?:where|filter(?:ed)?\s+by|condition|having|with)\s+(?:the\s+)?([a-z_]+(?:\s+[a-z_]+)?)\s+(?:is|=|equals|equal|like|in|between|>|<)\b/gi;
   let m;
   while ((m = p1.exec(normText)) !== null) {
-    const col = m[1].trim();
-    if (!STOP_WORDS.has(col)) {
-      if (allSchemaColumns.has(col) || allSchemaColumns.has(col.replaceAll(' ', '_'))) {
-        mentioned.add(col.replaceAll(' ', '_'));
-      } else {
-        wrong.add(col);
-      }
-    }
+    checkCol(m[1]);
   }
 
   // Pattern 2: <col> [column|field]
   const p2 = /\b([a-z_]+(?:\s+[a-z_]+)?)\s+(?:column|field)\b/gi;
   while ((m = p2.exec(normText)) !== null) {
-    const col = m[1].trim();
-    if (!STOP_WORDS.has(col)) {
-      if (allSchemaColumns.has(col) || allSchemaColumns.has(col.replaceAll(' ', '_'))) {
-        mentioned.add(col.replaceAll(' ', '_'));
-      } else {
-        wrong.add(col);
-      }
-    }
+    checkCol(m[1]);
   }
 
   // Pattern 3: Specific cross-domain / invalid column patterns like 'account status'
@@ -153,7 +244,7 @@ function extractMentionedColumns(normText, allSchemaColumns) {
 
   // Pattern 4: Direct schema column presence
   allSchemaColumns.forEach(c => {
-    const re = new RegExp('\\b' + c + '\\b', 'i');
+    const re = new RegExp('\\b' + c + '(?:s)?\\b', 'i');
     if (re.test(normText)) {
       if (!wrong.has('account status') || c !== 'status') {
         mentioned.add(c.replaceAll(' ', '_'));
@@ -227,7 +318,7 @@ export function evaluateThinking(scenario, input) {
   }
 
   // 2. Extract Mentioned Tables and Classify
-  const candidateTables = extractMentionedTables(normText, schemaTableNames);
+  const candidateTables = extractMentionedTables(normText, schemaTableNames, allSchemaColumns);
   const explicitWrongSchemaTables = [];
   const explicitWrongScenarioTables = [];
   const correctTables = [];
@@ -249,6 +340,7 @@ export function evaluateThinking(scenario, input) {
   const hasWrongColumn = explicitWrongColumns.length > 0;
 
   // 4. Calculate Points (10 Points Model)
+  const isMultiTable = requiredTables.length > 1 || /JOIN\b/i.test(scenario?.sql || '');
 
   // (A) 3 Points – Correct table/source identification
   let tablePts = 0;
@@ -262,7 +354,7 @@ export function evaluateThinking(scenario, input) {
     // Table not explicitly named, but no wrong table mentioned (implicit reference)
     const mentionsDataOrRecords = /\b(?:records?|data|rows?|appointments?|details?)\b/i.test(normText) ||
                                   (scenario?.rubric?.sources && matches(scenario.rubric.sources, rawText));
-    tablePts = mentionsDataOrRecords ? 2 : 1;
+    tablePts = (!isMultiTable && mentionsDataOrRecords) ? 2 : (!isMultiTable ? 1 : 0);
   }
 
   // (B) 2 Points – Correct column(s)
@@ -296,7 +388,6 @@ export function evaluateThinking(scenario, input) {
   }
 
   // (C) 2 Points – Correct condition/filter/join/aggregation logic
-  const isMultiTable = requiredTables.length > 1 || /JOIN\b/i.test(scenario?.sql || '');
   const isFiltered = /WHERE\b/i.test(scenario?.sql || '');
   const isAggregated = /GROUP BY|COUNT\(|SUM\(|AVG\(|MAX\(|MIN\(/i.test(scenario?.sql || '');
   const isSorted = /ORDER BY/i.test(scenario?.sql || '');
@@ -355,18 +446,19 @@ export function evaluateThinking(scenario, input) {
   const clarityPts = (wordCount >= 3 && !rawSql && !isOffTopic) ? 1 : 0;
 
   // 5. Total Raw Score and Enforce Schema Capping Rules
+  const namesNoRequiredTables = requiredTables.length > 0 && correctTables.length === 0;
   let rawScore = tablePts + colPts + logicPts + objPts + clarityPts;
 
   if (hasWrongTable && hasWrongColumn) {
     rawScore = Math.min(rawScore, 4);
-  } else if (hasWrongTable) {
+  } else if (hasWrongTable || (namesNoRequiredTables && (candidateTables.length > 0 || isMultiTable))) {
     rawScore = Math.min(rawScore, 5);
   } else if (hasWrongColumn) {
     rawScore = Math.min(rawScore, 6);
   }
 
   const finalScore = Math.min(10, Math.max(0, rawScore));
-  const ready = !rawSql && finalScore >= 7;
+  const ready = !rawSql && finalScore >= PASS_THRESHOLD;
 
   // 6. Dynamic, Constructive Feedback Messages
   let feedback = '';
@@ -383,7 +475,7 @@ export function evaluateThinking(scenario, input) {
   } else if (ready) {
     feedback = `✓ Great thinking! You scored ${finalScore}/10. You can now proceed to the next scenario or try writing SQL below.`;
   } else {
-    feedback = `Thinking score: ${finalScore}/10. Score 7/10 or higher to unlock the next scenario. Check the table, the action to take, and the expected result.`;
+    feedback = `Thinking score: ${finalScore}/10. Score ${PASS_THRESHOLD}/10 or higher to unlock the next scenario. Check the table, the action to take, and the expected result.`;
   }
 
   const items = [
@@ -458,5 +550,5 @@ export function evaluateThinking(scenario, input) {
 export function thinkingIsReady(scenario, entry) {
   if (!entry?.thinking) return false;
   const assessment = evaluateThinking(scenario, entry.thinking);
-  return assessment.ready || (entry.assessment?.score >= 7);
+  return assessment.ready || (entry.assessment?.score >= PASS_THRESHOLD);
 }

@@ -1,7 +1,8 @@
-const CACHE='crack-sql-verified-v9';
+const CACHE='crack-sql-verified-v10';
 const ROOT=new URL('./',self.location).href;
 const SHELL=['index.html','manifest.json','icon-512.png','icon-maskable-512.png','apple-touch-icon.png',
 'data/scenarios.json','js/app.js','js/thinking.js','js/progress.js','js/cloud.js','js/schema.js','js/sql-evaluator.js','js/util.js',
+'js/contest.js','js/curriculum.js','js/contest-ai-evaluator.js',
 'vendor/pglite/index.js','vendor/pglite/chunk-2BOC2OMW.js','vendor/pglite/chunk-DDJLRBDX.js','vendor/pglite/chunk-F4GETNPB.js',
 'vendor/pglite/chunk-JDT7TZ73.js','vendor/pglite/chunk-NNS5RQRF.js','vendor/pglite/chunk-QY3QWFKW.js','vendor/pglite/chunk-RYDTTX3G.js',
 'vendor/pglite/initdb.wasm','vendor/pglite/pglite.data','vendor/pglite/pglite.wasm'].map(p=>new URL(p,ROOT).href);
@@ -9,11 +10,7 @@ const SHELL=['index.html','manifest.json','icon-512.png','icon-maskable-512.png'
 self.addEventListener('install',event=>{
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE).then(async cache => {
-      await Promise.allSettled(
-        SHELL.map(url => cache.add(url).catch(err => console.warn('PWA shell cache item failed:', url, err)))
-      );
-    })
+    caches.open(CACHE).then(cache => cache.addAll(SHELL))
   );
 });
 

@@ -3,7 +3,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { evaluateThinking } from './js/thinking.js';
+import { evaluateThinking, PASS_THRESHOLD } from './js/thinking.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,7 +52,7 @@ app.post('/api/evaluate-thinking', (req, res) => {
   const scenario = scenariosMap.get(scenarioId);
   const assessment = evaluateThinking(scenario, thinking || {});
   const score = typeof assessment?.score === 'number' ? assessment.score : 0;
-  const passed = score >= 7;
+  const passed = score >= PASS_THRESHOLD;
 
   return res.json({
     scenarioId,
@@ -63,9 +63,9 @@ app.post('/api/evaluate-thinking', (req, res) => {
 });
 
 // Trusted Backend Completion Verification Route
-// Validates completion using trusted scoring logic; does not accept client-supplied score
+// Validates completion using trusted scoring logic; does not accept or trust client-supplied score or userId
 app.post('/api/progress/complete', (req, res) => {
-  const { scenarioId, thinking, userId } = req.body || {};
+  const { scenarioId, thinking } = req.body || {};
 
   if (!scenarioId || !scenariosMap.has(scenarioId)) {
     return res.status(400).json({
@@ -77,14 +77,14 @@ app.post('/api/progress/complete', (req, res) => {
   const scenario = scenariosMap.get(scenarioId);
   const assessment = evaluateThinking(scenario, thinking || {});
   const score = typeof assessment?.score === 'number' ? assessment.score : 0;
-  const passed = score >= 7;
+  const passed = score >= PASS_THRESHOLD;
 
   if (!passed) {
     return res.status(422).json({
       success: false,
       passed: false,
       score,
-      message: `Thinking score of ${score}/10 does not meet the passing threshold (>= 7/10).`
+      message: `Thinking score of ${score}/10 does not meet the passing threshold (>= ${PASS_THRESHOLD}/10).`
     });
   }
 
@@ -97,9 +97,9 @@ app.post('/api/progress/complete', (req, res) => {
   });
 });
 
-// Serve static files from root
-app.use(express.static(__dirname, {
-  extensions: ['html'],
+// Static assets options
+const staticOptions = {
+  dotfiles: 'ignore',
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.wasm')) {
       res.setHeader('Content-Type', 'application/wasm');
@@ -109,11 +109,73 @@ app.use(express.static(__dirname, {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     }
   }
-}));
+};
 
-// Route fallback to index.html
-app.use((req, res) => {
+// Serve strictly allow-listed static directories
+app.use('/js', express.static(path.join(__dirname, 'js'), staticOptions));
+app.use('/data', express.static(path.join(__dirname, 'data'), staticOptions));
+app.use('/vendor', express.static(path.join(__dirname, 'vendor'), staticOptions));
+app.use('/public', express.static(path.join(__dirname, 'public'), staticOptions));
+
+// Explicitly allow-listed root assets
+const ALLOWED_ROOT_FILES = [
+  'index.html',
+  'admin.html',
+  'manifest.json',
+  'sw.js',
+  'apple-touch-icon.png',
+  'icon-512.png',
+  'icon-maskable-512.png',
+  'icon-maskable-512.jpeg',
+  'd2d-logo.svg'
+];
+
+ALLOWED_ROOT_FILES.forEach(fileName => {
+  app.get(`/${fileName}`, (req, res) => {
+    const filePath = path.join(__dirname, fileName);
+    if (!fs.existsSync(filePath)) return res.status(404).type('text/plain').send('Not Found');
+    if (fileName.endsWith('.js') || fileName.endsWith('.json') || fileName.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    }
+    res.sendFile(filePath);
+  });
+});
+
+// Explicit navigation routes
+app.get(['/', '/index.html'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get(['/admin', '/admin.html'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+// Unknown /api/* paths -> 404 JSON
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Navigation fallback for extension-less routes, 404 for files with extensions
+app.use((req, res) => {
+  const ext = path.extname(req.path);
+  if (!ext) {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    return res.sendFile(path.join(__dirname, 'index.html'));
+  }
+  res.status(404).type('text/plain').send('Not Found');
+});
+
+// Error handling middleware for malformed JSON and server errors
+app.use((err, req, res, next) => {
+  if (req.path.startsWith('/api') || req.url.startsWith('/api')) {
+    if (err instanceof SyntaxError && (err.status === 400 || err.statusCode === 400)) {
+      return res.status(400).json({ error: 'Invalid JSON' });
+    }
+    return res.status(err.status || err.statusCode || 500).json({ error: 'Invalid request' });
+  }
+  return res.status(err.status || err.statusCode || 500).send('Error');
 });
 
 // Port configuration:

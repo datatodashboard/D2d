@@ -26,14 +26,18 @@ SQL correctness is checked by the learner in external DB Fiddle. The app receive
 
 ## Scenario bank
 
-240 legacy IDs map to **94 distinct exercises**. Exact duplicate SQL within a domain was consolidated, including repeats across levels. Retained canonical IDs stay stable; aliases preserve old history without inflating counts.
+The curriculum contains **420 exercises across 7 domains** (Banking, Healthcare, Insurance, Capital Markets, Semiconductor, Education, Retail), with 20 exercises per domain-level.
 
 | Domain | Beginner | Intermediate | Expert | Total |
 |---|---:|---:|---:|---:|
-| Banking | 14 | 5 | 5 | 24 |
-| Healthcare | 14 | 5 | 5 | 24 |
-| Insurance | 14 | 5 | 4 | 23 |
-| Retail | 14 | 5 | 4 | 23 |
+| Banking | 20 | 20 | 20 | 60 |
+| Healthcare | 20 | 20 | 20 | 60 |
+| Insurance | 20 | 20 | 20 | 60 |
+| Capital Markets | 20 | 20 | 20 | 60 |
+| Semiconductor | 20 | 20 | 20 | 60 |
+| Education | 20 | 20 | 20 | 60 |
+| Retail | 20 | 20 | 20 | 60 |
+| **Total** | **140** | **140** | **140** | **420** |
 
 Corrections include Banking status ownership; Healthcare specialization/city ownership; explicit thresholds, sorting, ranges and classification bands; deterministic first-five and previous-row ordering; separate product IDs when names repeat; and explicit inclusion/exclusion rules for aggregates. Fixtures include boundary values, missing activity and tied dates.
 
@@ -76,7 +80,7 @@ pnpm test
 
 If using a preinstalled browser instead, set PLAYWRIGHT_CHANNEL to msedge or chrome before running tests.
 
-Tests cover all 94 reference queries using PGlite/PostgreSQL, rubric examples and negative inputs, account/guest isolation, reset merging, migration/RLS behavior, late cloud responses, and the mobile/browser/offline learning flow. Browser auth is mocked; production magic links and the deployed Supabase project are not exercised.
+Tests cover all 420 reference queries using PGlite/PostgreSQL, rubric examples and negative inputs, account/guest isolation, reset merging, migration/RLS behavior, late cloud responses, and the mobile/browser/offline learning flow. Browser auth is mocked; production magic links and the deployed Supabase project are not exercised.
 
 ## Offline releases
 
@@ -90,7 +94,7 @@ The service worker precaches application modules and data together. Missing asse
 - js/progress.js: local storage, migration, stages and merging
 - js/cloud.js: serialized cloud sync with session guards
 - js/schema.js: schema visualization
-- data/scenarios.json: 94 exercises and legacy aliases
+- data/scenarios.json: 420 exercises across 7 domains and legacy aliases
 - migrations/002_learning_progress.sql: cloud progress model
 - tests/: regression, PostgreSQL and browser tests
 

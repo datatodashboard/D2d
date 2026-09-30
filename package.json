@@ -6,7 +6,7 @@
     "dev": "node server.js",
     "build": "node copy-vendor.js",
     "start": "node server.js",
-    "lint": "node --check server.js copy-vendor.js js/*.js sw.js",
+    "lint": "node -e \"const fs=require('fs'),cp=require('child_process'),files=['server.js','copy-vendor.js','sw.js',...fs.readdirSync('js').filter(f=>f.endsWith('.js')||f.endsWith('.mjs')).map(f=>'js/'+f)];for(const f of files){const r=cp.spawnSync(process.execPath,['--check',f],{stdio:'inherit'});if(r.status!==0)process.exit(r.status||1);}\"",
     "test": "node --test tests/*.test.js",
     "test:e2e": "playwright test"
   },
