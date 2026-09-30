@@ -16,6 +16,7 @@ let currentEvaluation = null;
 let timerInterval = null;
 let autoSaveInterval = null;
 let isSubmitting = false;
+let serverClockOffset = 0;
 
 const $ = id => document.getElementById(id);
 
@@ -26,7 +27,8 @@ export function getContestState() {
     payment: currentPayment,
     attempt: currentAttempt,
     evaluation: currentEvaluation,
-    isAdmin: activeIsAdmin
+    isAdmin: activeIsAdmin,
+    serverClockOffset
   };
 }
 
@@ -53,16 +55,13 @@ export async function initContest(client, user, completedCount = 0, isAdmin = fa
     return;
   }
 
-  // For legitimate learners with >= 18 completions, persist contest_eligible
-  if (currentCompletedCount >= 18) {
+  // Authoritative server-side sync (no direct learner update of privileged profile fields)
+  if (currentCompletedCount >= 18 && typeof client.rpc === 'function') {
     try {
-      await client.from('profiles').update({
-        contest_eligible: true,
-        completed_count: currentCompletedCount,
-        last_active: new Date().toISOString()
-      }).eq('id', user.id);
-    } catch (profErr) {
-      console.warn('Profile contest_eligible update notice:', profErr);
+      const { error: syncErr } = await client.rpc('sync_user_progress');
+      if (syncErr) console.warn('Contest progress sync notice:', syncErr.message || syncErr);
+    } catch (rpcErr) {
+      console.warn('Contest progress sync notice:', rpcErr);
     }
   }
 
@@ -75,7 +74,12 @@ export async function initContest(client, user, completedCount = 0, isAdmin = fa
       .order('created_at', { ascending: false })
       .limit(1);
 
-    if (contestErr || !contests || contests.length === 0) {
+    if (contestErr) {
+      console.warn('[Contest] Error querying contests:', contestErr.message || contestErr);
+      return;
+    }
+
+    if (!contests || contests.length === 0) {
       currentContest = null;
       if (activeIsAdmin) {
         renderAdminNoContestCard();
@@ -87,8 +91,26 @@ export async function initContest(client, user, completedCount = 0, isAdmin = fa
 
     const contest = contests[0];
 
-    // If contest is not published/enabled for participation, and no attempt has been started:
-    if (contest.status !== 'PUBLISHED' && contest.status !== 'RESULTS_PUBLISHED') {
+    // Check if user already has an existing attempt
+    const { data: existingAtt, error: attCheckErr } = await client
+      .from('contest_attempts')
+      .select('*')
+      .eq('contest_id', contest.id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (attCheckErr) {
+      console.warn('[Contest] Error checking existing attempt:', attCheckErr.message || attCheckErr);
+    }
+
+    // Preserve existing attempt when registration closes, subject to its valid deadline!
+    if (contest.status === 'REGISTRATION_CLOSED') {
+      if (!existingAtt && !activeIsAdmin) {
+        currentContest = null;
+        renderContestWaitingCard();
+        return;
+      }
+    } else if (contest.status !== 'PUBLISHED' && contest.status !== 'RESULTS_PUBLISHED') {
       currentContest = null;
       if (activeIsAdmin) {
         renderAdminNoContestCard();
@@ -107,7 +129,11 @@ export async function initContest(client, user, completedCount = 0, isAdmin = fa
         .eq('user_id', user.id)
         .maybeSingle();
 
-      if (eligErr || !elig) {
+      if (eligErr) {
+        console.warn('[Contest] Eligibility query notice:', eligErr.message || eligErr);
+      }
+
+      if (!elig) {
         // Not in targeted audience
         currentContest = null;
         renderContestWaitingCard();
@@ -125,6 +151,19 @@ export async function initContest(client, user, completedCount = 0, isAdmin = fa
 
     // 6. If user was in the middle of an attempt (IN_PROGRESS), automatically restore contest modal
     if (currentAttempt && currentAttempt.status === 'IN_PROGRESS') {
+      try {
+        const { data: resumeRes, error: resumeErr } = await activeClient.rpc('start_contest_attempt', {
+          p_contest_id: currentContest.id
+        });
+        if (!resumeErr && resumeRes?.attempt) {
+          currentAttempt = resumeRes.attempt;
+          if (resumeRes.server_time) {
+            serverClockOffset = new Date(resumeRes.server_time).getTime() - Date.now();
+          }
+        }
+      } catch (resumeEx) {
+        console.warn('[Contest] Resume attempt sync notice:', resumeEx);
+      }
       openContestModal('active');
     }
   } catch (err) {
@@ -146,8 +185,13 @@ export async function refreshUserContestRecords() {
     activeClient.from('contest_attempts').select('*').eq('contest_id', currentContest.id).eq('user_id', activeUser.id).maybeSingle(),
     currentContest.status === 'RESULTS_PUBLISHED'
       ? activeClient.from('contest_evaluations').select('*').eq('contest_id', currentContest.id).eq('user_id', activeUser.id).maybeSingle()
-      : Promise.resolve({ data: null })
+      : Promise.resolve({ data: null, error: null })
   ]);
+
+  if (regRes.error) console.warn('[Contest] Fetch registration error:', regRes.error.message || regRes.error);
+  if (payRes.error) console.warn('[Contest] Fetch payment error:', payRes.error.message || payRes.error);
+  if (attRes.error) console.warn('[Contest] Fetch attempt error:', attRes.error.message || attRes.error);
+  if (evalRes?.error) console.warn('[Contest] Fetch evaluation error:', evalRes.error.message || evalRes.error);
 
   currentRegistration = regRes.data || null;
   currentPayment = payRes.data || null;
@@ -634,6 +678,7 @@ function renderModalContent(stage) {
               <li>Each participant is permitted exactly <strong>ONE official attempt</strong>.</li>
               <li>Once you click <em>Start Contest</em>, your official timer begins and <strong>cannot be paused or reset</strong>.</li>
               <li>Your draft approach is auto-saved as you type. If you refresh, your timer and draft will resume smoothly.</li>
+              <li><strong>Official Timer &amp; Disconnection Policy:</strong> Your timer runs authoritatively on the server. If you disconnect, your draft is saved locally on your device and will be synced upon reconnection. When the deadline expires, your attempt will automatically conclude and submit. A 60-second network grace window is provided for transmission latency. Submissions received after the grace window will be marked as TIMED OUT.</li>
               <li>Evaluation is based on requirement comprehension, entity identification, procedural logic, and operational reasoning.</li>
               <li>${escapeHtml(currentContest.rules || 'Submission deadline and decisions made by the evaluation panel are final.')}</li>
             </ul>
@@ -739,7 +784,7 @@ function renderModalContent(stage) {
           <div class="contest-warning-card">
             <span class="warning-icon">⚠️</span>
             <div class="warning-text">
-              <strong>Official Timer Warning:</strong> Your official timer will start the instant you click <strong>START CONTEST</strong> and cannot be paused or reset.
+              <strong>Official Server Timer Warning:</strong> Your official timer starts the instant you click <strong>START CONTEST</strong> and cannot be paused or reset. Changing your device clock will not extend your attempt. If network disconnects, your draft is backed up locally on this device and auto-submitted when reconnected, subject to the server deadline and a 60-second grace window.
             </div>
           </div>
         </div>
@@ -878,17 +923,22 @@ function renderModalContent(stage) {
                   id="contestThinkingInput"
                   class="contest-test-textarea"
                   placeholder="Explain your approach step by step. Consider the required data, tables, filters, relationships, calculations and expected result..."
-                >${escapeHtml(currentAttempt?.draft_response || '')}</textarea>
+                >${escapeHtml(currentAttempt?.draft_response || ((typeof localStorage !== 'undefined' && activeUser && currentContest) ? (localStorage.getItem(`contestDraft:${currentContest.id}:${activeUser.id}`) || '') : ''))}</textarea>
 
                 <div class="test-answer-footer">
                   <div class="test-footer-notes">
                     <span>🔒 Single official attempt</span>
                     <span class="footer-note-sep">•</span>
-                    <span>Auto-saved to cloud</span>
+                    <span>⏱️ Server deadline strictly enforced</span>
+                    <span class="footer-note-sep">•</span>
+                    <span>Auto-saved to cloud &amp; device</span>
                   </div>
                   <button id="btnSubmitContest" class="action primary contest-submit-btn">
                     Submit Answer
                   </button>
+                </div>
+                <div style="font-size:0.75rem;color:var(--muted);margin-top:6px;line-height:1.4;">
+                  ℹ️ <em>Official timer runs on the server and cannot be paused. If network disconnects, your draft is saved locally; when the deadline expires, your latest saved response will be automatically recorded.</em>
                 </div>
               </div>
             </div>
@@ -986,14 +1036,17 @@ function attachModalListeners(stage) {
       btn.textContent = 'Saving…';
 
       try {
-        // Record registration
-        await activeClient.from('contest_registrations').upsert({
+        // Record registration with explicit error checking and row confirmation
+        const { data: regData, error: regErr } = await activeClient.from('contest_registrations').upsert({
           contest_id: currentContest.id,
           user_id: activeUser.id,
           user_email: activeUser.email,
           agreed_rules: true,
           agreed_at: new Date().toISOString()
-        }, { onConflict: 'contest_id,user_id' });
+        }, { onConflict: 'contest_id,user_id' }).select().single();
+
+        if (regErr) throw regErr;
+        if (!regData) throw new Error('Contest registration could not be verified on server.');
 
         await refreshUserContestRecords();
 
@@ -1019,21 +1072,55 @@ function attachModalListeners(stage) {
         return;
       }
 
+      // If a payment record already exists (PENDING or VERIFIED), only refresh status!
+      if (currentPayment && (currentPayment.status === 'PENDING' || currentPayment.status === 'VERIFIED')) {
+        btn.disabled = true;
+        btn.textContent = 'Checking status…';
+        try {
+          await refreshUserContestRecords();
+          if (currentPayment?.status === 'VERIFIED') {
+            openContestModal('ready');
+            return;
+          }
+          const notice = $('paymentNotice');
+          if (notice) {
+            notice.style.display = 'block';
+            notice.innerHTML = `⏳ Reference <code>${escapeHtml(currentPayment.transaction_ref || '')}</code> is still <strong>pending admin verification</strong>. (Checked: ${new Date().toLocaleTimeString()})`;
+          }
+          btn.disabled = false;
+          btn.textContent = 'Refresh Verification Status 🔄';
+        } catch (checkErr) {
+          console.warn('Contest payment refresh check notice:', checkErr);
+          btn.disabled = false;
+          btn.textContent = 'Refresh Verification Status 🔄';
+        }
+        return;
+      }
+
+      // First-time submission of contest payment
       const txnRef = $('txnRefInput')?.value.trim();
+      if (!txnRef) {
+        alert('Please enter your transaction reference / UTR number.');
+        return;
+      }
+
       btn.disabled = true;
-      btn.textContent = 'Verifying…';
+      btn.textContent = 'Submitting…';
 
       try {
-        await activeClient.from('contest_payments').upsert({
+        const { data: payData, error: insErr } = await activeClient.from('contest_payments').insert({
           contest_id: currentContest.id,
           user_id: activeUser.id,
           amount: Number(currentContest.entry_fee),
           currency: 'INR',
           status: 'PENDING',
-          transaction_ref: txnRef || null,
+          transaction_ref: txnRef,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
-        }, { onConflict: 'contest_id,user_id' });
+        }).select().single();
+
+        if (insErr) throw insErr;
+        if (!payData) throw new Error('Payment reference could not be verified on server.');
 
         await refreshUserContestRecords();
 
@@ -1041,14 +1128,23 @@ function attachModalListeners(stage) {
           openContestModal('ready');
         } else {
           const notice = $('paymentNotice');
-          if (notice) notice.style.display = 'block';
+          if (notice) {
+            notice.style.display = 'block';
+            notice.innerHTML = `⏳ Payment verification submitted with reference <code>${escapeHtml(txnRef)}</code>. Waiting for Admin verification.`;
+          }
           btn.disabled = false;
           btn.textContent = 'Refresh Verification Status 🔄';
         }
       } catch (err) {
-        alert('Payment recording notice: ' + err.message);
+        console.warn('Contest payment submission error:', err);
+        await refreshUserContestRecords();
+        if (currentPayment?.status === 'VERIFIED') {
+          openContestModal('ready');
+          return;
+        }
+        alert('Payment recording notice: ' + (err.message || 'Please check your connection and retry.'));
         btn.disabled = false;
-        btn.textContent = 'Retry';
+        btn.textContent = currentPayment ? 'Refresh Verification Status 🔄' : 'Submit Reference for Verification';
       }
     });
   }
@@ -1070,22 +1166,19 @@ function attachModalListeners(stage) {
       btn.textContent = 'Starting…';
 
       try {
-        // Enforce ONE attempt: check or create attempt
-        if (!currentAttempt) {
-          const { data: newAttempt, error: attErr } = await activeClient
-            .from('contest_attempts')
-            .insert({
-              contest_id: currentContest.id,
-              user_id: activeUser.id,
-              started_at: new Date().toISOString(),
-              draft_response: '',
-              status: 'IN_PROGRESS'
-            })
-            .select('*')
-            .single();
+        // Enforce ONE attempt with safe server RPC start_contest_attempt
+        const { data: startRes, error: startErr } = await activeClient.rpc('start_contest_attempt', {
+          p_contest_id: currentContest.id
+        });
 
-          if (attErr) throw attErr;
-          currentAttempt = newAttempt;
+        if (startErr) throw startErr;
+        if (!startRes || !startRes.success) {
+          throw new Error(startRes?.message || 'Failed to start attempt.');
+        }
+
+        currentAttempt = startRes.attempt;
+        if (startRes.server_time) {
+          serverClockOffset = new Date(startRes.server_time).getTime() - Date.now();
         }
 
         openContestModal('active');
@@ -1105,7 +1198,10 @@ function attachModalListeners(stage) {
     let debounceTimer = null;
     textarea?.addEventListener('input', () => {
       const ind = $('draftSaveIndicator');
-      if (ind) ind.textContent = 'Saving draft…';
+      if (ind) {
+        ind.textContent = 'Saving draft…';
+        ind.style.color = '#64748b';
+      }
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => saveDraftResponse(false), 1200);
     });
@@ -1125,19 +1221,69 @@ function attachModalListeners(stage) {
   }
 }
 
-// Runtime: Persistent Timer & Draft Recovery
+// Runtime: Persistent Server-Authoritative Timer & Draft Recovery
 function startActiveContestRuntime() {
   stopTimers();
 
   if (!currentAttempt || !currentAttempt.started_at) return;
 
   const startTime = new Date(currentAttempt.started_at).getTime();
+  const deadlineTime = currentAttempt.deadline ? new Date(currentAttempt.deadline).getTime() : null;
+
+  // Use performance.now() to measure strictly monotonic elapsed time since runtime started.
+  // This guarantees changing the device/system clock does NOT extend the attempt.
+  const loadPerf = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : null;
+  const initialServerNow = Date.now() + serverClockOffset;
+  const initialRemaining = deadlineTime ? Math.max(0, Math.floor((deadlineTime - initialServerNow) / 1000)) : null;
+  const initialElapsed = Math.max(0, Math.floor((initialServerNow - startTime) / 1000));
 
   function updateTimer() {
-    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
-    const digitsEl = $('timerDigits');
-    if (digitsEl) {
-      digitsEl.textContent = formatSeconds(elapsedSeconds);
+    let remainingSeconds;
+    let elapsedSeconds;
+
+    if (loadPerf !== null) {
+      // Strictly monotonic progression since page/runtime opened - immune to system clock tampering
+      const monotonicPassed = Math.floor((performance.now() - loadPerf) / 1000);
+      remainingSeconds = initialRemaining !== null ? Math.max(0, initialRemaining - monotonicPassed) : null;
+      elapsedSeconds = initialElapsed + monotonicPassed;
+    } else {
+      const nowServer = Date.now() + serverClockOffset;
+      remainingSeconds = deadlineTime ? Math.max(0, Math.floor((deadlineTime - nowServer) / 1000)) : null;
+      elapsedSeconds = Math.max(0, Math.floor((nowServer - startTime) / 1000));
+    }
+
+    if (deadlineTime !== null) {
+      const digitsEl = $('timerDigits');
+      if (digitsEl) {
+        digitsEl.textContent = `${formatSeconds(remainingSeconds)} left (${formatSeconds(elapsedSeconds)} elapsed)`;
+      }
+
+      const pill = $('contestTimerDisplay');
+      if (pill) {
+        if (remainingSeconds <= 300) {
+          pill.style.background = '#fef2f2';
+          pill.style.borderColor = '#f87171';
+          pill.style.color = '#dc2626';
+        } else {
+          pill.style.background = '';
+          pill.style.borderColor = '';
+          pill.style.color = '';
+        }
+      }
+
+      // When deadline expires, automatically submit latest draft
+      if (remainingSeconds <= 0 && !isSubmitting) {
+        const textarea = $('contestThinkingInput');
+        const text = textarea ? textarea.value : '';
+        void submitFinalContestResponse(text);
+      }
+    } else {
+      const digitsEl = $('timerDigits');
+      if (digitsEl) {
+        digitsEl.textContent = formatSeconds(elapsedSeconds);
+      }
     }
   }
 
@@ -1168,25 +1314,38 @@ async function saveDraftResponse(isPeriodic = false) {
   const textarea = $('contestThinkingInput');
   const text = textarea ? textarea.value : '';
 
+  // Local backup in case of connection loss
   try {
-    // Local backup
-    try {
-      localStorage.setItem(`contestDraft:${currentContest.id}:${activeUser.id}`, text);
-    } catch {}
+    localStorage.setItem(`contestDraft:${currentContest.id}:${activeUser.id}`, text);
+  } catch {}
 
-    await activeClient
-      .from('contest_attempts')
-      .update({
-        draft_response: text,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', currentAttempt.id);
+  const ind = $('draftSaveIndicator');
+  if (ind && !isPeriodic) {
+    ind.textContent = 'Saving draft…';
+    ind.style.color = '#64748b';
+  }
 
-    const ind = $('draftSaveIndicator');
-    if (ind) ind.textContent = 'Draft saved ✓';
+  try {
+    const { data: draftRes, error: draftErr } = await activeClient.rpc('save_contest_draft', {
+      p_contest_id: currentContest.id,
+      p_draft_response: text
+    });
+
+    if (draftErr) throw draftErr;
+
+    if (draftRes && draftRes.success && (draftRes.rows_affected > 0 || draftRes.saved_at)) {
+      if (ind) {
+        ind.textContent = 'Draft saved ✓';
+        ind.style.color = '#15803d';
+      }
+    } else {
+      throw new Error('Draft save returned unsuccessful state');
+    }
   } catch (err) {
-    const ind = $('draftSaveIndicator');
-    if (ind) ind.textContent = 'Offline (cached locally)';
+    if (ind) {
+      ind.textContent = 'Offline (cached locally)';
+      ind.style.color = '#d97706';
+    }
   }
 }
 
@@ -1203,27 +1362,27 @@ async function submitFinalContestResponse(finalText) {
     submitBtn.textContent = 'Submitting…';
   }
 
-  const startTime = new Date(currentAttempt.started_at).getTime();
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
-
   try {
-    const { data: updated, error } = await activeClient
-      .from('contest_attempts')
-      .update({
-        final_response: finalText,
-        submitted_at: new Date().toISOString(),
-        elapsed_seconds: elapsedSeconds,
-        status: 'SUBMITTED',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', currentAttempt.id)
-      .select('*')
-      .single();
+    const { data: subRes, error: subErr } = await activeClient.rpc('submit_contest_attempt', {
+      p_contest_id: currentContest.id,
+      p_final_response: finalText
+    });
 
-    if (error) throw error;
+    if (subErr) throw subErr;
+    if (!subRes || !subRes.success) {
+      throw new Error(subRes?.message || 'Contest submission failed on server.');
+    }
+    if (!subRes.attempt || (subRes.attempt.status !== 'SUBMITTED' && subRes.attempt.status !== 'TIMED_OUT')) {
+      throw new Error('Server did not return a confirmed submitted attempt.');
+    }
 
-    currentAttempt = updated;
+    currentAttempt = subRes.attempt;
     isSubmitting = false;
+
+    // Clear local backup on confirmed submission success
+    try {
+      localStorage.removeItem(`contestDraft:${currentContest.id}:${activeUser.id}`);
+    } catch {}
 
     // Refresh and transition to submitted screen
     renderContestCard();
@@ -1235,6 +1394,8 @@ async function submitFinalContestResponse(finalText) {
       submitBtn.disabled = false;
       submitBtn.textContent = 'SUBMIT FINAL ANSWER 🏁';
     }
+    // Resume runtime/timers so participant doesn't lose sight of timer on network failure
+    startActiveContestRuntime();
   }
 }
 
@@ -1242,6 +1403,33 @@ function formatSeconds(secs) {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+// App resume / visibilitychange listener to resync authoritative clock and attempt
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && currentAttempt && currentAttempt.status === 'IN_PROGRESS' && activeClient && currentContest) {
+      try {
+        const { data: resumeRes } = await activeClient.rpc('start_contest_attempt', {
+          p_contest_id: currentContest.id
+        });
+        if (resumeRes?.attempt) {
+          currentAttempt = resumeRes.attempt;
+          if (resumeRes.server_time) {
+            serverClockOffset = new Date(resumeRes.server_time).getTime() - Date.now();
+          }
+          if (currentAttempt.status === 'SUBMITTED' || currentAttempt.status === 'TIMED_OUT') {
+            stopTimers();
+            openContestModal('submitted');
+          } else {
+            startActiveContestRuntime();
+          }
+        }
+      } catch (visErr) {
+        console.warn('Visibility resume sync notice:', visErr);
+      }
+    }
+  });
 }
 
 // Global modal close hook

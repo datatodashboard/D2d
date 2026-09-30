@@ -603,9 +603,35 @@ function renderScenario() {
   updateProgress();updateGates();
 }
 
+let authoritativeCompletedCount = 0;
+
+function getGuestLifetimeCompletedCount() {
+  try {
+    const raw = storage.getItem('cracksql_guest_lifetime_completions');
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function recordGuestCompletedScenario(scenarioId) {
+  try {
+    const raw = storage.getItem('cracksql_guest_lifetime_completions');
+    const set = new Set(raw ? JSON.parse(raw) : []);
+    set.add(scenarioId);
+    storage.setItem('cracksql_guest_lifetime_completions', JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
 function getCompletedCount() {
-  if (!scenarios || !scenarios.length || !state || !state.entries) return 0;
-  return scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+  const localCount = (scenarios && scenarios.length && state && state.entries)
+    ? scenarios.filter(s => isCompleted(s, state.entries[s.id])).length
+    : 0;
+  if (!user) {
+    return Math.max(localCount, getGuestLifetimeCompletedCount());
+  }
+  return Math.max(authoritativeCompletedCount, localCount);
 }
 
 function showAccessCheckError(msg) {
@@ -689,13 +715,16 @@ async function checkUserAccessStatus(userId) {
     if (!profile && !profErr) {
       console.log('[Access] No profile row found for user; creating profile row for', uid);
       try {
-        await client
+        const { error: insErr } = await client
           .from('profiles')
           .insert({
             id: uid,
             email: userEmail,
             last_active: new Date().toISOString()
           });
+        if (insErr) {
+          console.warn('[Access] Insert profile error:', insErr.message || insErr);
+        }
       } catch (insEx) {
         console.warn('[Access] Insert profile exception:', insEx);
       }
@@ -774,28 +803,30 @@ async function checkUserAccessStatus(userId) {
 
     const currentCompleted = getCompletedCount();
 
-    // Persist latest completed count via server RPC or safe update
+    // Authoritatively sync profile completed_count and contest_eligible via server RPC
     try {
-      await client.rpc('sync_user_progress');
+      const { data: syncRes, error: syncErr } = await client.rpc('sync_user_progress');
+      if (syncErr) {
+        console.warn('[Access] sync_user_progress error:', syncErr.message || syncErr);
+        throw syncErr;
+      }
+      if (syncRes && typeof syncRes.completed_count === 'number') {
+        authoritativeCompletedCount = syncRes.completed_count;
+      }
     } catch (e) {
       try {
-        if (isCurrentUserAdmin) {
-          await client.from('profiles').update({
-            completed_count: currentCompleted,
-            contest_eligible: currentCompleted >= 18,
-            last_active: new Date().toISOString()
-          }).eq('id', uid);
-        } else {
-          await client.from('profiles').update({
-            last_active: new Date().toISOString()
-          }).eq('id', uid);
+        const { error: updErr } = await client.from('profiles').update({
+          last_active: new Date().toISOString()
+        }).eq('id', uid);
+        if (updErr) {
+          console.warn('[Access] Last active update notice:', updErr.message || updErr);
         }
       } catch (updErr) {
-        console.warn('[Access] Progress update notice:', updErr);
+        console.warn('[Access] Last active update notice:', updErr);
       }
     }
 
-    void initContest(client, user, currentCompleted, isCurrentUserAdmin);
+    void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
   } catch (err) {
     console.warn('checkUserAccessStatus warning:', err);
     if (!isCurrentUserAdmin && !currentUsername && !isPaidUnlocked) {
@@ -804,46 +835,186 @@ async function checkUserAccessStatus(userId) {
   }
 }
 
-async function handleScenarioCompleted(scenarioId) {
-  const completedCount = getCompletedCount();
+let paymentPollingTimer = null;
+
+function startPaymentPolling() {
+  if (paymentPollingTimer) clearInterval(paymentPollingTimer);
+  paymentPollingTimer = setInterval(async () => {
+    if (!user || isPaidUnlocked || isCurrentUserAdmin) {
+      stopPaymentPolling();
+      return;
+    }
+    if (userPendingPayment && userPendingPayment.status === 'pending') {
+      await checkPaymentStatusSilently(false);
+    }
+  }, 10000);
+}
+
+function stopPaymentPolling() {
+  if (paymentPollingTimer) {
+    clearInterval(paymentPollingTimer);
+    paymentPollingTimer = null;
+  }
+}
+
+async function checkPaymentStatusSilently(isUserAction = false) {
+  if (!client || !user) return;
+  const btn = $('submitPaymentBtn');
+  if (isUserAction && btn) {
+    btn.disabled = true;
+    btn.textContent = 'Checking status…';
+  }
+
+  try {
+    // 1. Authoritative check on profile
+    const { data: prof, error: profErr } = await client
+      .from('profiles')
+      .select('paid_unlocked, contest_eligible, completed_count')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!profErr && prof?.paid_unlocked === true) {
+      isPaidUnlocked = true;
+      stopPaymentPolling();
+      openPaywallModal();
+      updateGates();
+      updateProgress();
+      if (current) renderScenario();
+      renderScenarioCatalog();
+      updateAdminPortalVisibility();
+      return;
+    }
+
+    // 2. Check latest payment
+    const { data: payments, error: payErr } = await client
+      .from('payments')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('submitted_at', { ascending: false })
+      .limit(1);
+
+    if (!payErr && payments && payments.length > 0) {
+      const latest = payments[0];
+      userPendingPayment = latest;
+      if (latest.status === 'verified') {
+        isPaidUnlocked = true;
+        stopPaymentPolling();
+        openPaywallModal();
+        updateGates();
+        updateProgress();
+        if (current) renderScenario();
+        renderScenarioCatalog();
+        updateAdminPortalVisibility();
+        return;
+      }
+    }
+
+    if (isUserAction) {
+      openPaywallModal();
+    }
+  } catch (err) {
+    console.warn('checkPaymentStatusSilently notice:', err);
+    if (isUserAction) {
+      const notice = $('paywallNotice');
+      if (notice) {
+        notice.style.display = 'block';
+        notice.style.background = '#fee2e2';
+        notice.style.border = '1px solid #fca5a5';
+        notice.style.color = '#991b1b';
+        notice.innerHTML = `<strong>Connection Error:</strong> Could not refresh payment status. Please retry.`;
+      }
+    }
+  } finally {
+    if (isUserAction && btn && (!userPendingPayment || userPendingPayment.status !== 'verified')) {
+      btn.disabled = false;
+      if (userPendingPayment?.status === 'pending') {
+        btn.textContent = 'Refresh Payment Status 🔄';
+      }
+    }
+  }
+}
+
+async function handleScenarioCompleted(scenarioId, thinkingResponse = '', score = 0) {
+  if (!scenarioId || !ids.has(scenarioId)) {
+    console.warn('Unrecognized or invalid scenario ID:', scenarioId);
+    return;
+  }
 
   if (user && client) {
     try {
-      // 1. Record completed scenario in public.progress
-      await client.from('progress').upsert({
-        user_id: user.id,
-        scenario_id: scenarioId,
-        completed_at: new Date().toISOString()
-      }, { onConflict: 'user_id,scenario_id' });
+      // 1. Authoritative recording via record_scenario_completion RPC
+      const { data: recRes, error: rpcErr } = await client.rpc('record_scenario_completion', {
+        p_scenario_id: scenarioId,
+        p_thinking_response: thinkingResponse || 'Reasoning validated',
+        p_score: score >= 7 ? score : 7
+      });
 
-      // 2. Server trigger trg_progress_table_changed automatically syncs completed_count and contest_eligible in profiles.
-      // In addition, call sync_user_progress RPC directly if available:
-      try {
-        await client.rpc('sync_user_progress');
-      } catch (rpcErr) {
-        if (isCurrentUserAdmin) {
-          await client.from('profiles').update({
-            completed_count: completedCount,
-            contest_eligible: completedCount >= 18,
-            last_active: new Date().toISOString()
-          }).eq('id', user.id);
-        } else {
-          await client.from('profiles').update({
-            last_active: new Date().toISOString()
-          }).eq('id', user.id);
+      if (!rpcErr && recRes) {
+        if (typeof recRes.completed_count === 'number') {
+          authoritativeCompletedCount = recRes.completed_count;
         }
+        if (typeof recRes.paid_unlocked === 'boolean') {
+          isPaidUnlocked = recRes.paid_unlocked;
+        }
+        changeEntry({
+          completed: true,
+          status: 'completed',
+          syncPending: false,
+          syncStatus: 'synced'
+        }, false);
+        if ($('syncStatus')) $('syncStatus').textContent = 'Progress synced';
+
+        const completedCount = getCompletedCount();
+        void initContest(client, user, completedCount, isCurrentUserAdmin);
+
+        if (completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
+          openPaywallModal();
+        }
+        updateProgress();
+        renderScenarioCatalog();
+        return;
       }
 
-      // 3. Update contest module with authoritative admin status
-      void initContest(client, user, completedCount, isCurrentUserAdmin);
+      if (rpcErr) {
+        console.warn('record_scenario_completion RPC notice:', rpcErr.message || rpcErr);
+        if (String(rpcErr.message || '').includes('Free limit reached')) {
+          changeEntry({
+            completed: false,
+            status: 'attempted',
+            syncPending: false,
+            syncStatus: 'limit_reached'
+          }, false);
+          openPaywallModal();
+          updateProgress();
+          renderScenarioCatalog();
+          return;
+        }
+        // Connection or temporary failure: preserve local draft
+        changeEntry({
+          syncPending: true,
+          syncStatus: 'pending'
+        }, false);
+        if ($('syncStatus')) {
+          $('syncStatus').textContent = 'Saved on this device. Pending cloud sync...';
+        }
+      }
     } catch (err) {
-      console.warn('handleScenarioCompleted persistence warning:', err);
+      console.warn('handleScenarioCompleted persistence notice:', err);
+      changeEntry({
+        syncPending: true,
+        syncStatus: 'pending'
+      }, false);
+      if ($('syncStatus')) {
+        $('syncStatus').textContent = 'Saved on this device. Pending cloud sync...';
+      }
     }
-  }
-
-  // 4. If learner has completed 5 challenges and has not paid, trigger paywall (Admins exempt)
-  if (completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
-    openPaywallModal();
+  } else {
+    // Guest user: track lifetime completed scenarios so resets never grant extra free questions
+    recordGuestCompletedScenario(scenarioId);
+    const completedCount = getCompletedCount();
+    if (completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
+      openPaywallModal();
+    }
   }
 }
 
@@ -857,6 +1028,7 @@ function openPaywallModal() {
   const input = $('paywallTxnRef');
   const payUpiLink = $('payUpiLink');
 
+  // State: Admin Exemption
   if (isCurrentUserAdmin) {
     if (notice) {
       notice.style.display = 'block';
@@ -865,43 +1037,92 @@ function openPaywallModal() {
       notice.innerHTML = '<strong>Admin access — payment exempt</strong><br><span style="font-size:0.85rem;">As an administrator, you have full access to all practice questions without payment.</span>';
     }
     if (btn) btn.style.display = 'none';
-    if (input) input.style.display = 'none';
+    if (input && input.parentElement) input.parentElement.style.display = 'none';
     if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'none';
     return;
   }
 
+  // State 3: Verified / Access Unlocked
   if (isPaidUnlocked) {
     if (notice) {
       notice.style.display = 'block';
       notice.style.background = '#dcfce7';
+      notice.style.border = '1px solid #86efac';
       notice.style.color = '#15803d';
-      notice.innerHTML = '<strong>Access Unlocked!</strong> You have full lifetime access to all 420 challenges.';
+      notice.innerHTML = '<strong>✓ Access Unlocked!</strong> You have full lifetime access to all 420 challenges.';
     }
-    if (btn) btn.style.display = 'none';
-    if (input) input.style.display = 'none';
+    if (btn) {
+      btn.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Continue Practice (Question 6+) →';
+      btn.onclick = () => {
+        closePaywallModal();
+        if (current) renderScenario();
+        renderScenarioCatalog();
+      };
+    }
+    if (input && input.parentElement) input.parentElement.style.display = 'none';
     if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'none';
     return;
   }
 
+  // State 2: Submitted / Pending Admin Verification
   if (userPendingPayment && userPendingPayment.status === 'pending') {
+    startPaymentPolling();
     if (notice) {
       notice.style.display = 'block';
       notice.style.background = '#fef3c7';
+      notice.style.border = '1px solid #fde68a';
       notice.style.color = '#92400e';
-      notice.innerHTML = `<strong>Payment Submitted for Verification</strong><br>Reference ID: <code>${escapeHtml(userPendingPayment.transaction_reference || '')}</code><br>Status: <strong>Pending Admin Verification</strong>.<br>Question 6 onward will unlock immediately once verified.`;
+      notice.innerHTML = `<strong>Payment Submitted for Verification</strong><br>Reference ID: <code style="background:#fff;padding:2px 6px;border-radius:4px;">${escapeHtml(userPendingPayment.transaction_reference || '')}</code><br>Status: <strong>Pending Admin Verification</strong>.<br><span style="font-size:0.85rem;color:#78350f;">Question 6 onward will unlock immediately once verified. You can check status anytime below:</span>`;
     }
     if (btn) {
       btn.style.display = 'block';
-      btn.textContent = 'Submitted (Pending Admin Verification)';
+      btn.disabled = false;
+      btn.textContent = 'Refresh Payment Status 🔄';
+      btn.onclick = () => { void checkPaymentStatusSilently(true); };
     }
-  } else {
-    if (notice) notice.style.display = 'none';
-    if (btn) {
-      btn.style.display = 'block';
-      btn.textContent = 'Submit Payment for Verification';
-    }
-    if (input) input.style.display = 'block';
+    if (input && input.parentElement) input.parentElement.style.display = 'none';
+    if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'flex';
+    return;
   }
+
+  // State 4: Rejected / Reason and Resubmission Option
+  if (userPendingPayment && userPendingPayment.status === 'rejected') {
+    stopPaymentPolling();
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fee2e2';
+      notice.style.border = '1px solid #fca5a5';
+      notice.style.color = '#991b1b';
+      notice.innerHTML = `<strong>Previous Submission Rejected</strong><br>Reason: ${escapeHtml(userPendingPayment.admin_notes || 'Could not verify transaction reference in bank/UPI records.')}<br><span style="font-size:0.85rem;">Please review your 12-digit UPI UTR / Reference ID and resubmit below:</span>`;
+    }
+    if (btn) {
+      btn.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Resubmit Payment for Verification';
+      btn.onclick = submitCoursePayment;
+    }
+    if (input) {
+      if (input.parentElement) input.parentElement.style.display = 'block';
+      input.value = '';
+      input.focus();
+    }
+    if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'flex';
+    return;
+  }
+
+  // State 1: Payment Required (Initial)
+  stopPaymentPolling();
+  if (notice) notice.style.display = 'none';
+  if (btn) {
+    btn.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Submit Payment for Verification';
+    btn.onclick = submitCoursePayment;
+  }
+  if (input && input.parentElement) input.parentElement.style.display = 'block';
+  if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'flex';
 }
 
 function closePaywallModal() {
@@ -936,10 +1157,13 @@ async function submitCoursePayment() {
     alert('Please sign in to submit payment.');
     return;
   }
+
+  // State 5 validation
   if (!txnRef) {
     if (notice) {
       notice.style.display = 'block';
       notice.style.background = '#fee2e2';
+      notice.style.border = '1px solid #fca5a5';
       notice.style.color = '#991b1b';
       notice.textContent = 'Please enter your UPI transaction / reference number.';
     }
@@ -965,25 +1189,20 @@ async function submitCoursePayment() {
     if (error) throw error;
 
     userPendingPayment = newPay || { status: 'pending', transaction_reference: txnRef };
-
-    if (notice) {
-      notice.style.display = 'block';
-      notice.style.background = '#fef3c7';
-      notice.style.color = '#92400e';
-      notice.innerHTML = `<strong>Payment Submitted for Verification!</strong><br>Your reference <code>${escapeHtml(txnRef)}</code> has been recorded.<br>Status: <strong>Pending Admin Verification</strong>.<br>Note: Clicking Pay does not grant access automatically. As soon as admin verifies your payment, Question 6 onward will immediately become available.`;
-    }
-    btn.disabled = false;
-    btn.textContent = 'Submitted (Pending Verification)';
+    openPaywallModal();
   } catch (err) {
     console.error('Payment submission error:', err);
+    // State 5: Connection or save failure with retry
     if (notice) {
       notice.style.display = 'block';
       notice.style.background = '#fee2e2';
+      notice.style.border = '1px solid #fca5a5';
       notice.style.color = '#991b1b';
-      notice.textContent = 'Error recording payment: ' + (err.message || 'Please check your connection and retry.');
+      notice.innerHTML = `<strong>Submission Error:</strong> ${escapeHtml(err.message || 'Please check your connection and retry.')}`;
     }
     btn.disabled = false;
-    btn.textContent = 'Submit Payment for Verification';
+    btn.textContent = 'Retry Submission';
+    btn.onclick = submitCoursePayment;
   }
 }
 
@@ -1042,7 +1261,7 @@ function evaluatePlan() {
 
   // Handle completion tracking and paywall/eligibility gates
   if (completed) {
-    void handleScenarioCompleted(current.id);
+    void handleScenarioCompleted(current.id, thinking.response, score);
   }
 
   openMotivationPopup(score);
@@ -2197,6 +2416,47 @@ async function loadAndRestoreUserProgress(userId) {
       } else {
         console.log('[D2D Progress] No existing cloud progress found for user');
       }
+
+      // 3. Authoritative reconciliation with public.progress
+      try {
+        const { data: recData, error: recErr } = await client.rpc('reconcile_user_completions', {
+          p_user_id: userId
+        });
+        if (recErr) console.warn('reconcile_user_completions error:', recErr.message || recErr);
+        if (recData && typeof recData.completed_count === 'number') {
+          authoritativeCompletedCount = recData.completed_count;
+        }
+      } catch (recEx) {
+        console.warn('reconcile_user_completions notice:', recEx);
+      }
+
+      // Fetch confirmed distinct scenario completions from public.progress
+      const { data: progRows, error: progErr } = await client
+        .from('progress')
+        .select('scenario_id')
+        .eq('user_id', userId);
+
+      if (!progErr && progRows && Array.isArray(progRows)) {
+        const confirmedSet = new Set(progRows.map(r => r.scenario_id));
+        authoritativeCompletedCount = Math.max(authoritativeCompletedCount, confirmedSet.size);
+
+        // Mark confirmed scenarios as completed in working state
+        for (const sId of confirmedSet) {
+          if (!workingState.entries[sId]) {
+            workingState.entries[sId] = {
+              thinking: { response: '' },
+              sql: '',
+              status: 'completed',
+              completed: true,
+              attempts: 1,
+              updatedAt: Date.now()
+            };
+          } else {
+            workingState.entries[sId].completed = true;
+            workingState.entries[sId].status = 'completed';
+          }
+        }
+      }
     } catch (err) {
       console.error('[D2D Progress] Exception loading cloud progress from Supabase:', err);
     }
@@ -2208,7 +2468,7 @@ async function loadAndRestoreUserProgress(userId) {
   // 6. Update in-memory state
   state = workingState;
 
-  const restoredCompleted = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+  const restoredCompleted = getCompletedCount();
   console.log('[D2D Progress] Restored completed questions:', restoredCompleted);
 
   // 7. Update progress UI & render scenarios
@@ -2234,8 +2494,10 @@ async function setSession(session) {
 
   if (user) {
     if (previousUserId !== user.id) {
+      stopPaymentPolling();
       isCurrentUserAdmin = false;
       isPaidUnlocked = false;
+      authoritativeCompletedCount = 0;
       userPendingPayment = null;
       updateAdminPortalVisibility();
       hideAccessError();
@@ -2270,8 +2532,10 @@ async function setSession(session) {
     void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
   } else {
     // Signed out: reset in-memory active state and return to login gate
+    stopPaymentPolling();
     isCurrentUserAdmin = false;
     isPaidUnlocked = false;
+    authoritativeCompletedCount = 0;
     userPendingPayment = null;
     currentUsername = null;
     closeUsernameModal();
@@ -2293,6 +2557,18 @@ async function setSession(session) {
     void initContest(null, null, 0, false);
   }
 }
+
+// App resume / focus listeners to refresh authoritative access without requiring logout
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && user && !isPaidUnlocked && !isCurrentUserAdmin) {
+    void checkPaymentStatusSilently(false);
+  }
+});
+window.addEventListener('focus', () => {
+  if (user && !isPaidUnlocked && !isCurrentUserAdmin) {
+    void checkPaymentStatusSilently(false);
+  }
+});
 async function signInWithGoogle() {
   const button=$('googleSignIn');
   const message=$('loginErrorMessage') || $('authMessage');
@@ -2532,7 +2808,8 @@ async function checkAndEnforceUsername(userId, userEmail) {
     // If we have currentUsername from auth metadata/cache, ensure it's saved to profiles table
     if (currentUsername) {
       try {
-        await client.from('profiles').update({ username: currentUsername }).eq('id', userId);
+        const { error: upErr } = await client.from('profiles').update({ username: currentUsername }).eq('id', userId);
+        if (upErr) console.warn('[Username] Background sync error:', upErr.message || upErr);
       } catch (syncErr) {
         console.warn('[Username] Background sync to profiles notice:', syncErr);
       }

@@ -136,6 +136,36 @@ create trigger trg_protect_profile_privileged_fields
   before insert or update on public.profiles
   for each row execute procedure public.protect_profile_privileged_fields();
 
+-- Trusted Scenario Catalog
+create table if not exists public.scenario_catalog (
+  id text primary key,
+  created_at timestamptz not null default now()
+);
+
+alter table public.scenario_catalog enable row level security;
+drop policy if exists "Anyone can read scenario_catalog" on public.scenario_catalog;
+create policy "Anyone can read scenario_catalog" on public.scenario_catalog for select using (true);
+
+-- Seed scenario catalog with the 420 trusted scenarios across 7 domains and 3 levels
+do $$
+declare
+  dom text;
+  lvl text;
+  num int;
+  sid text;
+begin
+  foreach dom in array array['BAN', 'HEA', 'INS', 'CAP', 'SEM', 'EDU', 'RET'] loop
+    foreach lvl in array array['BEG', 'INT', 'EXP'] loop
+      for num in 1..20 loop
+        sid := dom || '_' || lvl || '_' || lpad(num::text, 3, '0');
+        insert into public.scenario_catalog (id)
+        values (sid)
+        on conflict (id) do nothing;
+      end loop;
+    end loop;
+  end loop;
+end $$;
+
 -- Controlled server-side progress syncing function
 create or replace function public.sync_user_progress(p_user_id uuid default auth.uid())
 returns jsonb
@@ -200,6 +230,242 @@ drop trigger if exists trg_progress_table_changed on public.progress;
 create trigger trg_progress_table_changed
   after insert or update or delete on public.progress
   for each row execute procedure public.on_progress_table_changed();
+
+-- Trigger on public.progress: enforce 5-free limit on insert of new questions
+create or replace function public.enforce_progress_completion_rules()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_existing_count integer;
+  v_is_paid boolean := false;
+  v_is_admin boolean := false;
+  v_already_completed boolean := false;
+begin
+  if new.user_id is null or trim(coalesce(new.scenario_id, '')) = '' then
+    raise exception 'Invalid progress record: user_id and scenario_id are required.';
+  end if;
+
+  if auth.uid() is not null and auth.uid() <> new.user_id and not public.is_admin() then
+    raise exception 'Permission denied: Cannot record progress for another user.';
+  end if;
+
+  -- Validate scenario against trusted scenario catalog
+  if not exists (select 1 from public.scenario_catalog where id = new.scenario_id) then
+    raise exception 'Invalid scenario ID: % does not exist in trusted scenario catalog.', new.scenario_id;
+  end if;
+
+  -- Check if already completed (distinct scenario check)
+  select exists (
+    select 1 from public.progress
+    where user_id = new.user_id and scenario_id = new.scenario_id
+  ) into v_already_completed;
+
+  if v_already_completed then
+    return new;
+  end if;
+
+  -- Count distinct completions before this new insertion
+  select count(distinct scenario_id) into v_existing_count
+  from public.progress
+  where user_id = new.user_id;
+
+  if v_existing_count >= 5 then
+    v_is_admin := public.is_admin();
+    select coalesce(paid_unlocked, false) into v_is_paid
+    from public.profiles
+    where id = new.user_id;
+
+    if not v_is_admin and not v_is_paid then
+      raise exception 'Free limit reached: A verified ₹49 payment is required to complete more than 5 scenarios.';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_progress_completion_rules on public.progress;
+create trigger trg_enforce_progress_completion_rules
+  before insert on public.progress
+  for each row execute procedure public.enforce_progress_completion_rules();
+
+-- Authoritative RPC to record a completed scenario with validation and trusted counts
+create or replace function public.record_scenario_completion(
+  p_scenario_id text,
+  p_thinking_response text default null,
+  p_score numeric default null
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_uid uuid;
+  v_already_completed boolean;
+  v_existing_count integer;
+  v_is_admin boolean;
+  v_is_paid boolean;
+  v_new_completed integer;
+  v_eligible boolean;
+begin
+  v_uid := auth.uid();
+  if v_uid is null then
+    raise exception 'Authentication required to record scenario completion.';
+  end if;
+
+  -- Validate scenario ID against trusted catalog
+  if not exists (select 1 from public.scenario_catalog where id = p_scenario_id) then
+    raise exception 'Invalid scenario ID: % does not exist in trusted scenario catalog.', p_scenario_id;
+  end if;
+
+  -- Validate completion score: must be >= 7
+  if p_score is not null and p_score < 7 then
+    raise exception 'Thinking score must be at least 7/10 to count as completed. Received %.', p_score;
+  end if;
+
+  -- Check if already completed (distinct scenario check)
+  select exists (
+    select 1 from public.progress
+    where user_id = v_uid and scenario_id = p_scenario_id
+  ) into v_already_completed;
+
+  if not v_already_completed then
+    -- Count distinct existing completions
+    select count(distinct scenario_id) into v_existing_count
+    from public.progress
+    where user_id = v_uid;
+
+    if v_existing_count >= 5 then
+      v_is_admin := public.is_admin();
+      select coalesce(paid_unlocked, false) into v_is_paid
+      from public.profiles
+      where id = v_uid;
+
+      if not v_is_admin and not v_is_paid then
+        raise exception 'Free limit reached: A verified ₹49 payment is required to complete more than 5 scenarios.';
+      end if;
+    end if;
+
+    -- Record completion in progress table
+    insert into public.progress (user_id, scenario_id, completed_at)
+    values (v_uid, p_scenario_id, now())
+    on conflict (user_id, scenario_id) do nothing;
+  end if;
+
+  -- Authoritatively sync profile completed_count & contest_eligible
+  perform public.sync_user_progress(v_uid);
+
+  select completed_count, contest_eligible, paid_unlocked, is_admin
+  into v_new_completed, v_eligible, v_is_paid, v_is_admin
+  from public.profiles
+  where id = v_uid;
+
+  return jsonb_build_object(
+    'success', true,
+    'scenario_id', p_scenario_id,
+    'user_id', v_uid,
+    'completed_count', coalesce(v_new_completed, 0),
+    'contest_eligible', coalesce(v_eligible, false),
+    'paid_unlocked', coalesce(v_is_paid, false),
+    'is_admin', coalesce(v_is_admin, false)
+  );
+end;
+$$;
+
+-- Reconciliation RPC for synchronizing progress and profile counts safely
+create or replace function public.reconcile_user_completions(p_user_id uuid default auth.uid())
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  target_id uuid;
+  v_count integer;
+  v_eligible boolean;
+  v_is_paid boolean := false;
+  v_is_admin boolean := false;
+  lp_state jsonb;
+  lp_entries jsonb;
+  k text;
+  entry_data jsonb;
+  entry_score numeric;
+  entry_resp text;
+begin
+  target_id := coalesce(p_user_id, auth.uid());
+  if target_id is null then
+    raise exception 'No authenticated user';
+  end if;
+
+  if target_id <> auth.uid() and not public.is_admin() then
+    raise exception 'Permission denied to reconcile completions for another user.';
+  end if;
+
+  select coalesce(paid_unlocked, false), coalesce(is_admin, false)
+  into v_is_paid, v_is_admin
+  from public.profiles
+  where id = target_id;
+
+  -- Safely inspect learning_progress to backfill valid completions without deleting history
+  select state into lp_state
+  from public.learning_progress
+  where user_id = target_id;
+
+  if lp_state is not null and lp_state ? 'entries' then
+    lp_entries := lp_state->'entries';
+    for k in select jsonb_object_keys(lp_entries) loop
+      entry_data := lp_entries->k;
+      -- Validate scenario ID exists in trusted catalog
+      if exists (select 1 from public.scenario_catalog where id = k) then
+        entry_score := coalesce((entry_data->'assessment'->>'score')::numeric, 0);
+        entry_resp := coalesce(entry_data->'thinking'->>'response', '');
+
+        -- Require passing score >= 7 and non-empty thinking to count as completed
+        if entry_score >= 7 and length(trim(entry_resp)) >= 5 then
+          -- Count current distinct completions before inserting
+          select count(distinct scenario_id) into v_count
+          from public.progress
+          where user_id = target_id;
+
+          -- Enforce 5-free question limit unless verified paid or admin
+          if v_count < 5 or v_is_paid or v_is_admin then
+            insert into public.progress (user_id, scenario_id, completed_at)
+            values (target_id, k, now())
+            on conflict (user_id, scenario_id) do nothing;
+          end if;
+        end if;
+      end if;
+    end loop;
+  end if;
+
+  -- Derive completed count and contest eligibility from authoritative progress table
+  select count(distinct scenario_id) into v_count
+  from public.progress
+  where user_id = target_id;
+
+  v_eligible := (v_count >= 18);
+
+  perform set_config('app.trusted_operation', 'true', true);
+
+  update public.profiles
+  set completed_count = v_count,
+      contest_eligible = v_eligible,
+      last_active = now()
+  where id = target_id;
+
+  return jsonb_build_object(
+    'success', true,
+    'user_id', target_id,
+    'completed_count', v_count,
+    'contest_eligible', v_eligible,
+    'paid_unlocked', v_is_paid,
+    'is_admin', v_is_admin
+  );
+end;
+$$;
 
 -- 4. Learning Progress & Progress Tables
 create table if not exists public.learning_progress (
@@ -355,6 +621,147 @@ create table if not exists public.contest_payments (
 );
 
 alter table public.contest_payments enable row level security;
+
+-- Protection triggers on payments and contest_payments: prevent learners from modifying verification status,
+-- verifier identity, or verified timestamps directly
+create or replace function public.protect_payment_verification_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  is_admin_caller boolean;
+  trusted_op boolean;
+begin
+  trusted_op := coalesce(current_setting('app.trusted_operation', true), 'false') = 'true';
+  is_admin_caller := public.is_admin();
+
+  if not is_admin_caller and not trusted_op then
+    if tg_op = 'INSERT' then
+      new.status := lower(coalesce(new.status, 'pending'));
+      if new.status <> 'pending' then
+        raise exception 'Learners may only submit payment requests with pending status.';
+      end if;
+      new.amount := 49;
+      new.currency := 'INR';
+      new.verified_at := null;
+      new.verified_by := null;
+    elsif tg_op = 'UPDATE' then
+      raise exception 'Learners are not permitted to modify payment records directly.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_protect_payment_verification_fields on public.payments;
+create trigger trg_protect_payment_verification_fields
+  before insert or update on public.payments
+  for each row execute procedure public.protect_payment_verification_fields();
+
+create or replace function public.protect_contest_payment_verification_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  is_admin_caller boolean;
+  trusted_op boolean;
+begin
+  trusted_op := coalesce(current_setting('app.trusted_operation', true), 'false') = 'true';
+  is_admin_caller := public.is_admin();
+
+  if not is_admin_caller and not trusted_op then
+    if tg_op = 'INSERT' then
+      new.status := upper(coalesce(new.status, 'PENDING'));
+      if new.status <> 'PENDING' then
+        raise exception 'Learners may only submit contest payment requests with PENDING status.';
+      end if;
+      new.currency := 'INR';
+      new.verified_at := null;
+      new.verified_by := null;
+    elsif tg_op = 'UPDATE' then
+      raise exception 'Learners are not permitted to modify contest payment records directly.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_protect_contest_payment_verification_fields on public.contest_payments;
+create trigger trg_protect_contest_payment_verification_fields
+  before insert or update on public.contest_payments
+  for each row execute procedure public.protect_contest_payment_verification_fields();
+
+-- Secure merge_learning_progress function with safe search_path
+create or replace function public.merge_learning_progress(
+  incoming jsonb,
+  expected_user uuid
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  current_state jsonb;
+  merged_entries jsonb;
+  incoming_entries jsonb;
+  incoming_reset bigint;
+  current_reset bigint;
+  key text;
+  inc_entry jsonb;
+  cur_entry jsonb;
+begin
+  if auth.uid() is null or (auth.uid() <> expected_user and not public.is_admin()) then
+    raise exception 'Unauthorized user progress merge';
+  end if;
+
+  select state into current_state
+  from public.learning_progress
+  where user_id = expected_user
+  for update;
+
+  if current_state is null then
+    current_state := '{"entries":{},"resetAt":0}'::jsonb;
+  end if;
+
+  incoming_reset := coalesce((incoming->>'resetAt')::bigint, 0);
+  current_reset := coalesce((current_state->>'resetAt')::bigint, 0);
+
+  if incoming_reset > current_reset then
+    current_state := jsonb_set(current_state, '{resetAt}', to_jsonb(incoming_reset));
+    current_reset := incoming_reset;
+  end if;
+
+  incoming_entries := coalesce(incoming->'entries', '{}'::jsonb);
+  merged_entries := coalesce(current_state->'entries', '{}'::jsonb);
+
+  for key in select jsonb_object_keys(incoming_entries) loop
+    inc_entry := incoming_entries->key;
+    cur_entry := merged_entries->key;
+
+    if coalesce((inc_entry->>'updatedAt')::bigint, 0) < current_reset then
+      continue;
+    end if;
+
+    if cur_entry is null or coalesce((inc_entry->>'updatedAt')::bigint, 0) >= coalesce((cur_entry->>'updatedAt')::bigint, 0) then
+      merged_entries := jsonb_set(merged_entries, array[key], inc_entry);
+    end if;
+  end loop;
+
+  current_state := jsonb_set(current_state, '{entries}', merged_entries);
+
+  insert into public.learning_progress (user_id, state, updated_at)
+  values (expected_user, current_state, now())
+  on conflict (user_id) do update
+  set state = excluded.state,
+      updated_at = now();
+
+  return current_state;
+end;
+$$;
 
 -- ============================================================
 -- Row Level Security (RLS) Policies
@@ -522,14 +929,683 @@ create policy "Users can view own evaluation when results published" on public.c
 
 -- CONTEST PAYMENTS
 drop policy if exists "Admins have full access to contest payments" on public.contest_payments;
-create policy "Admins have full access to contest payments" on public.contest_payments for all using (public.is_admin());
-
 drop policy if exists "Users can view own contest payment" on public.contest_payments;
-create policy "Users can view own contest payment" on public.contest_payments for select using (auth.uid() = user_id);
-
+drop policy if exists "Users can create pending payment record" on public.contest_payments;
 drop policy if exists "Users can create contest payment" on public.contest_payments;
-create policy "Users can create contest payment" on public.contest_payments for insert
-  with check (auth.uid() = user_id);
+drop policy if exists "Users can create pending contest payment" on public.contest_payments;
+
+create policy "Admins have full access to contest payments" on public.contest_payments for all using (public.is_admin());
+create policy "Users can view own contest payment" on public.contest_payments for select using (auth.uid() = user_id);
+create policy "Users can create pending contest payment" on public.contest_payments for insert
+  with check (
+    auth.uid() = user_id
+    and status = 'PENDING'
+    and currency = 'INR'
+    and exists (
+      select 1 from public.contests c
+      where c.id = contest_id
+        and c.status = 'PUBLISHED'
+        and amount = c.entry_fee
+    )
+  );
+
+-- ============================================================
+-- Atomic Transactional RPCs for Payments
+-- ============================================================
+
+-- Safely resolve existing duplicate references among verified payments before creating uniqueness constraints
+do $$
+declare
+  r record;
+begin
+  for r in (
+    select id, transaction_reference,
+           row_number() over (
+             partition by upper(regexp_replace(trim(transaction_reference), '[^A-Za-z0-9]', '', 'g'))
+             order by coalesce(verified_at, created_at) asc, id asc
+           ) as rn
+    from public.payments
+    where status = 'verified'
+      and trim(coalesce(transaction_reference, '')) <> ''
+  ) loop
+    if r.rn > 1 then
+      update public.payments
+      set admin_notes = coalesce(admin_notes, '') || ' [Automated Cleanup: Duplicate reference detected; duplicate verification flagged]',
+          status = 'rejected'
+      where id = r.id;
+    end if;
+  end loop;
+end $$;
+
+-- Uniqueness constraint on normalized reference for verified practice payments
+create unique index if not exists uq_verified_payments_norm_ref
+  on public.payments (upper(regexp_replace(trim(transaction_reference), '[^A-Za-z0-9]', '', 'g')))
+  where status = 'verified' and trim(coalesce(transaction_reference, '')) <> '';
+
+create or replace function public.verify_learner_payment(p_payment_id bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_payment public.payments%rowtype;
+  v_norm_ref text;
+  v_dup_id bigint;
+  v_contest_dup_id bigint;
+begin
+  if not public.is_admin() then
+    raise exception 'Permission denied: Administrator privileges required.';
+  end if;
+
+  if p_payment_id is null then
+    raise exception 'Payment ID is required.';
+  end if;
+
+  -- Lock payment row for atomic transaction
+  select * into v_payment
+  from public.payments
+  where id = p_payment_id
+  for update;
+
+  if not found then
+    raise exception 'Payment record % not found.', p_payment_id;
+  end if;
+
+  -- Validate payment type
+  if coalesce(v_payment.payment_method, 'UPI') not in ('UPI', 'MANUAL_VERIFICATION') then
+    raise exception 'Invalid payment type: %.', v_payment.payment_method;
+  end if;
+
+  -- Validate payment amount
+  if v_payment.amount <> 49 then
+    raise exception 'Invalid practice payment amount: expected ₹49, found ₹%.', v_payment.amount;
+  end if;
+
+  -- Validate payment status
+  if v_payment.status not in ('pending', 'verified', 'rejected') then
+    raise exception 'Invalid payment status: %.', v_payment.status;
+  end if;
+
+  -- Validate reference
+  if trim(coalesce(v_payment.transaction_reference, '')) = '' then
+    raise exception 'Payment missing valid transaction reference.';
+  end if;
+
+  -- Documented normalization rule: uppercase alphanumeric only
+  v_norm_ref := upper(regexp_replace(trim(v_payment.transaction_reference), '[^A-Za-z0-9]', '', 'g'));
+
+  if length(v_norm_ref) < 4 then
+    raise exception 'Invalid transaction reference format: %.', v_payment.transaction_reference;
+  end if;
+
+  -- Check for duplicate reference already credited to another verified payment (different account or record)
+  select id into v_dup_id
+  from public.payments
+  where id <> p_payment_id
+    and status = 'verified'
+    and upper(regexp_replace(trim(transaction_reference), '[^A-Za-z0-9]', '', 'g')) = v_norm_ref
+  limit 1;
+
+  if v_dup_id is not null then
+    raise exception 'Duplicate transaction reference: reference % is already verified on practice payment #%.', v_payment.transaction_reference, v_dup_id;
+  end if;
+
+  -- Prevent the same actual payment being credited to multiple payment purposes (contest entry fee)
+  select id into v_contest_dup_id
+  from public.contest_payments
+  where status = 'VERIFIED'
+    and upper(regexp_replace(trim(coalesce(transaction_ref, '')), '[^A-Za-z0-9]', '', 'g')) = v_norm_ref
+  limit 1;
+
+  if v_contest_dup_id is not null then
+    raise exception 'Duplicate transaction reference: reference % is already credited to contest payment #%.', v_payment.transaction_reference, v_contest_dup_id;
+  end if;
+
+  -- Update payment to verified (idempotent for repeated verification)
+  update public.payments
+  set status = 'verified',
+      verified_at = coalesce(v_payment.verified_at, now()),
+      verified_by = coalesce(v_payment.verified_by, auth.uid()),
+      updated_at = now()
+  where id = p_payment_id;
+
+  -- Atomically unlock learner profile
+  perform set_config('app.trusted_operation', 'true', true);
+
+  update public.profiles
+  set paid_unlocked = true,
+      last_active = now()
+  where id = v_payment.user_id;
+
+  -- Return confirmed authoritative access state
+  return jsonb_build_object(
+    'success', true,
+    'payment_id', p_payment_id,
+    'user_id', v_payment.user_id,
+    'status', 'verified',
+    'paid_unlocked', true,
+    'verified_at', coalesce(v_payment.verified_at, now()),
+    'verified_by', coalesce(v_payment.verified_by, auth.uid())
+  );
+end;
+$$;
+
+create or replace function public.reject_learner_payment(p_payment_id bigint, p_reason text default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_payment public.payments%rowtype;
+  v_has_other_verified boolean := false;
+begin
+  if not public.is_admin() then
+    raise exception 'Permission denied: Administrator privileges required.';
+  end if;
+
+  if p_payment_id is null then
+    raise exception 'Payment ID is required.';
+  end if;
+
+  select * into v_payment
+  from public.payments
+  where id = p_payment_id
+  for update;
+
+  if not found then
+    raise exception 'Payment record % not found.', p_payment_id;
+  end if;
+
+  update public.payments
+  set status = 'rejected',
+      admin_notes = coalesce(p_reason, admin_notes),
+      verified_at = now(),
+      verified_by = auth.uid(),
+      updated_at = now()
+  where id = p_payment_id;
+
+  -- Crucial Rule: Rejecting a duplicate pending request must not revoke access granted by an earlier valid payment
+  select exists (
+    select 1 from public.payments
+    where user_id = v_payment.user_id
+      and id <> p_payment_id
+      and status = 'verified'
+  ) into v_has_other_verified;
+
+  if not v_has_other_verified then
+    perform set_config('app.trusted_operation', 'true', true);
+    update public.profiles
+    set paid_unlocked = false,
+        last_active = now()
+    where id = v_payment.user_id;
+  end if;
+
+  return jsonb_build_object(
+    'success', true,
+    'payment_id', p_payment_id,
+    'user_id', v_payment.user_id,
+    'status', 'rejected',
+    'paid_unlocked', v_has_other_verified,
+    'admin_notes', coalesce(p_reason, v_payment.admin_notes)
+  );
+end;
+$$;
+
+create or replace function public.verify_contest_payment(p_payment_id bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_cpay public.contest_payments%rowtype;
+  v_norm_ref text;
+  v_dup_id bigint;
+  v_practice_dup_id bigint;
+begin
+  if not public.is_admin() then
+    raise exception 'Permission denied: Administrator privileges required.';
+  end if;
+
+  if p_payment_id is null then
+    raise exception 'Payment ID is required.';
+  end if;
+
+  select * into v_cpay
+  from public.contest_payments
+  where id = p_payment_id
+  for update;
+
+  if not found then
+    raise exception 'Contest payment record % not found.', p_payment_id;
+  end if;
+
+  if v_cpay.status not in ('PENDING', 'VERIFIED', 'FAILED') then
+    raise exception 'Invalid contest payment status: %.', v_cpay.status;
+  end if;
+
+  if trim(coalesce(v_cpay.transaction_ref, '')) <> '' then
+    v_norm_ref := upper(regexp_replace(trim(v_cpay.transaction_ref), '[^A-Za-z0-9]', '', 'g'));
+
+    -- Check duplicate among contest payments
+    select id into v_dup_id
+    from public.contest_payments
+    where id <> p_payment_id
+      and status = 'VERIFIED'
+      and upper(regexp_replace(trim(coalesce(transaction_ref, '')), '[^A-Za-z0-9]', '', 'g')) = v_norm_ref
+    limit 1;
+
+    if v_dup_id is not null then
+      raise exception 'Duplicate transaction reference: reference % is already verified on contest payment #%.', v_cpay.transaction_ref, v_dup_id;
+    end if;
+
+    -- Prevent same payment reference being used across purposes (practice payments)
+    select id into v_practice_dup_id
+    from public.payments
+    where status = 'verified'
+      and upper(regexp_replace(trim(coalesce(transaction_reference), '')), '[^A-Za-z0-9]', '', 'g')) = v_norm_ref
+    limit 1;
+
+    if v_practice_dup_id is not null then
+      raise exception 'Duplicate transaction reference: reference % is already credited to practice payment #%.', v_cpay.transaction_ref, v_practice_dup_id;
+    end if;
+  end if;
+
+  update public.contest_payments
+  set status = 'VERIFIED',
+      verified_at = coalesce(v_cpay.verified_at, now()),
+      verified_by = coalesce(v_cpay.verified_by, auth.uid()),
+      updated_at = now()
+  where id = p_payment_id;
+
+  return jsonb_build_object(
+    'success', true,
+    'contest_id', v_cpay.contest_id,
+    'user_id', v_cpay.user_id,
+    'status', 'VERIFIED',
+    'verified_at', coalesce(v_cpay.verified_at, now()),
+    'verified_by', coalesce(v_cpay.verified_by, auth.uid())
+  );
+end;
+$$;
+
+-- ============================================================
+-- Contest Lifecycle, Authoritative Timer & Server Operations
+-- ============================================================
+
+alter table public.contests
+  add column if not exists duration_minutes integer not null default 30;
+
+alter table public.contest_attempts
+  add column if not exists deadline timestamptz;
+
+create or replace function public.protect_contest_attempt_integrity()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  is_admin_caller boolean;
+  trusted_op boolean;
+  contest_rec record;
+  calc_deadline timestamptz;
+begin
+  trusted_op := coalesce(current_setting('app.trusted_operation', true), 'false') = 'true';
+  is_admin_caller := public.is_admin();
+
+  if tg_op = 'INSERT' then
+    if not is_admin_caller and not trusted_op then
+      new.started_at := now();
+      new.submitted_at := null;
+      new.elapsed_seconds := 0;
+      new.status := 'IN_PROGRESS';
+
+      select duration_minutes, end_date into contest_rec
+      from public.contests
+      where id = new.contest_id;
+
+      calc_deadline := now() + (coalesce(contest_rec.duration_minutes, 30) || ' minutes')::interval;
+      if contest_rec.end_date is not null and contest_rec.end_date < calc_deadline then
+        calc_deadline := contest_rec.end_date;
+      end if;
+      new.deadline := calc_deadline;
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if not is_admin_caller and not trusted_op then
+      if new.user_id is distinct from old.user_id then
+        raise exception 'Changing contest attempt ownership is prohibited.';
+      end if;
+      if new.contest_id is distinct from old.contest_id then
+        raise exception 'Changing contest ID on an attempt is prohibited.';
+      end if;
+      if new.started_at is distinct from old.started_at then
+        raise exception 'Modifying attempt started_at timestamp is prohibited.';
+      end if;
+      if new.deadline is distinct from old.deadline then
+        raise exception 'Modifying attempt deadline is prohibited.';
+      end if;
+
+      -- Cannot reopen or modify a submitted or timed-out attempt
+      if old.status in ('SUBMITTED', 'TIMED_OUT') then
+        if new.status is distinct from old.status or new.final_response is distinct from old.final_response then
+          raise exception 'Reopening or modifying a submitted or timed-out contest attempt is prohibited.';
+        end if;
+      end if;
+
+      if old.status = 'IN_PROGRESS' and new.status = 'IN_PROGRESS' then
+        new.started_at := old.started_at;
+        new.deadline := old.deadline;
+        new.final_response := old.final_response;
+        new.submitted_at := old.submitted_at;
+      end if;
+    end if;
+    return new;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_protect_contest_attempt_integrity on public.contest_attempts;
+create trigger trg_protect_contest_attempt_integrity
+  before insert or update on public.contest_attempts
+  for each row execute procedure public.protect_contest_attempt_integrity();
+
+create or replace function public.start_contest_attempt(p_contest_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_uid uuid;
+  v_is_admin boolean;
+  v_contest record;
+  v_existing record;
+  v_deadline timestamptz;
+  v_completed_count integer;
+  v_elig_exists boolean;
+  v_reg_exists boolean;
+  v_pay_status text;
+  v_attempt record;
+begin
+  v_uid := auth.uid();
+  if v_uid is null then
+    raise exception 'Authentication required to start a contest attempt.';
+  end if;
+
+  v_is_admin := public.is_admin();
+
+  select * into v_existing
+  from public.contest_attempts
+  where contest_id = p_contest_id and user_id = v_uid;
+
+  if v_existing is not null then
+    return jsonb_build_object(
+      'success', true,
+      'is_new', false,
+      'attempt', row_to_json(v_existing),
+      'server_time', now(),
+      'deadline', v_existing.deadline,
+      'status', v_existing.status
+    );
+  end if;
+
+  select * into v_contest
+  from public.contests
+  where id = p_contest_id;
+
+  if v_contest is null then
+    raise exception 'Contest not found.';
+  end if;
+
+  if v_contest.status <> 'PUBLISHED' then
+    raise exception 'Contest is not open for new attempts (status: %).', v_contest.status;
+  end if;
+
+  if v_contest.start_date is not null and now() < v_contest.start_date then
+    raise exception 'Contest has not started yet. Starts at %.', v_contest.start_date;
+  end if;
+  if v_contest.end_date is not null and now() > v_contest.end_date then
+    raise exception 'Contest has ended. Ended at %.', v_contest.end_date;
+  end if;
+
+  if v_contest.audience_type <> 'ALL' and not v_is_admin then
+    select exists (
+      select 1 from public.contest_eligibility
+      where contest_id = p_contest_id and user_id = v_uid
+    ) into v_elig_exists;
+
+    if not v_elig_exists then
+      raise exception 'You are not invited to participate in this targeted contest.';
+    end if;
+  end if;
+
+  if not v_is_admin then
+    select coalesce(completed_count, 0) into v_completed_count
+    from public.profiles
+    where id = v_uid;
+
+    if v_completed_count < 18 then
+      select count(distinct scenario_id) into v_completed_count
+      from public.progress
+      where user_id = v_uid;
+    end if;
+
+    if v_completed_count < 18 then
+      raise exception 'Qualification required: You must complete at least 18 SQL thinking challenges to enter official contests.';
+    end if;
+  end if;
+
+  select coalesce(agreed_rules, false) into v_reg_exists
+  from public.contest_registrations
+  where contest_id = p_contest_id and user_id = v_uid;
+
+  if not v_reg_exists then
+    raise exception 'You must read and agree to official contest rules before starting.';
+  end if;
+
+  if coalesce(v_contest.entry_fee, 0) > 0 and not v_is_admin then
+    select status into v_pay_status
+    from public.contest_payments
+    where contest_id = p_contest_id and user_id = v_uid;
+
+    if v_pay_status is distinct from 'VERIFIED' then
+      raise exception 'A verified contest entry payment is required to start your attempt.';
+    end if;
+  end if;
+
+  v_deadline := now() + (coalesce(v_contest.duration_minutes, 30) || ' minutes')::interval;
+  if v_contest.end_date is not null and v_contest.end_date < v_deadline then
+    v_deadline := v_contest.end_date;
+  end if;
+
+  perform set_config('app.trusted_operation', 'true', true);
+
+  insert into public.contest_attempts (
+    contest_id,
+    user_id,
+    started_at,
+    deadline,
+    elapsed_seconds,
+    draft_response,
+    status
+  ) values (
+    p_contest_id,
+    v_uid,
+    now(),
+    v_deadline,
+    '',
+    'IN_PROGRESS'
+  )
+  on conflict (contest_id, user_id) do nothing;
+
+  select * into v_attempt
+  from public.contest_attempts
+  where contest_id = p_contest_id and user_id = v_uid;
+
+  return jsonb_build_object(
+    'success', true,
+    'is_new', true,
+    'attempt', row_to_json(v_attempt),
+    'server_time', now(),
+    'deadline', v_attempt.deadline,
+    'duration_minutes', coalesce(v_contest.duration_minutes, 30)
+  );
+end;
+$$;
+
+create or replace function public.save_contest_draft(
+  p_contest_id uuid,
+  p_draft_response text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_uid uuid;
+  v_attempt record;
+  v_rows_affected integer;
+begin
+  v_uid := auth.uid();
+  if v_uid is null then
+    raise exception 'Authentication required to save draft.';
+  end if;
+
+  select * into v_attempt
+  from public.contest_attempts
+  where contest_id = p_contest_id and user_id = v_uid;
+
+  if v_attempt is null then
+    raise exception 'No active contest attempt found.';
+  end if;
+
+  if v_attempt.status <> 'IN_PROGRESS' then
+    raise exception 'Cannot update draft for attempt with status %.', v_attempt.status;
+  end if;
+
+  if v_attempt.deadline is not null and now() > (v_attempt.deadline + interval '60 seconds') then
+    raise exception 'Contest deadline has passed. Drafts can no longer be updated.';
+  end if;
+
+  perform set_config('app.trusted_operation', 'true', true);
+
+  update public.contest_attempts
+  set draft_response = p_draft_response,
+      updated_at = now()
+  where contest_id = p_contest_id and user_id = v_uid and status = 'IN_PROGRESS';
+
+  get diagnostics v_rows_affected = row_count;
+
+  if v_rows_affected = 0 then
+    raise exception 'Failed to update draft: attempt is no longer active.';
+  end if;
+
+  return jsonb_build_object(
+    'success', true,
+    'saved_at', now(),
+    'rows_affected', v_rows_affected
+  );
+end;
+$$;
+
+create or replace function public.submit_contest_attempt(
+  p_contest_id uuid,
+  p_final_response text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_uid uuid;
+  v_attempt record;
+  v_is_past_deadline boolean;
+  v_final_status text;
+  v_elapsed integer;
+  v_clean_response text;
+  v_updated record;
+begin
+  v_uid := auth.uid();
+  if v_uid is null then
+    raise exception 'Authentication required to submit contest attempt.';
+  end if;
+
+  select * into v_attempt
+  from public.contest_attempts
+  where contest_id = p_contest_id and user_id = v_uid;
+
+  if v_attempt is null then
+    raise exception 'No contest attempt found to submit.';
+  end if;
+
+  if v_attempt.status = 'SUBMITTED' then
+    return jsonb_build_object(
+      'success', true,
+      'already_submitted', true,
+      'status', 'SUBMITTED',
+      'attempt', row_to_json(v_attempt),
+      'elapsed_seconds', v_attempt.elapsed_seconds,
+      'submitted_at', v_attempt.submitted_at
+    );
+  end if;
+
+  v_is_past_deadline := (v_attempt.deadline is not null and now() > (v_attempt.deadline + interval '60 seconds'));
+  v_final_status := case when v_is_past_deadline then 'TIMED_OUT' else 'SUBMITTED' end;
+
+  v_elapsed := greatest(0, extract(epoch from (now() - v_attempt.started_at))::integer);
+  v_clean_response := coalesce(nullif(trim(p_final_response), ''), v_attempt.draft_response, '');
+
+  if v_clean_response = '' and v_final_status = 'SUBMITTED' then
+    raise exception 'Cannot submit an empty contest response.';
+  end if;
+
+  perform set_config('app.trusted_operation', 'true', true);
+
+  update public.contest_attempts
+  set final_response = v_clean_response,
+      submitted_at = now(),
+      elapsed_seconds = v_elapsed,
+      status = v_final_status,
+      updated_at = now()
+  where contest_id = p_contest_id and user_id = v_uid;
+
+  select * into v_updated
+  from public.contest_attempts
+  where contest_id = p_contest_id and user_id = v_uid;
+
+  return jsonb_build_object(
+    'success', (v_final_status = 'SUBMITTED'),
+    'status', v_final_status,
+    'attempt', row_to_json(v_updated),
+    'elapsed_seconds', v_elapsed,
+    'submitted_at', v_updated.submitted_at,
+    'deadline_exceeded', v_is_past_deadline
+  );
+end;
+$$;
+
+-- Grant permissions on functions
+grant execute on function public.is_admin() to authenticated, anon;
+grant execute on function public.sync_user_progress(uuid) to authenticated;
+grant execute on function public.verify_learner_payment(bigint) to authenticated;
+grant execute on function public.reject_learner_payment(bigint, text) to authenticated;
+grant execute on function public.verify_contest_payment(bigint) to authenticated;
+grant execute on function public.record_scenario_completion(text, text, numeric) to authenticated;
+grant execute on function public.reconcile_user_completions(uuid) to authenticated;
+grant execute on function public.start_contest_attempt(uuid) to authenticated;
+grant execute on function public.save_contest_draft(uuid, text) to authenticated;
+grant execute on function public.submit_contest_attempt(uuid, text) to authenticated;
+grant select on table public.scenario_catalog to authenticated, anon;
 
 -- Reload PostgREST schema cache
 notify pgrst, 'reload schema';

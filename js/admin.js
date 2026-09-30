@@ -743,29 +743,38 @@ export async function loadPayments() {
   if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted);">Loading payments from database…</td></tr>';
 
   try {
-    const { data, error } = await client
-      .from('payments')
-      .select('*')
-      .order('submitted_at', { ascending: false });
+    const [payRes, profRes] = await Promise.all([
+      client.from('payments').select('*').order('submitted_at', { ascending: false }),
+      client.from('profiles').select('id, name, username, email').limit(2000)
+    ]);
 
-    if (error) {
-      if (error.message && error.message.includes('schema cache')) {
+    if (payRes.error) {
+      if (payRes.error.message && payRes.error.message.includes('schema cache')) {
         if (tbody) {
           tbody.innerHTML = `
             <tr>
               <td colspan="9" style="padding:24px;text-align:center;background:#fffbeb;color:#92400e;">
                 <strong>Payments table not found in Supabase schema cache.</strong><br>
-                Please execute <code>migrations/006_complete_system_schema.sql</code> in your Supabase SQL editor.
+                Please execute <code>migrations/009_end_to_end_reliability.sql</code> in your Supabase SQL editor.
               </td>
             </tr>
           `;
         }
         return;
       }
-      throw error;
+      throw payRes.error;
     }
 
-    paymentsData = data || [];
+    const profileMap = new Map((profRes.data || []).map(p => [p.id, p]));
+    paymentsData = (payRes.data || []).map(p => {
+      const prof = profileMap.get(p.user_id);
+      return {
+        ...p,
+        user_name: prof?.name || null,
+        user_username: prof?.username || null
+      };
+    });
+
     renderPaymentsStats();
     renderPaymentsTable();
   } catch (err) {
@@ -808,6 +817,8 @@ function renderPaymentsTable() {
   if (paymentSearchQuery) {
     list = list.filter(p =>
       (p.user_email || '').toLowerCase().includes(paymentSearchQuery) ||
+      (p.user_name || '').toLowerCase().includes(paymentSearchQuery) ||
+      (p.user_username || '').toLowerCase().includes(paymentSearchQuery) ||
       (p.user_id || '').toLowerCase().includes(paymentSearchQuery) ||
       (p.transaction_reference || '').toLowerCase().includes(paymentSearchQuery)
     );
@@ -821,34 +832,49 @@ function renderPaymentsTable() {
   tbody.innerHTML = list.map((p, idx) => {
     const isPending = p.status === 'pending';
     const isVerified = p.status === 'verified';
+    const isRejected = p.status === 'rejected';
     const statusBadge = isVerified ? 'badge verified' : (isPending ? 'badge pending' : 'badge danger');
+
+    const auditInfo = isVerified
+      ? `<div style="font-weight:600;color:#16a34a;">Verified ${formatDate(p.verified_at)}</div>${p.verified_by ? `<div style="font-size:0.7rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;max-width:140px;" title="${escapeHtml(p.verified_by)}">By: ${escapeHtml(p.verified_by)}</div>` : ''}`
+      : (isRejected
+          ? `<div style="font-weight:600;color:#dc2626;">Rejected ${formatDate(p.verified_at || p.updated_at)}</div>${p.admin_notes ? `<div style="font-size:0.72rem;color:#b91c1c;margin-top:2px;">Reason: ${escapeHtml(p.admin_notes)}</div>` : ''}`
+          : '<span style="color:#d97706;font-size:0.78rem;font-weight:600;">⏳ Match statement in bank / UPI</span>');
+
+    const displayName = p.user_name || (p.user_username ? `@${p.user_username}` : (p.user_email ? p.user_email.split('@')[0] : 'Learner'));
 
     return `
       <tr>
         <td class="num">${idx + 1}</td>
         <td>
-          <div style="font-weight:600;">${escapeHtml(p.user_email ? p.user_email.split('@')[0] : 'Learner')}</div>
-          <div style="font-size:0.75rem;color:var(--muted);">${escapeHtml(p.user_id)}</div>
+          <div style="font-weight:700;color:var(--ink);">${escapeHtml(displayName)}</div>
+          ${p.user_username && p.user_name ? `<div style="font-size:0.75rem;color:var(--primary);font-weight:600;">@${escapeHtml(p.user_username)}</div>` : ''}
+          <div style="font-size:0.72rem;color:var(--muted);font-family:monospace;margin-top:2px;" title="${escapeHtml(p.user_id)}">ID: ${escapeHtml(p.user_id.slice(0, 8))}…</div>
         </td>
-        <td>${escapeHtml(p.user_email || '—')}</td>
-        <td style="font-weight:700;">₹${p.amount || 49}</td>
         <td>
-          <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:0.85rem;">${escapeHtml(p.transaction_reference || '—')}</code>
+          <div style="font-weight:500;">${escapeHtml(p.user_email || '—')}</div>
+        </td>
+        <td>
+          <div style="font-weight:800;color:var(--ink);">₹${p.amount || 49} ${escapeHtml(p.currency || 'INR')}</div>
+          <div style="font-size:0.72rem;color:#0284c7;font-weight:600;">Practice Course Unlock</div>
+        </td>
+        <td>
+          <code style="background:#f1f5f9;border:1px solid #e2e8f0;padding:3px 8px;border-radius:4px;font-size:0.85rem;font-weight:700;letter-spacing:0.5px;color:var(--ink);">${escapeHtml(p.transaction_reference || '—')}</code>
         </td>
         <td style="font-size:0.82rem;color:var(--muted);">${formatDate(p.submitted_at || p.created_at)}</td>
         <td><span class="${statusBadge}">${(p.status || 'pending').toUpperCase()}</span></td>
-        <td style="font-size:0.8rem;color:var(--muted);">
-          ${isVerified ? `Verified: ${formatDate(p.verified_at)}` : (p.status === 'rejected' ? 'Rejected' : 'Awaiting verification')}
+        <td style="font-size:0.8rem;">
+          ${auditInfo}
         </td>
         <td>
           <div style="display:flex;gap:6px;">
             ${isPending ? `
-              <button class="action success sm" onclick="window.verifyLearnerPayment(${p.id}, '${p.user_id}')">✓ Verify</button>
+              <button class="action success sm" onclick="window.verifyLearnerPayment(${p.id})">✓ Verify</button>
               <button class="action danger sm" onclick="window.rejectLearnerPayment(${p.id})">✕ Reject</button>
             ` : (isVerified ? `
               <span style="color:#16a34a;font-size:0.85rem;font-weight:700;">✓ Active Paid</span>
             ` : `
-              <button class="action secondary sm" onclick="window.verifyLearnerPayment(${p.id}, '${p.user_id}')">Re-Verify</button>
+              <button class="action secondary sm" onclick="window.verifyLearnerPayment(${p.id})">Re-Verify</button>
             `)}
           </div>
         </td>
@@ -857,34 +883,30 @@ function renderPaymentsTable() {
   }).join('');
 }
 
-export async function verifyLearnerPayment(paymentId, userId) {
+export async function verifyLearnerPayment(paymentId) {
   if (!client) return;
-  const ok = confirm('Verify this ₹49 payment and unlock Questions 6 onward for this learner?');
+  const ok = confirm('Verify this ₹49 payment and unlock Questions 6 onward for this learner?\n\nNote: Please confirm you have matched this UTR in your receiving bank/UPI statement before verifying.');
   if (!ok) return;
 
   try {
-    const { error: payErr } = await client
-      .from('payments')
-      .update({
-        status: 'verified',
-        verified_at: new Date().toISOString(),
-        verified_by: currentUser?.id || null
-      })
-      .eq('id', paymentId);
+    // Single admin-only transactional database operation.
+    // The database derives the user from the payment ID, validates payment type, amount, status,
+    // and reference, detects duplicates across accounts and purposes, marks payment verified and
+    // sets paid_unlocked together, and automatically rolls back everything if any required operation fails.
+    const { data: rpcRes, error: rpcErr } = await client.rpc('verify_learner_payment', {
+      p_payment_id: paymentId
+    });
 
-    if (payErr) throw payErr;
+    if (rpcErr) {
+      throw new Error(rpcErr.message || 'Payment verification transactional operation failed.');
+    }
 
-    const { error: profErr } = await client
-      .from('profiles')
-      .update({
-        paid_unlocked: true,
-        last_active: new Date().toISOString()
-      })
-      .eq('id', userId);
+    if (!rpcRes || !rpcRes.success) {
+      throw new Error(rpcRes?.error || 'Payment verification transactional operation did not succeed.');
+    }
 
-    if (profErr) console.warn('Profile paid_unlocked update notice:', profErr);
-
-    alert('Payment verified! Question 6 onward is now unlocked for this learner.');
+    // Never display success unless the transaction succeeded
+    alert('Payment verified successfully! Question 6 onward is now unlocked for this learner.');
     await loadPayments();
     await loadDashboardData();
   } catch (err) {
@@ -894,23 +916,28 @@ export async function verifyLearnerPayment(paymentId, userId) {
 
 export async function rejectLearnerPayment(paymentId) {
   if (!client) return;
-  const reason = prompt('Optional reason for rejecting this payment (or leave blank):');
+  const reason = prompt('Optional reason for rejecting this payment (e.g. UTR not found in bank statement, amount mismatch):');
   if (reason === null) return;
 
   try {
-    const { error } = await client
-      .from('payments')
-      .update({
-        status: 'rejected',
-        admin_notes: reason || null,
-        verified_at: new Date().toISOString(),
-        verified_by: currentUser?.id || null
-      })
-      .eq('id', paymentId);
+    // Single admin-only transactional database operation with explanatory note & audit history.
+    // Rejecting a duplicate pending request will not revoke access granted by an earlier valid payment.
+    const { data: rpcRes, error: rpcErr } = await client.rpc('reject_learner_payment', {
+      p_payment_id: paymentId,
+      p_reason: reason.trim() || null
+    });
 
-    if (error) throw error;
+    if (rpcErr) {
+      throw new Error(rpcErr.message || 'Payment rejection transactional operation failed.');
+    }
+
+    if (!rpcRes || !rpcRes.success) {
+      throw new Error(rpcRes?.error || 'Payment rejection transactional operation did not succeed.');
+    }
+
     alert('Payment marked as rejected.');
     await loadPayments();
+    await loadDashboardData();
   } catch (err) {
     alert('Rejection error: ' + err.message);
   }
@@ -1183,14 +1210,20 @@ export async function saveContestForm() {
 
   try {
     if (id) {
-      const { error } = await client.from('contests').update(payload).eq('id', id);
+      const { data: updated, error } = await client.from('contests').update(payload).eq('id', id).select();
       if (error) throw error;
+      if (!updated || updated.length === 0) {
+        throw new Error('Failed to update contest: record not found or permission denied.');
+      }
     } else {
       payload.status = 'DRAFT'; // Always starts as DRAFT
       payload.created_by = currentUser?.id || null;
       payload.created_at = new Date().toISOString();
-      const { error } = await client.from('contests').insert(payload);
+      const { data: inserted, error } = await client.from('contests').insert(payload).select();
       if (error) throw error;
+      if (!inserted || inserted.length === 0) {
+        throw new Error('Failed to create contest.');
+      }
     }
 
     closeEditorModal();
@@ -1263,8 +1296,11 @@ export async function updateContestStatus(contestId, newStatus) {
       patch.results_published_at = new Date().toISOString();
     }
 
-    const { error } = await client.from('contests').update(patch).eq('id', contestId);
+    const { data: updated, error } = await client.from('contests').update(patch).eq('id', contestId).select();
     if (error) throw error;
+    if (!updated || updated.length === 0) {
+      throw new Error('Failed to update contest status: record not found or permission denied.');
+    }
 
     await loadContests();
   } catch (err) {
@@ -1290,10 +1326,14 @@ export async function deleteContest(contestId) {
 
   try {
     // 1. Delete dependent contest data explicitly to guarantee clean deletion
-    await client.from('contest_evaluations').delete().eq('contest_id', contestId);
-    await client.from('contest_attempts').delete().eq('contest_id', contestId);
-    await client.from('contest_registrations').delete().eq('contest_id', contestId);
-    await client.from('contest_eligibility').delete().eq('contest_id', contestId);
+    const { error: evalDelErr } = await client.from('contest_evaluations').delete().eq('contest_id', contestId);
+    if (evalDelErr) console.warn('[Admin] Delete evaluations notice:', evalDelErr.message);
+    const { error: attDelErr } = await client.from('contest_attempts').delete().eq('contest_id', contestId);
+    if (attDelErr) console.warn('[Admin] Delete attempts notice:', attDelErr.message);
+    const { error: regDelErr } = await client.from('contest_registrations').delete().eq('contest_id', contestId);
+    if (regDelErr) console.warn('[Admin] Delete registrations notice:', regDelErr.message);
+    const { error: eligDelErr } = await client.from('contest_eligibility').delete().eq('contest_id', contestId);
+    if (eligDelErr) console.warn('[Admin] Delete eligibility notice:', eligDelErr.message);
 
     // 2. Delete the contest record itself
     const { error } = await client.from('contests').delete().eq('id', contestId);
@@ -1406,7 +1446,8 @@ export async function saveAudienceSelection() {
 
   try {
     // Delete existing eligibility rows
-    await client.from('contest_eligibility').delete().eq('contest_id', selectedContestId);
+    const { error: delErr } = await client.from('contest_eligibility').delete().eq('contest_id', selectedContestId);
+    if (delErr) throw delErr;
 
     // Insert new selected rows
     const rows = Array.from(selectedAudienceIds).map(uid => {
@@ -1609,19 +1650,42 @@ export async function verifyPayment(contestId, userId, newStatus = 'VERIFIED') {
   if (!ok) return;
 
   try {
-    const { error } = await client
+    const { data: payRow, error: fetchErr } = await client
       .from('contest_payments')
-      .update({
-        status: newStatus,
-        verified_at: new Date().toISOString(),
-        verified_by: currentUser?.id || null,
-        updated_at: new Date().toISOString()
-      })
+      .select('id')
       .eq('contest_id', contestId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .maybeSingle();
 
-    if (error) throw error;
+    if (fetchErr) throw fetchErr;
+    if (!payRow) throw new Error('No contest payment record found for this participant.');
+
+    if (newStatus === 'VERIFIED') {
+      const { data: vRes, error: vErr } = await client.rpc('verify_contest_payment', {
+        p_payment_id: payRow.id
+      });
+      if (vErr) throw vErr;
+      if (!vRes?.success) throw new Error(vRes?.message || 'Contest payment verification failed.');
+    } else {
+      const { data: updRows, error: updErr } = await client
+        .from('contest_payments')
+        .update({
+          status: newStatus,
+          verified_at: new Date().toISOString(),
+          verified_by: currentUser?.id || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', payRow.id)
+        .select();
+
+      if (updErr) throw updErr;
+      if (!updRows || updRows.length === 0) {
+        throw new Error('Failed to update contest payment: no record was updated.');
+      }
+    }
+
     await openContestSubmissions(contestId);
+    alert(`Contest payment marked as ${newStatus} successfully!`);
   } catch (err) {
     alert('Payment verification error: ' + err.message);
   }
@@ -1747,11 +1811,15 @@ export async function saveEvaluation(evaluationStatus = 'DRAFT') {
   }
 
   try {
-    const { error } = await client
+    const { data: savedData, error } = await client
       .from('contest_evaluations')
-      .upsert(payload, { onConflict: 'contest_id,user_id' });
+      .upsert(payload, { onConflict: 'contest_id,user_id' })
+      .select();
 
     if (error) throw error;
+    if (!savedData || savedData.length === 0) {
+      throw new Error('Failed to save evaluation.');
+    }
 
     closeEvaluationModal();
     await openContestSubmissions(contestId);
@@ -1846,16 +1914,20 @@ export async function publishContestResults() {
   if (!ok) return;
 
   try {
-    const { error } = await client
+    const { data: pubData, error } = await client
       .from('contests')
       .update({
         status: 'RESULTS_PUBLISHED',
         results_published_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
-      .eq('id', selectedContestId);
+      .eq('id', selectedContestId)
+      .select();
 
     if (error) throw error;
+    if (!pubData || pubData.length === 0) {
+      throw new Error('Failed to publish results: contest record was not found or updated.');
+    }
 
     closeResultsModal();
     await loadContests();
