@@ -1024,9 +1024,7 @@ function openPaywallModal() {
   modal.hidden = false;
 
   const notice = $('paywallNotice');
-  const btn = $('submitPaymentBtn');
-  const input = $('paywallTxnRef');
-  const payUpiLink = $('payUpiLink');
+  const payBtn = $('paywallPayBtn');
 
   // State: Admin Exemption
   if (isCurrentUserAdmin) {
@@ -1036,13 +1034,11 @@ function openPaywallModal() {
       notice.style.color = '#0369a1';
       notice.innerHTML = '<strong>Admin access — payment exempt</strong><br><span style="font-size:0.85rem;">As an administrator, you have full access to all practice questions without payment.</span>';
     }
-    if (btn) btn.style.display = 'none';
-    if (input && input.parentElement) input.parentElement.style.display = 'none';
-    if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'none';
+    if (payBtn) payBtn.style.display = 'none';
     return;
   }
 
-  // State 3: Verified / Access Unlocked
+  // State: Verified / Access Unlocked
   if (isPaidUnlocked) {
     if (notice) {
       notice.style.display = 'block';
@@ -1051,78 +1047,27 @@ function openPaywallModal() {
       notice.style.color = '#15803d';
       notice.innerHTML = '<strong>✓ Access Unlocked!</strong> You have full lifetime access to all 420 challenges.';
     }
-    if (btn) {
-      btn.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Continue Practice (Question 6+) →';
-      btn.onclick = () => {
+    if (payBtn) {
+      payBtn.style.display = 'block';
+      payBtn.disabled = false;
+      payBtn.textContent = 'Continue Practice (Question 6+) →';
+      payBtn.onclick = () => {
         closePaywallModal();
         if (current) renderScenario();
         renderScenarioCatalog();
       };
     }
-    if (input && input.parentElement) input.parentElement.style.display = 'none';
-    if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'none';
     return;
   }
 
-  // State 2: Submitted / Pending Admin Verification
-  if (userPendingPayment && userPendingPayment.status === 'pending') {
-    startPaymentPolling();
-    if (notice) {
-      notice.style.display = 'block';
-      notice.style.background = '#fef3c7';
-      notice.style.border = '1px solid #fde68a';
-      notice.style.color = '#92400e';
-      notice.innerHTML = `<strong>Payment Submitted for Verification</strong><br>Reference ID: <code style="background:#fff;padding:2px 6px;border-radius:4px;">${escapeHtml(userPendingPayment.transaction_reference || '')}</code><br>Status: <strong>Pending Admin Verification</strong>.<br><span style="font-size:0.85rem;color:#78350f;">Question 6 onward will unlock immediately once verified. You can check status anytime below:</span>`;
-    }
-    if (btn) {
-      btn.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Refresh Payment Status 🔄';
-      btn.onclick = () => { void checkPaymentStatusSilently(true); };
-    }
-    if (input && input.parentElement) input.parentElement.style.display = 'none';
-    if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'flex';
-    return;
-  }
-
-  // State 4: Rejected / Reason and Resubmission Option
-  if (userPendingPayment && userPendingPayment.status === 'rejected') {
-    stopPaymentPolling();
-    if (notice) {
-      notice.style.display = 'block';
-      notice.style.background = '#fee2e2';
-      notice.style.border = '1px solid #fca5a5';
-      notice.style.color = '#991b1b';
-      notice.innerHTML = `<strong>Previous Submission Rejected</strong><br>Reason: ${escapeHtml(userPendingPayment.admin_notes || 'Could not verify transaction reference in bank/UPI records.')}<br><span style="font-size:0.85rem;">Please review your 12-digit UPI UTR / Reference ID and resubmit below:</span>`;
-    }
-    if (btn) {
-      btn.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Resubmit Payment for Verification';
-      btn.onclick = submitCoursePayment;
-    }
-    if (input) {
-      if (input.parentElement) input.parentElement.style.display = 'block';
-      input.value = '';
-      input.focus();
-    }
-    if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'flex';
-    return;
-  }
-
-  // State 1: Payment Required (Initial)
-  stopPaymentPolling();
+  // State: Initial Payment Required
   if (notice) notice.style.display = 'none';
-  if (btn) {
-    btn.style.display = 'block';
-    btn.disabled = false;
-    btn.textContent = 'Submit Payment for Verification';
-    btn.onclick = submitCoursePayment;
+  if (payBtn) {
+    payBtn.style.display = 'inline-flex';
+    payBtn.disabled = false;
+    payBtn.innerHTML = '<span>Pay ₹49</span>';
+    payBtn.onclick = payCourseUnlockWithRazorpay;
   }
-  if (input && input.parentElement) input.parentElement.style.display = 'block';
-  if (payUpiLink && payUpiLink.parentElement) payUpiLink.parentElement.style.display = 'flex';
 }
 
 function closePaywallModal() {
@@ -1130,81 +1075,180 @@ function closePaywallModal() {
   if (modal) modal.hidden = true;
 }
 
-function copyUpiId() {
-  const upiId = $('paywallUpiId')?.textContent.trim() || 'ramgokul1987@axisbank';
-  if (navigator?.clipboard?.writeText) {
-    navigator.clipboard.writeText(upiId).then(() => {
-      const btn = $('copyUpiBtn');
-      if (btn) {
-        const orig = btn.innerHTML;
-        btn.innerHTML = '✓ Copied!';
-        setTimeout(() => { if (btn) btn.innerHTML = orig; }, 2000);
-      }
-    }).catch(() => {
-      prompt('Copy UPI ID:', upiId);
-    });
-  } else {
-    prompt('Copy UPI ID:', upiId);
-  }
+function loadRazorpaySdk() {
+  if (window.Razorpay) return Promise.resolve(window.Razorpay);
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[src*="checkout.razorpay.com"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.Razorpay));
+      existing.addEventListener('error', () => reject(new Error('Failed to load Razorpay SDK')));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve(window.Razorpay);
+    script.onerror = () => reject(new Error('Failed to load Razorpay SDK'));
+    document.head.appendChild(script);
+  });
 }
 
-async function submitCoursePayment() {
-  const txnRef = $('paywallTxnRef')?.value.trim();
+async function payCourseUnlockWithRazorpay() {
   const notice = $('paywallNotice');
-  const btn = $('submitPaymentBtn');
+  const payBtn = $('paywallPayBtn');
 
   if (!user) {
-    alert('Please sign in to submit payment.');
-    return;
-  }
-
-  // State 5 validation
-  if (!txnRef) {
     if (notice) {
       notice.style.display = 'block';
       notice.style.background = '#fee2e2';
       notice.style.border = '1px solid #fca5a5';
       notice.style.color = '#991b1b';
-      notice.textContent = 'Please enter your UPI transaction / reference number.';
+      notice.innerHTML = 'Please sign in first to unlock full access.';
     }
+    const authModal = $('authModal');
+    if (authModal) authModal.hidden = false;
     return;
   }
 
-  btn.disabled = true;
-  btn.textContent = 'Submitting…';
+  if (payBtn) {
+    payBtn.disabled = true;
+    payBtn.textContent = 'Creating order…';
+  }
 
   try {
-    const { data: newPay, error } = await client.from('payments').insert({
-      user_id: user.id,
-      user_email: user.email,
-      amount: 49,
-      currency: 'INR',
-      payment_method: 'UPI',
-      upi_id: 'ramgokul1987@axisbank',
-      transaction_reference: txnRef,
-      status: 'pending',
-      submitted_at: new Date().toISOString()
-    }).select('*').single();
+    // 1. Call create-razorpay-order
+    const { data, error } = await client.functions.invoke('create-razorpay-order', {
+      body: { contest_id: 'course_unlock' }
+    });
 
-    if (error) throw error;
+    if (error) {
+      throw new Error(error.message || 'Failed to create payment order.');
+    }
 
-    userPendingPayment = newPay || { status: 'pending', transaction_reference: txnRef };
-    openPaywallModal();
+    if (!data || !data.order_id || !data.key_id) {
+      throw new Error(data?.error || data?.message || 'Invalid order response received.');
+    }
+
+    // 2. Load Razorpay Checkout SDK
+    const RazorpaySDK = await loadRazorpaySdk();
+    if (!RazorpaySDK) {
+      throw new Error('Could not load Razorpay Checkout SDK.');
+    }
+
+    // 3. Open Razorpay Checkout
+    const rzp = new RazorpaySDK({
+      key: data.key_id,
+      amount: data.amount || 4900,
+      currency: data.currency || 'INR',
+      name: 'Think and Crack SQL',
+      description: 'Premium Unlock - Lifetime Access',
+      order_id: data.order_id,
+      prefill: {
+        email: user.email || '',
+        name: user.user_metadata?.name || user.user_metadata?.full_name || ''
+      },
+      theme: {
+        color: '#2563eb'
+      },
+      handler: async function (response) {
+        if (!response || !response.razorpay_payment_id || !response.razorpay_signature) {
+          if (notice) {
+            notice.style.display = 'block';
+            notice.style.background = '#fee2e2';
+            notice.style.border = '1px solid #fca5a5';
+            notice.style.color = '#991b1b';
+            notice.textContent = 'Payment response incomplete from Razorpay.';
+          }
+          return;
+        }
+
+        if (payBtn) {
+          payBtn.disabled = true;
+          payBtn.textContent = 'Verifying payment…';
+        }
+
+        try {
+          // 4. Call verify-razorpay-payment
+          const { data: verifyData, error: verifyErr } = await client.functions.invoke('verify-razorpay-payment', {
+            body: {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              contest_id: 'course_unlock'
+            }
+          });
+
+          if (verifyErr) {
+            throw new Error(verifyErr.message || 'Payment verification failed on server.');
+          }
+
+          if (!verifyData || !verifyData.success) {
+            throw new Error(verifyData?.error || verifyData?.message || 'Payment verification failed.');
+          }
+
+          // 5. Unlock state
+          isPaidUnlocked = true;
+          if (notice) {
+            notice.style.display = 'block';
+            notice.style.background = '#dcfce7';
+            notice.style.border = '1px solid #86efac';
+            notice.style.color = '#15803d';
+            notice.innerHTML = '<strong>✓ Payment Successful!</strong> Premium lifetime access unlocked.';
+          }
+
+          if (payBtn) {
+            payBtn.disabled = false;
+            payBtn.textContent = 'Continue Practice (Question 6+) →';
+            payBtn.onclick = () => {
+              closePaywallModal();
+              if (current) renderScenario();
+              renderScenarioCatalog();
+            };
+          }
+
+          if (typeof renderScenarioCatalog === 'function') {
+            renderScenarioCatalog();
+          }
+          if (typeof updatePaywallUI === 'function') {
+            updatePaywallUI();
+          }
+        } catch (vErr) {
+          console.error('[Course Payment] Verification error:', vErr);
+          if (notice) {
+            notice.style.display = 'block';
+            notice.style.background = '#fee2e2';
+            notice.style.border = '1px solid #fca5a5';
+            notice.style.color = '#991b1b';
+            notice.innerHTML = `<strong>Verification Error:</strong> ${escapeHtml(vErr.message || 'Verification failed.')}`;
+          }
+        } finally {
+          if (payBtn && !isPaidUnlocked) {
+            payBtn.disabled = false;
+            payBtn.innerHTML = '<span>Pay ₹49</span>';
+          }
+        }
+      }
+    });
+
+    rzp.open();
   } catch (err) {
-    console.error('Payment submission error:', err);
-    // State 5: Connection or save failure with retry
+    console.error('[Course Payment] Order error:', err);
     if (notice) {
       notice.style.display = 'block';
       notice.style.background = '#fee2e2';
       notice.style.border = '1px solid #fca5a5';
       notice.style.color = '#991b1b';
-      notice.innerHTML = `<strong>Submission Error:</strong> ${escapeHtml(err.message || 'Please check your connection and retry.')}`;
+      notice.innerHTML = `<strong>Order Error:</strong> ${escapeHtml(err.message || 'Failed to start payment.')}`;
     }
-    btn.disabled = false;
-    btn.textContent = 'Retry Submission';
-    btn.onclick = submitCoursePayment;
+  } finally {
+    if (payBtn && !isPaidUnlocked) {
+      payBtn.disabled = false;
+      payBtn.innerHTML = '<span>Pay ₹49</span>';
+    }
   }
 }
+
+window.payCourseUnlockWithRazorpay = payCourseUnlockWithRazorpay;
 
 function loadScenario() {
   if(!selectedDomain||!selectedLevel) return;

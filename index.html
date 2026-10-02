@@ -2851,59 +2851,19 @@ body.landscape-layout .practice-container {
         Unlock the complete Think and Crack SQL learning journey for ₹49.
       </p>
 
-      <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: 14px; padding: 14px; margin-bottom: 18px;">
-        <div style="font-size: 12.5px; font-weight: 700; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px;">Full Access Lifetime Unlock</div>
-        <div style="font-size: 26px; font-weight: 900; color: #1d4ed8; margin: 4px 0;">Unlock for ₹49</div>
+      <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: 14px; padding: 18px; margin-bottom: 18px;">
+        <div style="font-size: 13px; font-weight: 700; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px;">Premium Unlock</div>
+        <div style="font-size: 32px; font-weight: 900; color: #1d4ed8; margin: 6px 0;">₹49</div>
         <div style="font-size: 12px; color: #3b82f6;">All 420 Scenarios across 7 Domains + Contest Eligibility at 18</div>
       </div>
 
-      <!-- Payment Instructions & UPI details -->
-      <div style="text-align: left; background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 16px; font-size: 13px; line-height: 1.6;">
-        <div style="font-weight: 800; color: var(--ink); margin-bottom: 6px;">UPI Payment Details:</div>
-        <div style="display: flex; align-items: center; justify-content: space-between; background: #ffffff; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px;">
-          <div>
-            <span style="font-size: 11px; color: var(--muted); display: block;">UPI ID:</span>
-            <strong id="paywallUpiId" style="font-size: 13.5px; color: var(--ink); letter-spacing: 0.3px;">ramgokul1987@axisbank</strong>
-          </div>
-          <button type="button" class="action secondary sm" id="copyUpiBtn" onclick="copyUpiId()" style="padding: 6px 12px; font-size: 12px;">
-            📋 Copy UPI ID
-          </button>
-        </div>
-
-        <div style="font-size: 12.5px; color: var(--muted);">
-          <strong>Payment Instructions:</strong>
-          <ol style="margin: 6px 0 0; padding-left: 18px;">
-            <li>Open Google Pay, PhonePe, Paytm, or any UPI app.</li>
-            <li>Transfer <strong>₹49</strong> to UPI ID: <code>ramgokul1987@axisbank</code>.</li>
-            <li>Note down the 12-digit UPI Transaction / UTR / Reference ID.</li>
-            <li>Enter your transaction reference number below and submit for verification.</li>
-          </ol>
-        </div>
-
-        <div style="margin-top: 14px; display: flex; justify-content: center;">
-          <a id="payUpiLink" href="upi://pay?pa=ramgokul1987@axisbank&pn=Think%20and%20Crack%20SQL&am=49&cu=INR&tn=Course%20Unlock" class="action primary" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; width: 100%; padding: 10px; border-radius: 8px; font-size: 14px; font-weight: 800;">
-            <span>💳 Pay ₹49</span>
-          </a>
-        </div>
-      </div>
-
-      <!-- Transaction Reference Input & Submit -->
-      <div style="text-align: left; margin-bottom: 14px;">
-        <label for="paywallTxnRef" style="display: block; font-size: 12.5px; font-weight: 700; color: var(--ink); margin-bottom: 6px;">
-          UPI Transaction / Reference Number (UTR / Ref ID):
-        </label>
-        <input type="text" id="paywallTxnRef" placeholder="e.g. 423984719283" style="width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px;" />
+      <div style="margin-bottom: 14px;">
+        <button id="paywallPayBtn" class="action primary" onclick="payCourseUnlockWithRazorpay()" style="width: 100%; padding: 14px; font-size: 16px; font-weight: 800; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
+          <span>Pay ₹49</span>
+        </button>
       </div>
 
       <div id="paywallNotice" style="display:none; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; text-align: left; line-height: 1.5;"></div>
-
-      <button id="submitPaymentBtn" class="action primary" onclick="submitCoursePayment()" style="width: 100%; padding: 12px; font-size: 14px; font-weight: 800; border-radius: 10px;">
-        Submit Payment for Verification
-      </button>
-
-      <div style="font-size: 11.5px; color: var(--muted); margin-top: 10px;">
-        * Note: Clicking "Pay" does not grant access automatically. Submitting your UPI reference initiates admin verification. Question 6 onward will unlock immediately once verified.
-      </div>
     </div>
   </div>
 </div>

@@ -57,10 +57,10 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, contest_id } = body;
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !contest_id) {
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return new Response(JSON.stringify({
         success: false,
-        error: 'Missing required parameters: razorpay_order_id, razorpay_payment_id, razorpay_signature, and contest_id are required.'
+        error: 'Missing required parameters: razorpay_order_id, razorpay_payment_id, and razorpay_signature are required.'
       }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -93,29 +93,6 @@ serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    // 5. Verify that the contest exists and matches the requested contest_id
-    const { data: contest, error: contestErr } = await supabaseAdmin
-      .from('contests')
-      .select('id, entry_fee, currency, status')
-      .eq('id', contest_id)
-      .maybeSingle();
-
-    if (contestErr || !contest) {
-      return new Response(JSON.stringify({ success: false, error: 'Requested contest was not found.' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // 6. Verify payment amount is exactly ₹49 (4900 paise)
-    const contestFee = Number(contest.entry_fee) || 49;
-    if (contestFee !== 49) {
-      return new Response(JSON.stringify({ success: false, error: 'Payment amount mismatch: fixed contest fee must be ₹49.' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
     // Optional direct verification against Razorpay API if key ID is present
     const keyId = Deno.env.get('RAZORPAY_KEY_ID') || '';
     if (keyId && keySecret) {
@@ -144,47 +121,96 @@ serve(async (req: Request) => {
       }
     }
 
-    // 8. Update the existing contest_payments record idempotently
     const nowIso = new Date().toISOString();
-    const { data: updatedPayment, error: payUpdateErr } = await supabaseAdmin
-      .from('contest_payments')
-      .upsert({
-        contest_id: contest_id,
-        user_id: user.id,
-        amount: 49,
-        currency: 'INR',
-        status: 'paid',
-        payment_method: 'RAZORPAY',
-        transaction_ref: razorpay_payment_id,
-        verified_at: nowIso,
-        updated_at: nowIso
-      }, { onConflict: 'contest_id,user_id' })
-      .select()
-      .single();
 
-    if (payUpdateErr) {
-      console.error('[verify-razorpay-payment] DB update error:', payUpdateErr);
-      return new Response(JSON.stringify({ success: false, error: 'Failed to update contest payment record.' }), {
-        status: 500,
+    const isContestPayment = contest_id && contest_id !== 'course_unlock' && contest_id !== 'premium_unlock';
+
+    if (isContestPayment) {
+      // 5. Verify that the contest exists
+      const { data: contest, error: contestErr } = await supabaseAdmin
+        .from('contests')
+        .select('id, entry_fee, currency, status')
+        .eq('id', contest_id)
+        .maybeSingle();
+
+      if (contestErr || !contest) {
+        return new Response(JSON.stringify({ success: false, error: 'Requested contest was not found.' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Update contest_payments record idempotently
+      const { data: updatedPayment, error: payUpdateErr } = await supabaseAdmin
+        .from('contest_payments')
+        .upsert({
+          contest_id: contest_id,
+          user_id: user.id,
+          amount: 49,
+          currency: 'INR',
+          status: 'paid',
+          payment_method: 'RAZORPAY',
+          transaction_ref: razorpay_payment_id,
+          verified_at: nowIso,
+          updated_at: nowIso
+        }, { onConflict: 'contest_id,user_id' })
+        .select()
+        .single();
+
+      if (payUpdateErr) {
+        console.error('[verify-razorpay-payment] DB update error:', payUpdateErr);
+        return new Response(JSON.stringify({ success: false, error: 'Failed to update contest payment record.' }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Ensure contest_eligibility record exists idempotently
+      await supabaseAdmin
+        .from('contest_eligibility')
+        .upsert({
+          contest_id: contest_id,
+          user_id: user.id,
+          user_email: user.email,
+          is_invited: true
+        }, { onConflict: 'contest_id,user_id' });
+
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Payment verified and contest unlocked successfully.',
+        payment: updatedPayment,
+        contest_id,
+        user_id: user.id,
+        status: 'paid'
+      }), {
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // 9. Unlock contest access: ensure contest_eligibility record exists idempotently
+    // General Course / Premium Unlock
     await supabaseAdmin
-      .from('contest_eligibility')
-      .upsert({
-        contest_id: contest_id,
+      .from('profiles')
+      .update({ paid_unlocked: true })
+      .eq('id', user.id);
+
+    await supabaseAdmin
+      .from('payments')
+      .insert({
         user_id: user.id,
         user_email: user.email,
-        is_invited: true
-      }, { onConflict: 'contest_id,user_id' });
+        amount: 49,
+        currency: 'INR',
+        payment_method: 'RAZORPAY',
+        transaction_reference: razorpay_payment_id,
+        status: 'approved',
+        submitted_at: nowIso,
+        verified_at: nowIso
+      });
 
     return new Response(JSON.stringify({
       success: true,
-      message: 'Payment verified and contest unlocked successfully.',
-      payment: updatedPayment,
-      contest_id,
+      message: 'Payment verified and course unlocked successfully.',
       user_id: user.id,
       status: 'paid'
     }), {

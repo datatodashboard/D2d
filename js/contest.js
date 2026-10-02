@@ -757,31 +757,17 @@ function renderModalContent(stage) {
           </div>
 
           ${isFee ? `
-            <div class="contest-section-block">
-              <div style="margin-bottom:16px;">
-                <button id="btnPayContest" class="action primary" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;font-size:14px;font-weight:800;border-radius:8px;cursor:pointer;">
-                  <span>💳 Pay ₹49</span>
-                </button>
-                <div id="payOrderError" style="display:none;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:8px 12px;border-radius:8px;font-size:0.85rem;margin-top:8px;font-weight:600;text-align:left;"></div>
-              </div>
+            <div class="contest-section-block" style="text-align: center; padding: 20px 16px;">
+              <div style="font-size: 1.15rem; font-weight: 800; color: var(--ink); margin-bottom: 4px;">Premium Unlock</div>
+              <div style="font-size: 2.2rem; font-weight: 900; color: #2563eb; margin-bottom: 18px;">₹49</div>
 
-              <h4>Payment Instructions</h4>
-              <p>To participate, transfer the entry fee of <strong>₹${currentContest.entry_fee}</strong> via UPI or online transfer.</p>
-              <div class="upi-box">
-                <span class="upi-label">Admin UPI ID / Payment Handle:</span>
-                <span class="upi-id"><strong>datatodashboard@upi</strong> (or scan desk QR)</span>
-              </div>
-              <p class="small text-muted" style="margin-top:8px;">
-                Enter your transaction reference / UTR number below. Our administrator will verify your payment and activate your challenge room.
-              </p>
+              <button id="btnPayContest" class="action primary" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:14px;font-size:16px;font-weight:800;border-radius:10px;cursor:pointer;">
+                <span>Pay ₹49</span>
+              </button>
 
-              <div class="form-group" style="margin-top:14px;">
-                <label for="txnRefInput" style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:6px;">Transaction Reference / UTR Number:</label>
-                <input type="text" id="txnRefInput" class="contest-input" placeholder="e.g. UPI Ref 328491823901" value="${escapeHtml(currentPayment?.transaction_ref || '')}" />
-              </div>
-
-              <div id="paymentNotice" class="alert-box" style="margin-top:12px;${isPending ? '' : 'display:none;'}">
-                ⏳ Payment verification submitted. Waiting for Admin verification. You can refresh anytime to check status.
+              <div id="payOrderError" style="display:none;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:10px 14px;border-radius:8px;font-size:0.88rem;margin-top:12px;font-weight:600;text-align:left;"></div>
+              <div id="paymentNotice" class="alert-box" style="margin-top:14px;${isPending ? '' : 'display:none;'}">
+                ⏳ Payment verification submitted. Waiting for verification.
               </div>
             </div>
           ` : `
@@ -793,9 +779,11 @@ function renderModalContent(stage) {
 
         <div class="contest-modal-footer">
           <button class="ghost-btn" onclick="openContestModal('details')">← Back</button>
-          <button id="btnSubmitPayment" class="action primary">
-            ${isPending ? 'Refresh Verification Status 🔄' : (isFee ? 'Submit Reference for Verification' : 'Proceed to Ready Screen →')}
-          </button>
+          ${!isFee ? `
+            <button id="btnSubmitPayment" class="action primary">
+              Proceed to Ready Screen →
+            </button>
+          ` : ''}
         </div>
       </div>
     `;
