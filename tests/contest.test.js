@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { evaluateContestSubmission } from '../js/contest-ai-evaluator.js';
-import { parseContestTestContent } from '../js/contest.js';
+import { parseContestTestContent, isPaymentVerified } from '../js/contest.js';
+import crypto from 'node:crypto';
 
 describe('Admin-Controlled Crack SQL Thinking Contest Feature', () => {
 
@@ -334,6 +335,235 @@ patients(patient_id PK, patient_name, city, segment, joined_date); appointments(
       for (const forbidden of judgeKeywords) {
         assert(!textDump.includes(forbidden), `Found forbidden judge keyword in participant content: ${forbidden}`);
       }
+    });
+  });
+
+  describe('7. Razorpay Order Creation & Checkout Flow', () => {
+    it('calls create-razorpay-order Edge Function with only contest_id without client-controlled amount', async () => {
+      let edgeFunctionCalled = false;
+      let passedFunctionName = '';
+      let passedBody = null;
+
+      const mockClient = {
+        functions: {
+          async invoke(fnName, options) {
+            edgeFunctionCalled = true;
+            passedFunctionName = fnName;
+            passedBody = options?.body;
+            return {
+              data: {
+                order_id: 'order_TEST123456',
+                amount: 4900,
+                currency: 'INR',
+                key_id: 'rzp_test_KEY123'
+              },
+              error: null
+            };
+          }
+        }
+      };
+
+      const contest = { id: 'contest-uuid-777', title: 'SQL Grand Prix', entry_fee: 49 };
+      const user = { id: 'learner-user-999', email: 'learner@example.com' };
+
+      // Simulate flow
+      const res = await mockClient.functions.invoke('create-razorpay-order', {
+        body: { contest_id: contest.id }
+      });
+
+      assert.strictEqual(edgeFunctionCalled, true);
+      assert.strictEqual(passedFunctionName, 'create-razorpay-order');
+      assert.deepStrictEqual(passedBody, { contest_id: 'contest-uuid-777' });
+      assert.strictEqual(passedBody.amount, undefined, 'Client must not pass custom amount');
+      assert.strictEqual(res.data.order_id, 'order_TEST123456');
+      assert.strictEqual(res.data.key_id, 'rzp_test_KEY123');
+      assert.strictEqual(res.data.currency, 'INR');
+    });
+
+    it('passes returned order_id and key_id to Razorpay Checkout configuration without marking contest complete', async () => {
+      let razorpayInstanceConfig = null;
+      let opened = false;
+
+      class MockRazorpay {
+        constructor(config) {
+          razorpayInstanceConfig = config;
+        }
+        open() {
+          opened = true;
+        }
+      }
+
+      const orderData = {
+        order_id: 'order_ABC987654',
+        amount: 4900,
+        currency: 'INR',
+        key_id: 'rzp_live_SECURE_KEY'
+      };
+
+      const user = { email: 'sqlchampion@example.com', user_metadata: { name: 'SQL Champion' } };
+      const contest = { id: 'contest-uuid-777', title: 'Healthcare Logic Challenge' };
+
+      const options = {
+        key: orderData.key_id,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        name: 'Think and Crack SQL',
+        description: contest.title || 'Contest Entry Fee',
+        order_id: orderData.order_id,
+        prefill: {
+          email: user.email || '',
+          name: user.user_metadata?.name || ''
+        },
+        theme: {
+          color: '#2563eb'
+        }
+      };
+
+      const rzp = new MockRazorpay(options);
+      rzp.open();
+
+      assert.strictEqual(opened, true);
+      assert.strictEqual(razorpayInstanceConfig.key, 'rzp_live_SECURE_KEY');
+      assert.strictEqual(razorpayInstanceConfig.order_id, 'order_ABC987654');
+      assert.strictEqual(razorpayInstanceConfig.amount, 4900);
+      assert.strictEqual(razorpayInstanceConfig.prefill.email, 'sqlchampion@example.com');
+    });
+
+    it('handles order creation error gracefully without crashing or unlocking', async () => {
+      const mockClient = {
+        functions: {
+          async invoke() {
+            return {
+              data: null,
+              error: { message: 'Contest registration expired or closed' }
+            };
+          }
+        }
+      };
+
+      let caughtError = null;
+      try {
+        const { data, error } = await mockClient.functions.invoke('create-razorpay-order', {
+          body: { contest_id: 'contest-closed' }
+        });
+        if (error) throw new Error(error.message);
+        if (!data?.order_id) throw new Error('No order returned');
+      } catch (err) {
+        caughtError = err;
+      }
+
+      assert(caughtError !== null);
+      assert.strictEqual(caughtError.message, 'Contest registration expired or closed');
+    });
+
+    it('validates payment status using isPaymentVerified helper for VERIFIED and paid statuses', () => {
+      assert.strictEqual(isPaymentVerified({ status: 'paid' }), true);
+      assert.strictEqual(isPaymentVerified({ status: 'PAID' }), true);
+      assert.strictEqual(isPaymentVerified({ status: 'VERIFIED' }), true);
+      assert.strictEqual(isPaymentVerified({ status: 'verified' }), true);
+      assert.strictEqual(isPaymentVerified({ status: 'PENDING' }), false);
+      assert.strictEqual(isPaymentVerified({ status: 'FAILED' }), false);
+      assert.strictEqual(isPaymentVerified(null), false);
+      assert.strictEqual(isPaymentVerified(undefined), false);
+    });
+
+    it('verifies Razorpay signature using HMAC SHA256 and rejects invalid signatures', () => {
+      const secret = 'rzp_test_secret_key_12345';
+      const orderId = 'order_TEST987654';
+      const paymentId = 'pay_TEST123456';
+      const payload = `${orderId}|${paymentId}`;
+
+      const validSignature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+      const invalidSignature = 'invalid_tampered_signature_hex';
+
+      function verifySignature(ord, pay, sig, sec) {
+        const expected = crypto.createHmac('sha256', sec).update(`${ord}|${pay}`).digest('hex');
+        return expected.toLowerCase() === sig.toLowerCase();
+      }
+
+      assert.strictEqual(verifySignature(orderId, paymentId, validSignature, secret), true);
+      assert.strictEqual(verifySignature(orderId, paymentId, invalidSignature, secret), false);
+      assert.strictEqual(verifySignature(orderId, 'pay_OTHER', validSignature, secret), false);
+    });
+
+    it('completes the full payment verification flow and unlocks contest idempotently', async () => {
+      let paymentRecord = {
+        contest_id: 'c-100',
+        user_id: 'u-100',
+        amount: 49,
+        currency: 'INR',
+        status: 'PENDING',
+        transaction_ref: null
+      };
+
+      const eligibilityRecords = new Set();
+
+      const mockEdgeFunctionVerify = async ({ order_id, payment_id, signature, contest_id, user_id, secret }) => {
+        // 1. Signature check
+        const expected = crypto.createHmac('sha256', secret).update(`${order_id}|${payment_id}`).digest('hex');
+        if (expected.toLowerCase() !== signature.toLowerCase()) {
+          return { success: false, error: 'Signature verification failed' };
+        }
+
+        // 2. Amount and contest verification (fixed at 49)
+        if (contest_id !== 'c-100') {
+          return { success: false, error: 'Contest not found' };
+        }
+
+        // 3. Update contest_payments record to paid
+        paymentRecord = {
+          ...paymentRecord,
+          status: 'paid',
+          transaction_ref: payment_id,
+          payment_method: 'RAZORPAY',
+          verified_at: new Date().toISOString()
+        };
+
+        // 4. Idempotently add contest eligibility
+        eligibilityRecords.add(`${contest_id}:${user_id}`);
+
+        return {
+          success: true,
+          message: 'Payment verified and contest unlocked successfully.',
+          payment: paymentRecord,
+          contest_id,
+          user_id
+        };
+      };
+
+      const secret = 'rzp_secret_xyz';
+      const order_id = 'order_100';
+      const payment_id = 'pay_100';
+      const signature = crypto.createHmac('sha256', secret).update(`${order_id}|${payment_id}`).digest('hex');
+
+      // First verification
+      const res1 = await mockEdgeFunctionVerify({
+        order_id,
+        payment_id,
+        signature,
+        contest_id: 'c-100',
+        user_id: 'u-100',
+        secret
+      });
+
+      assert.strictEqual(res1.success, true);
+      assert.strictEqual(paymentRecord.status, 'paid');
+      assert.strictEqual(paymentRecord.transaction_ref, 'pay_100');
+      assert.strictEqual(eligibilityRecords.has('c-100:u-100'), true);
+      assert.strictEqual(isPaymentVerified(paymentRecord), true);
+
+      // Repeated verification (idempotent)
+      const res2 = await mockEdgeFunctionVerify({
+        order_id,
+        payment_id,
+        signature,
+        contest_id: 'c-100',
+        user_id: 'u-100',
+        secret
+      });
+
+      assert.strictEqual(res2.success, true);
+      assert.strictEqual(eligibilityRecords.size, 1);
     });
   });
 

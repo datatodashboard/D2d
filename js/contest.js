@@ -20,6 +20,37 @@ let serverClockOffset = 0;
 
 const $ = id => document.getElementById(id);
 
+function loadRazorpaySdk() {
+  return new Promise((resolve, reject) => {
+    if (typeof window !== 'undefined' && window.Razorpay) {
+      resolve(window.Razorpay);
+      return;
+    }
+    const existing = typeof document !== 'undefined' ? document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]') : null;
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.Razorpay));
+      existing.addEventListener('error', () => reject(new Error('Failed to load Razorpay Checkout SDK.')));
+      return;
+    }
+    if (typeof document === 'undefined') {
+      reject(new Error('Document not defined'));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve(window.Razorpay);
+    script.onerror = () => reject(new Error('Failed to load Razorpay Checkout SDK. Please check your connection.'));
+    document.head.appendChild(script);
+  });
+}
+
+export function isPaymentVerified(payment) {
+  if (!payment || !payment.status) return false;
+  const s = String(payment.status).toUpperCase();
+  return s === 'VERIFIED' || s === 'PAID';
+}
+
 export function getContestState() {
   return {
     contest: currentContest,
@@ -310,7 +341,7 @@ export function renderContestCard() {
     btnIcon = '⏱️';
     badgeText = 'IN PROGRESS';
     badgeClass = 'contest-badge-progress';
-  } else if (activeIsAdmin || currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
+  } else if (activeIsAdmin || isPaymentVerified(currentPayment) || Number(currentContest.entry_fee) === 0) {
     btnLabel = 'Join Contest';
     btnIcon = '🚪';
     badgeText = activeIsAdmin ? 'ADMIN EXEMPT' : 'READY';
@@ -376,7 +407,7 @@ function handleContestAction() {
   } else if (currentAttempt?.status === 'IN_PROGRESS') {
     openContestModal('active');
   } else if (currentRegistration?.agreed_rules) {
-    if (activeIsAdmin || currentPayment?.status === 'VERIFIED' || Number(currentContest.entry_fee) === 0) {
+    if (activeIsAdmin || isPaymentVerified(currentPayment) || Number(currentContest.entry_fee) === 0) {
       openContestModal('ready');
     } else {
       openContestModal('payment');
@@ -727,6 +758,13 @@ function renderModalContent(stage) {
 
           ${isFee ? `
             <div class="contest-section-block">
+              <div style="margin-bottom:16px;">
+                <button id="btnPayContest" class="action primary" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;font-size:14px;font-weight:800;border-radius:8px;cursor:pointer;">
+                  <span>💳 Pay ₹49</span>
+                </button>
+                <div id="payOrderError" style="display:none;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:8px 12px;border-radius:8px;font-size:0.85rem;margin-top:8px;font-weight:600;text-align:left;"></div>
+              </div>
+
               <h4>Payment Instructions</h4>
               <p>To participate, transfer the entry fee of <strong>₹${currentContest.entry_fee}</strong> via UPI or online transfer.</p>
               <div class="upi-box">
@@ -1050,7 +1088,7 @@ function attachModalListeners(stage) {
 
         await refreshUserContestRecords();
 
-        if (Number(currentContest.entry_fee) === 0 || activeIsAdmin) {
+        if (Number(currentContest.entry_fee) === 0 || activeIsAdmin || isPaymentVerified(currentPayment)) {
           openContestModal('ready');
         } else {
           openContestModal('payment');
@@ -1064,6 +1102,139 @@ function attachModalListeners(stage) {
   }
 
   if (stage === 'payment') {
+    const payBtn = $('btnPayContest');
+    const payErr = $('payOrderError');
+
+    payBtn?.addEventListener('click', async () => {
+      if (!activeClient || !activeUser || !currentContest) {
+        if (payErr) {
+          payErr.textContent = 'User session or contest details not found. Please sign in again.';
+          payErr.style.display = 'block';
+        }
+        return;
+      }
+
+      if (payErr) {
+        payErr.style.display = 'none';
+        payErr.textContent = '';
+      }
+
+      const originalHtml = payBtn.innerHTML;
+      payBtn.disabled = true;
+      payBtn.textContent = 'Creating order…';
+
+      try {
+        // 1. Call create-razorpay-order Edge Function with current contest_id
+        const { data, error } = await activeClient.functions.invoke('create-razorpay-order', {
+          body: { contest_id: currentContest.id }
+        });
+
+        if (error) {
+          throw new Error(error.message || 'Failed to create payment order.');
+        }
+
+        if (!data || !data.order_id || !data.key_id) {
+          throw new Error(data?.error || data?.message || 'Invalid order response received.');
+        }
+
+        // 2. Load Razorpay Checkout only upon user click
+        const RazorpaySDK = await loadRazorpaySdk();
+        if (!RazorpaySDK) {
+          throw new Error('Could not load Razorpay Checkout SDK.');
+        }
+
+        // 3. Open Razorpay Checkout using order_id and key_id
+        const rzp = new RazorpaySDK({
+          key: data.key_id,
+          amount: data.amount,
+          currency: data.currency || 'INR',
+          name: 'Think and Crack SQL',
+          description: currentContest.title || 'Contest Entry Fee',
+          order_id: data.order_id,
+          prefill: {
+            email: activeUser.email || '',
+            name: activeUser.user_metadata?.name || activeUser.user_metadata?.full_name || ''
+          },
+          theme: {
+            color: '#2563eb'
+          },
+          handler: async function (response) {
+            if (!response || !response.razorpay_payment_id || !response.razorpay_signature) {
+              if (payErr) {
+                payErr.textContent = 'Payment response incomplete from Razorpay.';
+                payErr.style.display = 'block';
+              }
+              return;
+            }
+
+            if (payErr) {
+              payErr.style.display = 'none';
+              payErr.textContent = '';
+            }
+
+            payBtn.disabled = true;
+            payBtn.textContent = 'Verifying payment…';
+
+            try {
+              // 4. Call verify-razorpay-payment Edge Function
+              const { data: verifyData, error: verifyErr } = await activeClient.functions.invoke('verify-razorpay-payment', {
+                body: {
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  contest_id: currentContest.id
+                }
+              });
+
+              if (verifyErr) {
+                throw new Error(verifyErr.message || 'Payment verification failed on server.');
+              }
+
+              if (!verifyData || !verifyData.success) {
+                throw new Error(verifyData?.error || verifyData?.message || 'Payment verification failed.');
+              }
+
+              // 5. Update client records and render
+              await refreshUserContestRecords();
+              renderContestCard();
+
+              // 6. Show Payment Successful and allow the user to enter the contest
+              const notice = $('paymentNotice');
+              if (notice) {
+                notice.style.display = 'block';
+                notice.innerHTML = `✅ <strong>Payment Successful!</strong> Your contest entry is unlocked.`;
+              }
+              openContestModal('ready');
+            } catch (vErr) {
+              console.error('[Contest Payment] Verification error:', vErr);
+              if (payErr) {
+                payErr.textContent = 'Payment verification failed: ' + (vErr.message || 'Please contact support.');
+                payErr.style.display = 'block';
+              } else {
+                alert('Payment verification error: ' + vErr.message);
+              }
+            } finally {
+              payBtn.disabled = false;
+              payBtn.innerHTML = originalHtml;
+            }
+          }
+        });
+
+        rzp.open();
+      } catch (err) {
+        console.error('[Contest Payment] Razorpay order creation failed:', err);
+        if (payErr) {
+          payErr.textContent = 'Order creation failed: ' + (err.message || 'Please try again.');
+          payErr.style.display = 'block';
+        } else {
+          alert('Could not create payment order: ' + err.message);
+        }
+      } finally {
+        payBtn.disabled = false;
+        payBtn.innerHTML = originalHtml;
+      }
+    });
+
     const btn = $('btnSubmitPayment');
     btn?.addEventListener('click', async () => {
       const isFee = Number(currentContest.entry_fee) > 0;
@@ -1078,7 +1249,7 @@ function attachModalListeners(stage) {
         btn.textContent = 'Checking status…';
         try {
           await refreshUserContestRecords();
-          if (currentPayment?.status === 'VERIFIED') {
+          if (isPaymentVerified(currentPayment)) {
             openContestModal('ready');
             return;
           }
@@ -1124,7 +1295,7 @@ function attachModalListeners(stage) {
 
         await refreshUserContestRecords();
 
-        if (currentPayment?.status === 'VERIFIED') {
+        if (isPaymentVerified(currentPayment)) {
           openContestModal('ready');
         } else {
           const notice = $('paymentNotice');
@@ -1138,7 +1309,7 @@ function attachModalListeners(stage) {
       } catch (err) {
         console.warn('Contest payment submission error:', err);
         await refreshUserContestRecords();
-        if (currentPayment?.status === 'VERIFIED') {
+        if (isPaymentVerified(currentPayment)) {
           openContestModal('ready');
           return;
         }
