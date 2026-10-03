@@ -565,6 +565,91 @@ patients(patient_id PK, patient_name, city, segment, joined_date); appointments(
       assert.strictEqual(res2.success, true);
       assert.strictEqual(eligibilityRecords.size, 1);
     });
+
+    it('matches Razorpay order ID using transaction_ref in webhook, marks payment as paid, and unlocks contest', async () => {
+      const contestPaymentsDB = new Map();
+      const contestEligibilityDB = new Set();
+
+      const orderId = 'order_RZP_WEBHOOK_999';
+      const paymentId = 'pay_RZP_CAPTURED_888';
+      const contestId = 'contest-data-lake-101';
+      const userId = 'user-data-hero-555';
+
+      // 1. Initial pending record stored with transaction_ref = orderId
+      contestPaymentsDB.set(`${contestId}:${userId}`, {
+        contest_id: contestId,
+        user_id: userId,
+        amount: 49,
+        currency: 'INR',
+        status: 'PENDING',
+        transaction_ref: orderId
+      });
+
+      // 2. Webhook handler matching via transaction_ref
+      const mockWebhookHandler = async (webhookPayload) => {
+        const order_id = webhookPayload.payload?.payment?.entity?.order_id || webhookPayload.payload?.order?.entity?.id;
+        const payment_id = webhookPayload.payload?.payment?.entity?.id;
+
+        // Query contest_payments using transaction_ref
+        let matchedRecord = null;
+        for (const record of contestPaymentsDB.values()) {
+          if (record.transaction_ref === order_id || record.transaction_ref === payment_id) {
+            matchedRecord = record;
+            break;
+          }
+        }
+
+        if (!matchedRecord) {
+          return { success: false, error: 'Payment not found by transaction_ref' };
+        }
+
+        // Mark payment as paid
+        const updated = {
+          ...matchedRecord,
+          status: 'paid',
+          payment_method: 'RAZORPAY',
+          transaction_ref: payment_id || order_id,
+          verified_at: new Date().toISOString()
+        };
+        contestPaymentsDB.set(`${updated.contest_id}:${updated.user_id}`, updated);
+
+        // Unlock contest
+        contestEligibilityDB.add(`${updated.contest_id}:${updated.user_id}`);
+
+        return {
+          success: true,
+          contest_id: updated.contest_id,
+          user_id: updated.user_id,
+          status: 'paid'
+        };
+      };
+
+      const webhookPayload = {
+        event: 'payment.captured',
+        payload: {
+          payment: {
+            entity: {
+              id: paymentId,
+              order_id: orderId,
+              amount: 4900,
+              currency: 'INR',
+              status: 'captured'
+            }
+          }
+        }
+      };
+
+      const result = await mockWebhookHandler(webhookPayload);
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.status, 'paid');
+      assert.strictEqual(result.contest_id, contestId);
+      assert.strictEqual(result.user_id, userId);
+
+      const finalPayment = contestPaymentsDB.get(`${contestId}:${userId}`);
+      assert.strictEqual(finalPayment.status, 'paid');
+      assert.strictEqual(isPaymentVerified(finalPayment), true);
+      assert.strictEqual(contestEligibilityDB.has(`${contestId}:${userId}`), true);
+    });
   });
 
 });

@@ -81,6 +81,23 @@ serve(async (req: Request) => {
       }
     }
 
+    if (contest_id && contest_id !== 'course_unlock' && contest_id !== 'premium_unlock') {
+      try {
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+        await supabaseAdmin.from('contest_payments').upsert({
+          contest_id,
+          user_id: user.id,
+          amount: 49,
+          currency,
+          status: 'PENDING',
+          payment_method: 'RAZORPAY',
+          transaction_ref: orderId
+        }, { onConflict: 'contest_id,user_id' });
+      } catch (dbErr) {
+        console.warn('[create-razorpay-order] Note updating pending payment transaction_ref:', dbErr);
+      }
+    }
+
     return new Response(JSON.stringify({
       order_id: orderId,
       key_id: keyId,
