@@ -111,25 +111,37 @@ describe('End-to-End Reliability, Atomic Payments, RLS & Progress Verification',
   });
 
   describe('3. Payment User Experience & Authoritative Refresh', () => {
-    test('Preserves configured UPI payee and payment interface', () => {
-      assert.ok(appJs.includes('ramgokul1987@axisbank'));
-      assert.ok(indexHtml.includes('upi://pay?pa=ramgokul1987@axisbank'));
+    test('Validates Razorpay payment integration and Pay ₹49 checkout flow', () => {
+      // Validates Pay ₹49 button and trigger in UI
+      assert.ok(indexHtml.includes('payCourseUnlockWithRazorpay()'));
+      assert.ok(indexHtml.includes('Pay ₹49'));
+      assert.ok(appJs.includes('payCourseUnlockWithRazorpay'));
+      // Validates Razorpay SDK checkout integration and order creation Edge Function invocation
+      assert.ok(appJs.includes('checkout.razorpay.com'));
+      assert.ok(appJs.includes("client.functions.invoke('create-razorpay-order'"));
+      assert.ok(appJs.includes("contest_id: 'course_unlock'"));
     });
 
-    test('App JS supports 5 learner payment states (required, pending, verified, rejected, error)', () => {
-      // State 1: Required
-      assert.ok(appJs.includes('Submit Payment for Verification'));
-      // State 2: Pending
-      assert.ok(appJs.includes('Payment Submitted for Verification'));
-      assert.ok(appJs.includes('Refresh Payment Status'));
-      // State 3: Verified
-      assert.ok(appJs.includes('Access Unlocked'));
-      // State 4: Rejected
-      assert.ok(appJs.includes('Previous Submission Rejected') || appJs.includes('Payment Rejected'));
-      assert.ok(appJs.includes('Resubmit Payment for Verification'));
-      // State 5: Error / Retry
-      assert.ok(appJs.includes('Submission Error') || appJs.includes('Error recording payment'));
-      assert.ok(appJs.includes('Retry Submission'));
+    test('App JS supports Razorpay payment lifecycle states (required, order creation, checkout, verification, unlock, error/retry)', () => {
+      // State 1: Payment required
+      assert.ok(appJs.includes("payBtn.innerHTML = '<span>Pay ₹49</span>'"));
+      // State 2: Order creation & order failure handling
+      assert.ok(appJs.includes("payBtn.textContent = 'Creating order…'"));
+      assert.ok(appJs.includes("client.functions.invoke('create-razorpay-order'"));
+      assert.ok(appJs.includes("Order Error:"));
+      // State 3: Razorpay checkout loading & launch
+      assert.ok(appJs.includes("loadRazorpaySdk"));
+      assert.ok(appJs.includes("rzp.open()"));
+      // State 4: Payment verification invocation
+      assert.ok(appJs.includes("payBtn.textContent = 'Verifying payment…'"));
+      assert.ok(appJs.includes("client.functions.invoke('verify-razorpay-payment'"));
+      // State 5: Successful premium unlock & continue action
+      assert.ok(appJs.includes("isPaidUnlocked = true"));
+      assert.ok(appJs.includes("Payment Successful!"));
+      assert.ok(appJs.includes("Continue Practice (Question 6+)"));
+      // State 6: Verification error & retry re-enablement
+      assert.ok(appJs.includes("Verification Error:"));
+      assert.ok(appJs.includes("payBtn.disabled = false"));
     });
 
     test('Admin payment screen renders all required operational fields', () => {
@@ -165,15 +177,31 @@ describe('End-to-End Reliability, Atomic Payments, RLS & Progress Verification',
       assert.ok(setSessionMatch[1].includes('stopPaymentPolling()'));
     });
 
-    test('Clicking Pay or returning from UPI app does NOT automatically unlock access', () => {
-      // Submitting payment sets status: 'pending' and does NOT set isPaidUnlocked = true
-      const submitMatch = appJs.match(/async function submitCoursePayment\s*\([^)]*\)\s*\{([\s\S]*?)\nfunction /);
-      assert.ok(submitMatch);
-      const submitBody = submitMatch[1];
+    test('Razorpay order creation and checkout launch do not directly unlock access; unlock requires server verification', () => {
+      const payFuncMatch = appJs.match(/async function payCourseUnlockWithRazorpay\s*\([^)]*\)\s*\{([\s\S]*?)\nfunction /);
+      assert.ok(payFuncMatch, 'payCourseUnlockWithRazorpay function must exist in app.js');
+      const payFuncBody = payFuncMatch[1];
+
+      // Extract the order creation and SDK launch section (before verification invocation)
+      const orderAndLaunchSection = payFuncBody.split("client.functions.invoke('verify-razorpay-payment'")[0];
+      assert.ok(orderAndLaunchSection, 'Must invoke verify-razorpay-payment');
+
+      // The order creation and launch phase must NEVER unlock access directly
       assert.strictEqual(
-        submitBody.includes('isPaidUnlocked = true'),
+        orderAndLaunchSection.includes('isPaidUnlocked = true'),
         false,
-        'submitCoursePayment must never set isPaidUnlocked = true'
+        'Razorpay order creation and checkout launch must never directly set isPaidUnlocked = true'
+      );
+
+      // Access unlock must occur only in the post-verification section
+      const postVerificationSection = payFuncBody.split("client.functions.invoke('verify-razorpay-payment'")[1];
+      assert.ok(
+        postVerificationSection.includes('isPaidUnlocked = true'),
+        'isPaidUnlocked = true must only occur after server verification succeeds'
+      );
+      assert.ok(
+        postVerificationSection.includes('verifyData.success'),
+        'Server verification success must be validated before unlocking access'
       );
     });
   });
@@ -276,8 +304,38 @@ describe('End-to-End Reliability, Atomic Payments, RLS & Progress Verification',
     });
 
     test('sync_user_progress handles returned error explicitly', () => {
-      assert.ok(appJs.includes("const { data: syncRes, error: syncErr } = await client.rpc('sync_user_progress'"));
-      assert.ok(appJs.includes("if (syncErr)"));
+      // Must invoke sync_user_progress RPC and capture returned error
+      assert.ok(
+        appJs.includes("client.rpc('sync_user_progress')"),
+        'Must call sync_user_progress RPC'
+      );
+      assert.ok(
+        appJs.includes('syncErr'),
+        'Must capture syncErr from sync_user_progress response'
+      );
+
+      // Verify that syncErr is explicitly checked before applying progress count
+      const hasExplicitErrorCheck =
+        appJs.includes('!syncErr && syncRes') ||
+        appJs.includes('if (syncErr)') ||
+        /if\s*\([^)]*syncErr[^)]*\)/.test(appJs);
+      assert.ok(
+        hasExplicitErrorCheck,
+        'Returned syncErr must be explicitly checked before applying progress count'
+      );
+
+      // Verify that progress is only applied when syncErr is null/absent
+      assert.ok(
+        appJs.includes('!syncErr && syncRes'),
+        'authoritativeCompletedCount must only be updated when syncErr is null/absent'
+      );
+
+      // Verify that the call is protected inside try/catch error handling
+      const syncBlock = appJs.match(/try\s*\{[\s\S]*?client\.rpc\('sync_user_progress'[\s\S]*?\}\s*catch/);
+      assert.ok(
+        syncBlock,
+        'sync_user_progress must be wrapped in try/catch to safely handle RPC failure'
+      );
     });
 
     test('Profile creation and access loading checks returned error explicitly', () => {
