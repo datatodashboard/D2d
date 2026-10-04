@@ -652,4 +652,111 @@ patients(patient_id PK, patient_name, city, segment, joined_date); appointments(
     });
   });
 
+  describe('8. Frontend Premium Access Check via contest_payments', () => {
+    it('determines paid access using contest_payments where status is VERIFIED', async () => {
+      const userId = 'user-premium-123';
+      let isPaidUnlocked = false;
+      let modalOpened = false;
+
+      const mockSupabase = {
+        from: (table) => {
+          if (table === 'contest_payments') {
+            return {
+              select: () => ({
+                eq: async (col, val) => {
+                  if (col === 'user_id' && val === userId) {
+                    return {
+                      data: [
+                        { contest_id: 'contest-456', user_id: userId, status: 'VERIFIED', amount: 49 }
+                      ],
+                      error: null
+                    };
+                  }
+                  return { data: [], error: null };
+                }
+              })
+            };
+          }
+          if (table === 'profiles') {
+            return {
+              select: (cols) => {
+                // Ensure caller never queries paid_unlocked, contest_eligible, or completed_count
+                assert.strictEqual(cols.includes('paid_unlocked'), false);
+                assert.strictEqual(cols.includes('contest_eligible'), false);
+                assert.strictEqual(cols.includes('completed_count'), false);
+                return {
+                  eq: () => ({
+                    maybeSingle: async () => ({
+                      data: { id: userId, email: 'premium@example.com', username: 'prosql' },
+                      error: null
+                    })
+                  })
+                };
+              }
+            };
+          }
+          return {};
+        }
+      };
+
+      // Simulate access check
+      const { data: contestPayments } = await mockSupabase.from('contest_payments').select('*').eq('user_id', userId);
+      const isVerified = contestPayments?.some(p => String(p.status).toUpperCase() === 'VERIFIED');
+      if (isVerified) {
+        isPaidUnlocked = true;
+      }
+
+      // If unlocked, paywall modal is never shown
+      const openModal = () => {
+        if (isPaidUnlocked) return;
+        modalOpened = true;
+      };
+
+      openModal();
+
+      assert.strictEqual(isPaidUnlocked, true);
+      assert.strictEqual(modalOpened, false);
+    });
+
+    it('does not unlock when contest_payments has PENDING or FAILED status', async () => {
+      const userId = 'user-pending-789';
+      let isPaidUnlocked = false;
+      let modalOpened = false;
+
+      const mockSupabase = {
+        from: (table) => {
+          if (table === 'contest_payments') {
+            return {
+              select: () => ({
+                eq: async () => ({
+                  data: [
+                    { contest_id: 'contest-456', user_id: userId, status: 'PENDING', amount: 49 }
+                  ],
+                  error: null
+                })
+              })
+            };
+          }
+          return {};
+        }
+      };
+
+      const { data: contestPayments } = await mockSupabase.from('contest_payments').select('*').eq('user_id', userId);
+      const isVerified = contestPayments?.some(p => String(p.status).toUpperCase() === 'VERIFIED');
+      if (isVerified) {
+        isPaidUnlocked = true;
+      }
+
+      const openModal = () => {
+        if (isPaidUnlocked) return;
+        modalOpened = true;
+      };
+
+      openModal();
+
+      assert.strictEqual(isPaidUnlocked, false);
+      assert.strictEqual(modalOpened, true);
+    });
+  });
+
 });

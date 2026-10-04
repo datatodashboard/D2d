@@ -678,20 +678,20 @@ async function checkUserAccessStatus(userId) {
     const userEmail = activeUser?.email || '';
 
     // Helper to query the profile row from public.profiles using the current authenticated user ID
+    // Note: public.profiles does NOT contain paid_unlocked, contest_eligible, or completed_count
     async function fetchProfile() {
-      // Primary select: select * returns all existing columns without failing on column name mismatches
       try {
         const { data, error } = await client
           .from('profiles')
-          .select('*')
+          .select('id, email, username, is_admin')
           .eq('id', uid)
           .maybeSingle();
 
         if (!error && data) return { profile: data, error: null };
         if (!error && !data) return { profile: null, error: null };
-        console.warn('[Access] Profiles select * notice:', error?.message || error);
+        console.warn('[Access] Profiles select notice:', error?.message || error);
       } catch (ex) {
-        console.warn('[Access] Profiles select * exception:', ex);
+        console.warn('[Access] Profiles select exception:', ex);
       }
 
       // Fallback: minimal columns (id, email)
@@ -736,7 +736,6 @@ async function checkUserAccessStatus(userId) {
     }
 
     // If the profile exists:
-    // - Load the profile normally.
     // - Load username.
     // - Load is_admin.
     // - Continue into the app normally.
@@ -765,11 +764,6 @@ async function checkUserAccessStatus(userId) {
         isCurrentUserAdmin = true;
         updateAdminPortalVisibility();
       }
-
-      // Load paid_unlocked normally
-      if (profile.paid_unlocked === true) {
-        isPaidUnlocked = true;
-      }
     } else if (isCurrentUserAdmin) {
       // If user is already verified admin (e.g. from admin_users table), never block them with an error
       hideAccessError();
@@ -778,51 +772,86 @@ async function checkUserAccessStatus(userId) {
       showAccessCheckError('Could not verify account profile. Click Retry to check again.');
     }
 
-    // Check payment status
+    // Use the existing public.contest_payments table to determine paid access for the signed-in user
     try {
-      const { data: payments, error: payErr } = await client
-        .from('payments')
+      const { data: contestPayments, error: cPayErr } = await client
+        .from('contest_payments')
         .select('*')
-        .eq('user_id', uid)
-        .order('submitted_at', { ascending: false })
-        .limit(1);
+        .eq('user_id', uid);
 
-      if (payErr) {
-        console.warn('[Access] Payments query notice:', payErr.message);
-      } else if (payments && payments.length > 0) {
-        const latestPay = payments[0];
-        if (latestPay.status === 'verified') {
+      if (cPayErr) {
+        console.warn('[Access] contest_payments query notice:', cPayErr.message);
+      } else if (contestPayments && contestPayments.length > 0) {
+        const hasVerified = contestPayments.some(p => {
+          const s = String(p.status || '').toUpperCase();
+          return s === 'VERIFIED' || s === 'PAID';
+        });
+
+        if (hasVerified) {
           isPaidUnlocked = true;
-        } else if (latestPay.status === 'pending') {
-          userPendingPayment = latestPay;
+          userPendingPayment = null;
+        } else {
+          const pending = contestPayments.find(p => String(p.status || '').toUpperCase() === 'PENDING');
+          if (pending) {
+            userPendingPayment = pending;
+          }
         }
       }
-    } catch (payEx) {
-      console.warn('[Access] Payments check exception:', payEx);
+    } catch (cPayEx) {
+      console.warn('[Access] contest_payments check exception:', cPayEx);
+    }
+
+    // Check payments table as fallback if not already unlocked
+    if (!isPaidUnlocked) {
+      try {
+        const { data: payments, error: payErr } = await client
+          .from('payments')
+          .select('*')
+          .eq('user_id', uid)
+          .order('submitted_at', { ascending: false })
+          .limit(1);
+
+        if (payErr) {
+          console.warn('[Access] Payments query notice:', payErr.message);
+        } else if (payments && payments.length > 0) {
+          const latestPay = payments[0];
+          const s = String(latestPay.status || '').toUpperCase();
+          if (s === 'VERIFIED' || s === 'PAID' || s === 'APPROVED') {
+            isPaidUnlocked = true;
+            userPendingPayment = null;
+          } else if (s === 'PENDING' && !userPendingPayment) {
+            userPendingPayment = latestPay;
+          }
+        }
+      } catch (payEx) {
+        console.warn('[Access] Payments check exception:', payEx);
+      }
+    }
+
+    // After login or refresh: VERIFIED payment -> premium access unlocked automatically
+    // and the user must not see the ₹49 payment popup again.
+    if (isPaidUnlocked) {
+      closePaywallModal();
+      updateGates();
+      updateProgress();
+      renderScenarioCatalog();
     }
 
     const currentCompleted = getCompletedCount();
 
-    // Authoritatively sync profile completed_count and contest_eligible via server RPC
+    // Authoritatively sync profile last_active / background sync safely
     try {
       const { data: syncRes, error: syncErr } = await client.rpc('sync_user_progress');
-      if (syncErr) {
-        console.warn('[Access] sync_user_progress error:', syncErr.message || syncErr);
-        throw syncErr;
-      }
-      if (syncRes && typeof syncRes.completed_count === 'number') {
+      if (!syncErr && syncRes && typeof syncRes.completed_count === 'number') {
         authoritativeCompletedCount = syncRes.completed_count;
       }
     } catch (e) {
       try {
-        const { error: updErr } = await client.from('profiles').update({
+        await client.from('profiles').update({
           last_active: new Date().toISOString()
         }).eq('id', uid);
-        if (updErr) {
-          console.warn('[Access] Last active update notice:', updErr.message || updErr);
-        }
       } catch (updErr) {
-        console.warn('[Access] Last active update notice:', updErr);
+        // Safe ignore
       }
     }
 
@@ -866,26 +895,38 @@ async function checkPaymentStatusSilently(isUserAction = false) {
   }
 
   try {
-    // 1. Authoritative check on profile
-    const { data: prof, error: profErr } = await client
-      .from('profiles')
-      .select('paid_unlocked, contest_eligible, completed_count')
-      .eq('id', user.id)
-      .maybeSingle();
+    // 1. Authoritative check on public.contest_payments table
+    const { data: contestPayments, error: cPayErr } = await client
+      .from('contest_payments')
+      .select('*')
+      .eq('user_id', user.id);
 
-    if (!profErr && prof?.paid_unlocked === true) {
-      isPaidUnlocked = true;
-      stopPaymentPolling();
-      openPaywallModal();
-      updateGates();
-      updateProgress();
-      if (current) renderScenario();
-      renderScenarioCatalog();
-      updateAdminPortalVisibility();
-      return;
+    if (!cPayErr && contestPayments && contestPayments.length > 0) {
+      const hasVerified = contestPayments.some(p => {
+        const s = String(p.status || '').toUpperCase();
+        return s === 'VERIFIED' || s === 'PAID';
+      });
+
+      if (hasVerified) {
+        isPaidUnlocked = true;
+        userPendingPayment = null;
+        stopPaymentPolling();
+        closePaywallModal();
+        updateGates();
+        updateProgress();
+        if (current) renderScenario();
+        renderScenarioCatalog();
+        updateAdminPortalVisibility();
+        return;
+      }
+
+      const pending = contestPayments.find(p => String(p.status || '').toUpperCase() === 'PENDING');
+      if (pending) {
+        userPendingPayment = pending;
+      }
     }
 
-    // 2. Check latest payment
+    // 2. Check latest payment in payments table
     const { data: payments, error: payErr } = await client
       .from('payments')
       .select('*')
@@ -895,17 +936,20 @@ async function checkPaymentStatusSilently(isUserAction = false) {
 
     if (!payErr && payments && payments.length > 0) {
       const latest = payments[0];
-      userPendingPayment = latest;
-      if (latest.status === 'verified') {
+      const s = String(latest.status || '').toUpperCase();
+      if (s === 'VERIFIED' || s === 'PAID' || s === 'APPROVED') {
         isPaidUnlocked = true;
+        userPendingPayment = null;
         stopPaymentPolling();
-        openPaywallModal();
+        closePaywallModal();
         updateGates();
         updateProgress();
         if (current) renderScenario();
         renderScenarioCatalog();
         updateAdminPortalVisibility();
         return;
+      } else if (s === 'PENDING') {
+        userPendingPayment = latest;
       }
     }
 
@@ -1019,6 +1063,11 @@ async function handleScenarioCompleted(scenarioId, thinkingResponse = '', score 
 }
 
 function openPaywallModal() {
+  if (isPaidUnlocked || isCurrentUserAdmin) {
+    closePaywallModal();
+    return;
+  }
+
   const modal = $('paywallModal');
   if (!modal) return;
   modal.hidden = false;
