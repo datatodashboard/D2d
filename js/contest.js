@@ -1175,7 +1175,19 @@ function attachModalListeners(stage) {
               });
 
               if (verifyErr) {
-                throw new Error(verifyErr.message || 'Payment verification failed on server.');
+                let safeMsg = verifyErr.message || 'Payment verification failed on server.';
+                let corrId = '';
+                if (verifyErr.context) {
+                  try {
+                    const bodyJson = typeof verifyErr.context.json === 'function' ? await verifyErr.context.json() : JSON.parse(await verifyErr.context.text());
+                    if (bodyJson?.error) safeMsg = bodyJson.error;
+                    if (bodyJson?.correlation_id) corrId = bodyJson.correlation_id;
+                  } catch (_) {}
+                }
+                if (safeMsg && safeMsg.includes('non-2xx')) {
+                  safeMsg = 'Payment verification could not be completed by the server.';
+                }
+                throw new Error(safeMsg + (corrId ? ` (Ref: ${corrId})` : ''));
               }
 
               if (!verifyData || !verifyData.success) {
@@ -1196,10 +1208,8 @@ function attachModalListeners(stage) {
             } catch (vErr) {
               console.error('[Contest Payment] Verification error:', vErr);
               if (payErr) {
-                payErr.textContent = 'Payment verification failed: ' + (vErr.message || 'Please contact support.');
+                payErr.textContent = 'Verification Notice: ' + (vErr.message || 'Please contact support.');
                 payErr.style.display = 'block';
-              } else {
-                alert('Payment verification error: ' + vErr.message);
               }
             } finally {
               payBtn.disabled = false;

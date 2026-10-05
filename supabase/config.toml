@@ -1,0 +1,10 @@
+project_id = "d2d-sql"
+
+[functions.create-razorpay-order]
+verify_jwt = true
+
+[functions.verify-razorpay-payment]
+verify_jwt = true
+
+[functions.razorpay-webhook]
+verify_jwt = false

@@ -1171,7 +1171,19 @@ async function payCourseUnlockWithRazorpay() {
     });
 
     if (error) {
-      throw new Error(error.message || 'Failed to create payment order.');
+      let safeMsg = error.message || 'Failed to create payment order.';
+      let corrId = '';
+      if (error.context) {
+        try {
+          const bodyJson = typeof error.context.json === 'function' ? await error.context.json() : JSON.parse(await error.context.text());
+          if (bodyJson?.error) safeMsg = bodyJson.error;
+          if (bodyJson?.correlation_id) corrId = bodyJson.correlation_id;
+        } catch (_) {}
+      }
+      if (safeMsg && safeMsg.includes('non-2xx')) {
+        safeMsg = 'Payment service unavailable. Please try again.';
+      }
+      throw new Error(safeMsg + (corrId ? ` (Ref: ${corrId})` : ''));
     }
 
     if (!data || !data.order_id || !data.key_id) {
@@ -1228,15 +1240,29 @@ async function payCourseUnlockWithRazorpay() {
           });
 
           if (verifyErr) {
-            throw new Error(verifyErr.message || 'Payment verification failed on server.');
+            let safeMsg = verifyErr.message || 'Payment verification failed on server.';
+            let corrId = '';
+            if (verifyErr.context) {
+              try {
+                const bodyJson = typeof verifyErr.context.json === 'function' ? await verifyErr.context.json() : JSON.parse(await verifyErr.context.text());
+                if (bodyJson?.error) safeMsg = bodyJson.error;
+                if (bodyJson?.correlation_id) corrId = bodyJson.correlation_id;
+              } catch (_) {}
+            }
+            if (safeMsg && safeMsg.includes('non-2xx')) {
+              safeMsg = 'Payment verification could not be completed by the server.';
+            }
+            throw new Error(safeMsg + (corrId ? ` (Ref: ${corrId})` : ''));
           }
 
           if (!verifyData || !verifyData.success) {
             throw new Error(verifyData?.error || verifyData?.message || 'Payment verification failed.');
           }
 
-          // 5. Unlock state
+          // 5. Authoritatively reload user access status from database
+          await checkUserAccessStatus(user.id);
           isPaidUnlocked = true;
+
           if (notice) {
             notice.style.display = 'block';
             notice.style.background = '#dcfce7';
@@ -1263,15 +1289,35 @@ async function payCourseUnlockWithRazorpay() {
           }
         } catch (vErr) {
           console.error('[Course Payment] Verification error:', vErr);
+          const errStr = String(vErr.message || '').toLowerCase();
+          const isPending = errStr.includes('pending') ||
+                            errStr.includes('provider_lookup_failed') ||
+                            errStr.includes('gateway_network_error');
+
           if (notice) {
             notice.style.display = 'block';
-            notice.style.background = '#fee2e2';
-            notice.style.border = '1px solid #fca5a5';
-            notice.style.color = '#991b1b';
-            notice.innerHTML = `<strong>Verification Error:</strong> ${escapeHtml(vErr.message || 'Verification failed.')}`;
+            if (isPending) {
+              notice.style.background = '#fef3c7';
+              notice.style.border = '1px solid #fcd34d';
+              notice.style.color = '#92400e';
+              notice.innerHTML = `<strong>Payment received; verification pending.</strong><br><span style="font-size:0.85rem;">Your payment was recorded, but server confirmation is still finalizing. Click below to recheck your status without making a duplicate payment.</span>`;
+            } else {
+              notice.style.background = '#fee2e2';
+              notice.style.border = '1px solid #fca5a5';
+              notice.style.color = '#991b1b';
+              notice.innerHTML = `<strong>Verification Error:</strong> ${escapeHtml(vErr.message || 'Verification could not be confirmed.')}`;
+            }
+          }
+
+          if (payBtn) {
+            if (isPending) {
+              payBtn.disabled = false;
+              payBtn.textContent = 'Check Payment Status 🔄';
+              payBtn.onclick = () => checkPaymentStatusSilently(true);
+            }
           }
         } finally {
-          if (payBtn && !isPaidUnlocked) {
+          if (payBtn && !isPaidUnlocked && !payBtn.textContent.includes('Check Payment Status')) {
             payBtn.disabled = false;
             payBtn.innerHTML = '<span>Pay ₹49</span>';
           }
@@ -1290,7 +1336,7 @@ async function payCourseUnlockWithRazorpay() {
       notice.innerHTML = `<strong>Order Error:</strong> ${escapeHtml(err.message || 'Failed to start payment.')}`;
     }
   } finally {
-    if (payBtn && !isPaidUnlocked) {
+    if (payBtn && !isPaidUnlocked && !payBtn.textContent.includes('Check Payment Status')) {
       payBtn.disabled = false;
       payBtn.innerHTML = '<span>Pay ₹49</span>';
     }
