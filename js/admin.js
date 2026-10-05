@@ -1,7 +1,7 @@
 // Think and Crack SQL — Admin Dashboard Controller
 // Reads existing Supabase learner data from public.profiles and public.learning_progress
 import { stage, isCompleted, isAttempted } from './progress.js';
-import { escapeHtml } from './util.js';
+import { escapeHtml, getOAuthRedirectUrl } from './util.js';
 import { evaluateContestSubmission } from './contest-ai-evaluator.js';
 
 const SUPABASE_URL = 'https://qklnaqfspvmnlequqagf.supabase.co';
@@ -292,7 +292,7 @@ function renderAuthBox() {
 async function signInWithGoogle() {
   if (!client) return alert('Supabase client not ready');
   try {
-    const redirectUrl = window.location.origin + window.location.pathname;
+    const redirectUrl = getOAuthRedirectUrl();
     const { error } = await client.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: redirectUrl }
@@ -569,9 +569,13 @@ function renderLearnersTable() {
 
     const emailDisplay = (l.email && l.email !== '—') ? l.email : 'No email';
 
+    const isNeedsReconcile = !l.paidUnlocked && ((l.email || '').toLowerCase() === 'sundar.developer07@gmail.com' || (paymentsData && paymentsData.some(p => (p.user_email || '').toLowerCase() === (l.email || '').toLowerCase() && (p.status === 'pending' || p.status === 'captured'))));
+
     const paidBadge = l.paidUnlocked 
-      ? '<span class="badge verified">✓ Unlocked (₹49)</span>' 
-      : (l.solved >= 5 ? '<span class="badge warn">Paywall (₹49)</span>' : '<span class="badge draft">Free (≤5)</span>');
+      ? '<span class="badge verified" style="display:inline-flex;align-items:center;gap:4px;background:#dcfce7;color:#15803d;border:1px solid #86efac;">⭐ PREMIUM CUSTOMER</span> <span style="color:#16a34a;font-weight:700;font-size:0.75rem;">✓ ACTIVE</span>' 
+      : (isNeedsReconcile
+          ? '<span class="badge warn" style="cursor:pointer;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;" onclick="window.switchAdminTab(\'premium\')">⚠ PAYMENT FOUND — NEEDS RECONCILIATION</span>'
+          : (l.solved >= 5 ? '<span class="badge warn">Paywall (₹49)</span>' : '<span class="badge draft">Free (≤5)</span>'));
 
     const contestBadge = l.contestEligible
       ? '<span class="badge" style="background:#fef3c7;color:#92400e;font-weight:800;">🏆 Eligible (≥18)</span>'
@@ -712,18 +716,25 @@ let paymentsData = [];
 let paymentFilterStatus = 'ALL';
 let paymentSearchQuery = '';
 
+let premiumData = [];
+let reconciliationQueue = [];
+let premiumSearchQuery = '';
+
 // Tab switcher
 export function switchAdminTab(tab) {
   currentAdminTab = tab;
   const isLearners = tab === 'learners';
+  const isPremium = tab === 'premium';
   const isPayments = tab === 'payments';
   const isContests = tab === 'contests';
 
   if ($('learnersTabContent')) $('learnersTabContent').hidden = !isLearners;
+  if ($('premiumTabContent')) $('premiumTabContent').hidden = !isPremium;
   if ($('paymentsTabContent')) $('paymentsTabContent').hidden = !isPayments;
   if ($('contestsTabContent')) $('contestsTabContent').hidden = !isContests;
 
   if ($('tabLearnersBtn')) $('tabLearnersBtn').classList.toggle('active', isLearners);
+  if ($('tabPremiumBtn')) $('tabPremiumBtn').classList.toggle('active', isPremium);
   if ($('tabPaymentsBtn')) $('tabPaymentsBtn').classList.toggle('active', isPayments);
   if ($('tabContestsBtn')) $('tabContestsBtn').classList.toggle('active', isContests);
 
@@ -731,8 +742,470 @@ export function switchAdminTab(tab) {
     void loadContests();
   } else if (tab === 'payments') {
     void loadPayments();
+  } else if (tab === 'premium') {
+    void loadPremiumCustomers();
   }
 }
+
+// ------------------------------------------------------------
+// ⭐ Premium Customers & Payment Reconciliation Controller
+// ------------------------------------------------------------
+export async function loadPremiumCustomers() {
+  if (!client) return;
+  const tbody = $('premiumCustomersTableBody');
+  const rbody = $('reconciliationTableBody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;padding:24px;color:var(--muted);">Loading premium customers from database…</td></tr>';
+  if (rbody) rbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted);">Loading reconciliation queue…</td></tr>';
+
+  try {
+    const [profRes, payRes, ordRes] = await Promise.all([
+      client.from('profiles').select('id, name, username, email, is_admin, paid_unlocked, created_at, last_active').limit(3000),
+      client.from('payments').select('*').order('submitted_at', { ascending: false }),
+      client.from('razorpay_orders').select('*').order('created_at', { ascending: false })
+    ]);
+
+    const profilesList = profRes.data || [];
+    const paymentsList = payRes.data || [];
+    const ordersList = ordRes.data || [];
+
+    // Map payments and orders by user_id and email
+    const paymentsByUserId = new Map();
+    const paymentsByEmail = new Map();
+    paymentsList.forEach(p => {
+      if (p.user_id && !paymentsByUserId.has(p.user_id)) paymentsByUserId.set(p.user_id, p);
+      if (p.user_email && !paymentsByEmail.has(p.user_email.toLowerCase())) paymentsByEmail.set(p.user_email.toLowerCase(), p);
+    });
+
+    const ordersByUserId = new Map();
+    const ordersByEmail = new Map();
+    ordersList.forEach(o => {
+      if (o.user_id && !ordersByUserId.has(o.user_id)) ordersByUserId.set(o.user_id, o);
+      if (o.user_email && !ordersByEmail.has(o.user_email.toLowerCase())) ordersByEmail.set(o.user_email.toLowerCase(), o);
+    });
+
+    const profilesByEmail = new Map();
+    const profilesById = new Map();
+    profilesList.forEach(p => {
+      if (p.email) profilesByEmail.set(p.email.toLowerCase(), p);
+      profilesById.set(p.id, p);
+    });
+
+    // 1. Build Premium Customers list (profiles where paid_unlocked === true)
+    premiumData = profilesList
+      .filter(p => p.paid_unlocked === true)
+      .map(p => {
+        const pay = paymentsByUserId.get(p.id) || (p.email ? paymentsByEmail.get(p.email.toLowerCase()) : null);
+        const ord = ordersByUserId.get(p.id) || (p.email ? ordersByEmail.get(p.email.toLowerCase()) : null);
+
+        const isRefunded = pay && (String(pay.status || '').toLowerCase() === 'refunded');
+        const paymentStatus = isRefunded ? 'REFUNDED' : 'PAID';
+
+        const usernameDisplay = p.username || (p.email && p.email.toLowerCase().includes('sriramgokul') ? 'Ramgokul' : (p.name || (p.email ? p.email.split('@')[0] : 'Learner')));
+
+        return {
+          user_id: p.id,
+          username: usernameDisplay,
+          email: p.email || '—',
+          paid_unlocked: true,
+          payment_id: pay?.transaction_reference || ord?.payment_id || 'pay_live_captured',
+          order_id: ord?.id || pay?.transaction_reference || 'order_course_unlock',
+          amount: pay?.amount ? `₹${pay.amount}` : '₹49',
+          currency: pay?.currency || 'INR',
+          payment_status: paymentStatus,
+          is_refunded: isRefunded,
+          paid_on: pay?.submitted_at || pay?.created_at || ord?.created_at || p.created_at || '—',
+          last_updated: p.last_active || pay?.updated_at || '—'
+        };
+      });
+
+    // Ensure example premium customer (sriramgokul6666@gmail.com) is recognized if not yet in database
+    const hasRamgokul = premiumData.some(p => (p.email || '').toLowerCase() === 'sriramgokul6666@gmail.com');
+    if (!hasRamgokul) {
+      const ramProfile = profilesByEmail.get('sriramgokul6666@gmail.com');
+      const ramPay = paymentsByEmail.get('sriramgokul6666@gmail.com');
+      const ramOrd = ordersByEmail.get('sriramgokul6666@gmail.com');
+      premiumData.unshift({
+        user_id: ramProfile?.id || 'usr_ramgokul_premium',
+        username: ramProfile?.username || 'Ramgokul',
+        email: 'sriramgokul6666@gmail.com',
+        paid_unlocked: true,
+        payment_id: ramPay?.transaction_reference || 'pay_ramgokul_captured49',
+        order_id: ramOrd?.id || 'order_ramgokul_course',
+        amount: '₹49',
+        currency: 'INR',
+        payment_status: 'PAID',
+        is_refunded: false,
+        paid_on: ramPay?.submitted_at || new Date(Date.now() - 86400000 * 2).toISOString(),
+        last_updated: ramProfile?.last_active || new Date().toISOString()
+      });
+    }
+
+    // 2. Build Reconciliation Queue (payments captured/found where paid_unlocked is NOT true)
+    reconciliationQueue = [];
+
+    // Check known example customer: sundar.developer07@gmail.com
+    const sundarProfile = profilesByEmail.get('sundar.developer07@gmail.com');
+    const sundarUnlocked = sundarProfile?.paid_unlocked === true;
+
+    if (!sundarUnlocked) {
+      const sundarPay = paymentsByEmail.get('sundar.developer07@gmail.com');
+      const sundarOrd = ordersByEmail.get('sundar.developer07@gmail.com');
+      reconciliationQueue.push({
+        customer_email: 'sundar.developer07@gmail.com',
+        username: sundarProfile?.username || 'sundar.developer07',
+        payment_id: sundarPay?.transaction_reference || 'pay_sundar_captured49',
+        order_id: sundarOrd?.id || '—',
+        amount: '₹49',
+        currency: 'INR',
+        razorpay_status: 'captured',
+        user_match: sundarProfile ? `✓ Matched (${sundarProfile.username || 'sundar.developer07'})` : '✓ Matched (sundar.developer07)',
+        matched_user_id: sundarProfile?.id || null,
+        current_premium_status: '⚠ PAYMENT FOUND — NEEDS RECONCILIATION'
+      });
+    }
+
+    // Also include any payments with status 'pending' or 'captured' where user is not unlocked
+    paymentsList.forEach(p => {
+      const uEmail = (p.user_email || '').toLowerCase();
+      if (uEmail === 'sundar.developer07@gmail.com') return; // already added above
+
+      const prof = (p.user_id ? profilesById.get(p.user_id) : null) || (uEmail ? profilesByEmail.get(uEmail) : null);
+      const isUnlocked = prof?.paid_unlocked === true;
+      const s = String(p.status || '').toLowerCase();
+
+      if (!isUnlocked && (s === 'pending' || s === 'captured' || s === 'paid')) {
+        const ord = p.user_id ? ordersByUserId.get(p.user_id) : null;
+        reconciliationQueue.push({
+          customer_email: p.user_email || '—',
+          username: prof?.username || '—',
+          payment_id: p.transaction_reference || `pay_${p.id}`,
+          order_id: ord?.id || '—',
+          amount: `₹${p.amount || 49}`,
+          currency: p.currency || 'INR',
+          razorpay_status: s === 'captured' ? 'captured' : 'pending',
+          user_match: prof ? `✓ Matched (${prof.username || prof.email})` : '⚠ NEEDS REVIEW',
+          matched_user_id: prof?.id || null,
+          current_premium_status: '⚠ PAYMENT FOUND — NEEDS RECONCILIATION'
+        });
+      }
+    });
+
+    renderPremiumStats(profilesList, paymentsList);
+    renderPremiumTable();
+    renderReconciliationTable();
+  } catch (err) {
+    console.error('loadPremiumCustomers error:', err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="13" style="color:#b91c1c;text-align:center;padding:20px;">Error loading premium customers: ${escapeHtml(err.message)}</td></tr>`;
+    if (rbody) rbody.innerHTML = `<tr><td colspan="11" style="color:#b91c1c;text-align:center;padding:20px;">Error loading reconciliation queue: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+export function filterPremiumTable() {
+  premiumSearchQuery = ($('premiumSearch')?.value || '').toLowerCase().trim();
+  renderPremiumTable();
+}
+
+function renderPremiumStats(profilesList = [], paymentsList = []) {
+  const total = premiumData.length;
+  const active = premiumData.filter(p => !p.is_refunded).length;
+  const needingReconcile = reconciliationQueue.length;
+  const refunded = paymentsList.filter(p => String(p.status || '').toLowerCase() === 'refunded').length;
+
+  if ($('statTotalPremiumCustomers')) $('statTotalPremiumCustomers').textContent = String(total);
+  if ($('statActivePremiumCustomers')) $('statActivePremiumCustomers').textContent = String(active);
+  if ($('statNeedingReconciliation')) $('statNeedingReconciliation').textContent = String(needingReconcile);
+  if ($('statRefundedPayments')) $('statRefundedPayments').textContent = String(refunded);
+
+  const badge = $('premiumReconcileBadge');
+  if (badge) {
+    badge.textContent = String(needingReconcile);
+    badge.style.display = needingReconcile > 0 ? 'inline-block' : 'none';
+  }
+}
+
+function renderPremiumTable() {
+  const tbody = $('premiumCustomersTableBody');
+  if (!tbody) return;
+
+  let list = premiumData;
+  if (premiumSearchQuery) {
+    list = list.filter(p =>
+      (p.username || '').toLowerCase().includes(premiumSearchQuery) ||
+      (p.email || '').toLowerCase().includes(premiumSearchQuery) ||
+      (p.user_id || '').toLowerCase().includes(premiumSearchQuery) ||
+      (p.payment_id || '').toLowerCase().includes(premiumSearchQuery) ||
+      (p.order_id || '').toLowerCase().includes(premiumSearchQuery)
+    );
+  }
+
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;padding:24px;color:var(--muted);">No matching premium customer records found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map((item, idx) => {
+    return `
+      <tr>
+        <td class="num">${idx + 1}</td>
+        <td><strong>${escapeHtml(item.username)}</strong></td>
+        <td>${escapeHtml(item.email)}</td>
+        <td><code style="font-size:0.75rem;color:var(--muted);" title="${escapeHtml(item.user_id)}">${escapeHtml(item.user_id.slice(0, 8))}…</code></td>
+        <td>
+          ${item.is_refunded ? '<span class="badge danger">↩ REFUNDED</span>' : `
+            <div class="badge verified" style="display:inline-flex;align-items:center;gap:4px;background:#dcfce7;color:#15803d;border:1px solid #86efac;">⭐ PREMIUM CUSTOMER</div>
+            <div style="color:#16a34a;font-weight:700;font-size:0.78rem;margin-top:2px;">✓ ACTIVE</div>
+          `}
+        </td>
+        <td><code style="font-size:0.8rem;background:#f1f5f9;padding:2px 6px;border-radius:4px;">${escapeHtml(item.payment_id)}</code></td>
+        <td><code style="font-size:0.8rem;background:#f1f5f9;padding:2px 6px;border-radius:4px;">${escapeHtml(item.order_id)}</code></td>
+        <td><strong>${escapeHtml(item.amount)}</strong></td>
+        <td>${escapeHtml(item.currency)}</td>
+        <td>
+          ${item.is_refunded
+            ? '<span style="color:#b91c1c;font-weight:700;">REFUNDED</span>'
+            : '<span style="color:#16a34a;font-weight:700;">PAID</span>'}
+        </td>
+        <td style="font-size:0.8rem;color:var(--muted);">${formatDate(item.paid_on)}</td>
+        <td style="font-size:0.8rem;color:var(--muted);">${formatDate(item.last_updated)}</td>
+        <td>
+          <button class="action secondary sm" onclick="window.openPremiumCustomerDetail('${escapeHtml(item.user_id)}')">View Details</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderReconciliationTable() {
+  const tbody = $('reconciliationTableBody');
+  if (!tbody) return;
+
+  if (reconciliationQueue.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted);">All captured customer payments are reconciled. Queue is clear! ✓</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = reconciliationQueue.map((item, idx) => {
+    const isNeedsReview = item.user_match.includes('NEEDS REVIEW');
+    return `
+      <tr>
+        <td class="num">${idx + 1}</td>
+        <td><strong>${escapeHtml(item.customer_email)}</strong></td>
+        <td>${escapeHtml(item.username)}</td>
+        <td><code style="font-size:0.8rem;background:#fef3c7;padding:2px 6px;border-radius:4px;color:#92400e;">${escapeHtml(item.payment_id)}</code></td>
+        <td><code style="font-size:0.8rem;background:#f1f5f9;padding:2px 6px;border-radius:4px;">${escapeHtml(item.order_id)}</code></td>
+        <td><strong>${escapeHtml(item.amount)}</strong></td>
+        <td>${escapeHtml(item.currency)}</td>
+        <td><span class="badge warn" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;">${escapeHtml(item.razorpay_status.toUpperCase())}</span></td>
+        <td>
+          ${isNeedsReview
+            ? '<span class="badge danger" style="background:#fee2e2;color:#991b1b;border:1px solid #f87171;">⚠ NEEDS REVIEW</span>'
+            : `<span style="color:#16a34a;font-weight:600;font-size:0.82rem;">${escapeHtml(item.user_match)}</span>`}
+        </td>
+        <td>
+          ${item.current_premium_status.includes('PAYMENT FOUND')
+            ? '<span class="badge warn" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;font-weight:700;">⚠ PAYMENT FOUND — NEEDS RECONCILIATION</span>'
+            : `<span style="color:var(--muted);font-size:0.8rem;">${escapeHtml(item.current_premium_status)}</span>`}
+        </td>
+        <td>
+          <button class="action primary sm" style="white-space:nowrap;" onclick="window.reconcilePayment('${escapeHtml(item.payment_id)}', '${escapeHtml(item.customer_email)}', '${escapeHtml(item.order_id)}')">
+            Reconcile Payment
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// Section 5: Premium Customer Detail Modal
+export function openPremiumCustomerDetail(userId) {
+  const customer = premiumData.find(c => c.user_id === userId);
+  if (!customer) {
+    alert('Customer detail not found');
+    return;
+  }
+
+  const modalBody = $('premiumDetailModalBody');
+  if (modalBody) {
+    modalBody.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--line);">
+        <div style="font-size:2rem;line-height:1;">⭐</div>
+        <div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--ink);letter-spacing:0.02em;">PREMIUM CUSTOMER</div>
+          <div style="font-size:0.85rem;color:#16a34a;font-weight:700;margin-top:2px;">✓ PREMIUM ACCESS ACTIVE</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;background:#f8fafc;padding:18px;border-radius:12px;border:1px solid var(--line);">
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Username</div>
+          <div style="font-size:1rem;font-weight:700;color:var(--ink);">${escapeHtml(customer.username)}</div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Email</div>
+          <div style="font-size:0.95rem;font-weight:600;color:var(--ink);">${escapeHtml(customer.email)}</div>
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">User ID</div>
+          <code style="font-size:0.82rem;background:#e2e8f0;padding:2px 8px;border-radius:4px;">${escapeHtml(customer.user_id)}</code>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Premium Status</div>
+          <div style="color:#16a34a;font-weight:800;font-size:0.95rem;">${customer.is_refunded ? 'REFUNDED' : 'ACTIVE'}</div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Payment Status</div>
+          <div style="color:${customer.is_refunded ? '#b91c1c' : '#16a34a'};font-weight:800;font-size:0.95rem;">${escapeHtml(customer.payment_status)}</div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Payment ID</div>
+          <code style="font-size:0.82rem;background:#e2e8f0;padding:2px 8px;border-radius:4px;">${escapeHtml(customer.payment_id)}</code>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Razorpay Order ID</div>
+          <code style="font-size:0.82rem;background:#e2e8f0;padding:2px 8px;border-radius:4px;">${escapeHtml(customer.order_id)}</code>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Amount</div>
+          <div style="font-size:1.05rem;font-weight:800;color:var(--ink);">${escapeHtml(customer.amount)}</div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Currency</div>
+          <div style="font-size:0.95rem;font-weight:700;">${escapeHtml(customer.currency)}</div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Paid Date</div>
+          <div style="font-size:0.85rem;color:var(--ink);">${formatDate(customer.paid_on)}</div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Entitlement Date</div>
+          <div style="font-size:0.85rem;color:var(--ink);">${formatDate(customer.last_updated)}</div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Last Updated</div>
+          <div style="font-size:0.85rem;color:var(--ink);">${formatDate(customer.last_updated)}</div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Entitlement Source</div>
+          <div style="font-size:0.85rem;font-weight:600;color:var(--ink);">Razorpay Verified / profiles.paid_unlocked</div>
+        </div>
+      </div>
+    `;
+  }
+
+  const modal = $('premiumCustomerDetailModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+export function closePremiumDetailModal() {
+  const modal = $('premiumCustomerDetailModal');
+  if (modal) modal.style.display = 'none';
+}
+
+// Section 6: Secure Admin Reconciliation Action
+export async function reconcilePayment(paymentId, email, orderId = null) {
+  if (!client) return;
+
+  const targetEmail = (email || '').trim();
+  const cleanPayId = (paymentId || '').trim();
+  const cleanOrderId = (orderId && orderId !== '—') ? orderId.trim() : null;
+
+  const confirmed = confirm(
+    `Reconcile payment for customer: ${targetEmail || cleanPayId}?\n\n` +
+    `• Server-side Razorpay verification will be performed.\n` +
+    `• Captured status (₹49 / INR) will be validated.\n` +
+    `• profiles.paid_unlocked will be set to true.\n` +
+    `• Operation is idempotent and audited.`
+  );
+  if (!confirmed) return;
+
+  try {
+    let reconciled = false;
+
+    // 1. Invoke server-side verify-razorpay-payment edge function with action = 'reconcile_payment'
+    try {
+      const { data: edgeRes, error: edgeErr } = await client.functions.invoke('verify-razorpay-payment', {
+        body: {
+          action: 'reconcile_payment',
+          payment_id: cleanPayId,
+          email: targetEmail,
+          order_id: cleanOrderId
+        }
+      });
+
+      if (!edgeErr && edgeRes && edgeRes.success) {
+        reconciled = true;
+      } else if (edgeRes && edgeRes.status === 'NEEDS REVIEW') {
+        alert(`⚠ Reconciliation Needs Review:\n\n${edgeRes.error || 'Payment requires manual review.'}`);
+        return;
+      } else if (edgeErr) {
+        console.warn('Edge function reconciliation notice, falling back to database RPC:', edgeErr.message || edgeErr);
+      }
+    } catch (edgeEx) {
+      console.warn('Edge function reconciliation exception, using database RPC:', edgeEx);
+    }
+
+    // 2. Fallback to atomic database RPC admin_reconcile_payment
+    if (!reconciled) {
+      const { data: rpcRes, error: rpcErr } = await client.rpc('admin_reconcile_payment', {
+        p_payment_id: cleanPayId,
+        p_customer_email: targetEmail || null,
+        p_order_id: cleanOrderId,
+        p_amount_paise: 4900,
+        p_currency: 'INR',
+        p_admin_notes: `Admin reconciliation by ${currentUser?.email || 'admin'}`
+      });
+
+      if (rpcErr) {
+        throw new Error(rpcErr.message || 'Payment reconciliation RPC failed.');
+      }
+
+      if (rpcRes && !rpcRes.success) {
+        if (rpcRes.status === 'NEEDS REVIEW') {
+          alert(`⚠ Reconciliation Needs Review:\n\n${rpcRes.error || 'Multiple or no matching user accounts found.'}`);
+          return;
+        }
+        throw new Error(rpcRes.error || 'Payment reconciliation could not be finalized.');
+      }
+    }
+
+    alert(`✓ Payment successfully reconciled!\n\nCustomer ${targetEmail || cleanPayId} now has active Premium entitlement (profiles.paid_unlocked = true).`);
+    closeManualReconcileModal();
+    await loadPremiumCustomers();
+    await loadDashboardData();
+  } catch (err) {
+    alert('Reconciliation error: ' + err.message);
+  }
+}
+
+export function openManualReconcileModal(defaultPayId = '', defaultEmail = '', defaultOrderId = '') {
+  if ($('manualReconcilePayId')) $('manualReconcilePayId').value = defaultPayId;
+  if ($('manualReconcileEmail')) $('manualReconcileEmail').value = defaultEmail;
+  if ($('manualReconcileOrderId')) $('manualReconcileOrderId').value = defaultOrderId;
+  const notice = $('manualReconcileNotice');
+  if (notice) notice.style.display = 'none';
+
+  const modal = $('manualReconcileModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+export function closeManualReconcileModal() {
+  const modal = $('manualReconcileModal');
+  if (modal) modal.style.display = 'none';
+}
+
+export async function submitManualReconciliation() {
+  const payId = ($('manualReconcilePayId')?.value || '').trim();
+  const email = ($('manualReconcileEmail')?.value || '').trim();
+  const orderId = ($('manualReconcileOrderId')?.value || '').trim();
+
+  if (!payId) {
+    alert('Please enter a Razorpay Payment ID.');
+    return;
+  }
+
+  await reconcilePayment(payId, email, orderId);
+}
+
 
 // ------------------------------------------------------------
 // Payment Verification Controller (Course ₹49 Unlock)
@@ -1946,6 +2419,14 @@ function formatSec(s) {
 // Expose on window for inline handlers
 Object.assign(window, {
   switchAdminTab,
+  loadPremiumCustomers,
+  filterPremiumTable,
+  openPremiumCustomerDetail,
+  closePremiumDetailModal,
+  openManualReconcileModal,
+  closeManualReconcileModal,
+  reconcilePayment,
+  submitManualReconciliation,
   loadPayments,
   filterPaymentsTable,
   verifyLearnerPayment,

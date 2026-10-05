@@ -36,7 +36,7 @@ h1{font-size:1.4rem;margin:0;}
 .tab-btn.active{color:var(--primary);border-bottom-color:var(--primary);}
 
 #gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:40px 24px;text-align:center;color:var(--muted);}
-#dashboard[hidden],#gate[hidden],#contestsTabContent[hidden],#paymentsTabContent[hidden],#learnersTabContent[hidden]{display:none;}
+#dashboard[hidden],#gate[hidden],#contestsTabContent[hidden],#paymentsTabContent[hidden],#learnersTabContent[hidden],#premiumTabContent[hidden]{display:none;}
 
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;}
@@ -119,6 +119,7 @@ textarea.form-control{min-height:90px;font-family:inherit;}
     <!-- Top Navigation Tabs -->
     <nav class="admin-tab-nav">
       <button id="tabLearnersBtn" class="tab-btn active" onclick="window.switchAdminTab('learners')">📊 Learner Directory &amp; Progress</button>
+      <button id="tabPremiumBtn" class="tab-btn" onclick="window.switchAdminTab('premium')">⭐ Premium Customers <span id="premiumReconcileBadge" class="badge warn" style="display:none;margin-left:4px;">0</span></button>
       <button id="tabPaymentsBtn" class="tab-btn" onclick="window.switchAdminTab('payments')">💳 Payment Verification <span id="pendingPaymentsCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
       <button id="tabContestsBtn" class="tab-btn" onclick="window.switchAdminTab('contests')">🏆 Contest Management</button>
     </nav>
@@ -164,6 +165,96 @@ textarea.form-control{min-height:90px;font-family:inherit;}
           </thead>
           <tbody id="tbody"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Tab: ⭐ Premium Customers & Payment Reconciliation -->
+    <div id="premiumTabContent" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <h2 style="margin:0;font-size:1.25rem;">⭐ Premium Customers &amp; Payment Reconciliation</h2>
+          <div style="color:var(--muted);font-size:0.85rem;">Authoritative customer entitlement management, verified paid learners &amp; Razorpay payment reconciliation.</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="action secondary" onclick="window.loadPremiumCustomers()">Refresh Premium 🔄</button>
+          <button class="action primary" onclick="window.openManualReconcileModal()">+ Reconcile Payment</button>
+        </div>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="stats">
+        <div class="stat"><div class="num" id="statTotalPremiumCustomers" style="color:var(--gold);">0</div><div class="label">Total Premium Customers</div></div>
+        <div class="stat"><div class="num" id="statActivePremiumCustomers" style="color:var(--good);">0</div><div class="label">Active Premium Customers</div></div>
+        <div class="stat"><div class="num" id="statNeedingReconciliation" style="color:var(--warn);">0</div><div class="label">Payments Needing Reconciliation</div></div>
+        <div class="stat"><div class="num" id="statRefundedPayments" style="color:#b91c1c;">0</div><div class="label">Refunded / Invalid Payments</div></div>
+      </div>
+
+      <!-- Dedicated Section 1: ⭐ Premium Customers Table -->
+      <div class="panel" style="margin-bottom:24px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <h3 style="margin:0;font-size:1.05rem;">⭐ Premium Customers</h3>
+          <div class="controls" style="margin:0;">
+            <input type="text" id="premiumSearch" placeholder="Search username, email, ID…" oninput="window.filterPremiumTable()" />
+          </div>
+        </div>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="num">#</th>
+                <th>Username</th>
+                <th>Email</th>
+                <th>User ID</th>
+                <th>Premium Status</th>
+                <th>Payment ID</th>
+                <th>Razorpay Order ID</th>
+                <th>Amount</th>
+                <th>Currency</th>
+                <th>Payment Status</th>
+                <th>Paid On</th>
+                <th>Last Updated</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="premiumCustomersTableBody">
+              <tr><td colspan="13" style="text-align:center;padding:24px;color:var(--muted);">Loading premium customers…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Dedicated Section 2: ⚠ Payments Needing Reconciliation Table -->
+      <div class="panel" style="border:1px solid #f59e0b;background:#fffdfa;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <div>
+            <h3 style="margin:0;font-size:1.05rem;color:#b45309;">⚠ Payments Needing Reconciliation</h3>
+            <div style="font-size:0.8rem;color:var(--muted);margin-top:2px;">Captured Razorpay payments requiring server-side identity verification &amp; entitlement finalization.</div>
+          </div>
+        </div>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="num">#</th>
+                <th>Customer Email</th>
+                <th>Username</th>
+                <th>Razorpay Payment ID</th>
+                <th>Razorpay Order ID</th>
+                <th>Amount</th>
+                <th>Currency</th>
+                <th>Razorpay Status</th>
+                <th>Existing Supabase User Match</th>
+                <th>Current Premium Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="reconciliationTableBody">
+              <tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted);">Loading reconciliation queue…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -522,6 +613,54 @@ textarea.form-control{min-height:90px;font-family:inherit;}
     <div class="modal-footer">
       <button class="action secondary" onclick="window.closeResultsModal()">Close</button>
       <button id="btnPublishResultsModal" class="action success" onclick="window.publishContestResults()">Publish Results to Participants 📢</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 5: Premium Customer Detail Modal (Section 5) -->
+<div id="premiumCustomerDetailModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px;">
+    <div class="modal-header">
+      <h3 style="display:flex;align-items:center;gap:6px;margin:0;">⭐ PREMIUM CUSTOMER</h3>
+      <button class="modal-close" onclick="window.closePremiumDetailModal()">✕</button>
+    </div>
+    <div class="modal-body" id="premiumDetailModalBody">
+      <!-- Dynamically rendered -->
+    </div>
+    <div class="modal-footer">
+      <button class="action secondary" onclick="window.closePremiumDetailModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 6: Reconcile Payment Modal -->
+<div id="manualReconcileModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:540px;">
+    <div class="modal-header">
+      <h3 style="margin:0;">⚠ Reconcile Razorpay Payment</h3>
+      <button class="modal-close" onclick="window.closeManualReconcileModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:0.85rem;color:var(--muted);margin-bottom:14px;">
+        Perform server-side Razorpay verification and grant authoritative <code>profiles.paid_unlocked = true</code> entitlement for an application customer.
+      </div>
+      <div class="form-group">
+        <label>Razorpay Payment ID *</label>
+        <input type="text" id="manualReconcilePayId" class="form-control" placeholder="e.g. pay_xxxxxxxxxxxxxx" />
+      </div>
+      <div class="form-group">
+        <label>Customer Email (for identity matching)</label>
+        <input type="email" id="manualReconcileEmail" class="form-control" placeholder="e.g. sundar.developer07@gmail.com" />
+      </div>
+      <div class="form-group">
+        <label>Razorpay Order ID (optional)</label>
+        <input type="text" id="manualReconcileOrderId" class="form-control" placeholder="e.g. order_xxxxxxxxxxxxxx" />
+      </div>
+      <div id="manualReconcileNotice" style="display:none;padding:10px 12px;border-radius:8px;font-size:0.85rem;margin-top:10px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="action secondary" onclick="window.closeManualReconcileModal()">Cancel</button>
+      <button class="action primary" id="btnExecuteReconcile" onclick="window.submitManualReconciliation()">Verify &amp; Reconcile Payment ✓</button>
     </div>
   </div>
 </div>

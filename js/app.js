@@ -3,7 +3,7 @@ import {EMPTY, readProgress, saveProgress, mergeProgress, sanitize, nextTimestam
 import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
 import {renderSchemaCards} from './schema.js';
-import {escapeHtml} from './util.js';
+import {escapeHtml, getOAuthRedirectUrl} from './util.js';
 import {SqlEngineManager, loadBrowserPGlite} from './sql-evaluator.js?v=4';
 import {initContest, renderContestCard, closeContestModal} from './contest.js';
 
@@ -678,12 +678,12 @@ async function checkUserAccessStatus(userId) {
     const userEmail = activeUser?.email || '';
 
     // Helper to query the profile row from public.profiles using the current authenticated user ID
-    // Note: public.profiles does NOT contain paid_unlocked, contest_eligible, or completed_count
+    // Premium entitlement is authoritatively determined from profiles.paid_unlocked === true
     async function fetchProfile() {
       try {
         const { data, error } = await client
           .from('profiles')
-          .select('id, email, username, is_admin')
+          .select('id, email, username, is_admin, paid_unlocked')
           .eq('id', uid)
           .maybeSingle();
 
@@ -694,11 +694,11 @@ async function checkUserAccessStatus(userId) {
         console.warn('[Access] Profiles select exception:', ex);
       }
 
-      // Fallback: minimal columns (id, email)
+      // Fallback: minimal columns (id, email, paid_unlocked)
       try {
         const { data: minData, error: minErr } = await client
           .from('profiles')
-          .select('id, email')
+          .select('id, email, paid_unlocked')
           .eq('id', uid)
           .maybeSingle();
 
@@ -772,69 +772,44 @@ async function checkUserAccessStatus(userId) {
       showAccessCheckError('Could not verify account profile. Click Retry to check again.');
     }
 
-    // Use the existing public.contest_payments table to determine paid access for the signed-in user
-    try {
-      const { data: contestPayments, error: cPayErr } = await client
-        .from('contest_payments')
-        .select('*')
-        .eq('user_id', uid);
-
-      if (cPayErr) {
-        console.warn('[Access] contest_payments query notice:', cPayErr.message);
-      } else if (contestPayments && contestPayments.length > 0) {
-        const hasVerified = contestPayments.some(p => {
-          const s = String(p.status || '').toUpperCase();
-          return s === 'VERIFIED' || s === 'PAID';
-        });
-
-        if (hasVerified) {
-          isPaidUnlocked = true;
-          userPendingPayment = null;
-        } else {
-          const pending = contestPayments.find(p => String(p.status || '').toUpperCase() === 'PENDING');
-          if (pending) {
-            userPendingPayment = pending;
-          }
-        }
-      }
-    } catch (cPayEx) {
-      console.warn('[Access] contest_payments check exception:', cPayEx);
+    // 1. Authoritative Premium Entitlement: determined strictly from profiles.paid_unlocked === true
+    if (profile && profile.paid_unlocked === true) {
+      isPaidUnlocked = true;
+      userPendingPayment = null;
+    } else {
+      isPaidUnlocked = false;
     }
 
-    // Check payments table as fallback if not already unlocked
+    // 2. Check for pending payment submissions (for user feedback/status notice only)
     if (!isPaidUnlocked) {
       try {
-        const { data: payments, error: payErr } = await client
+        const { data: payments } = await client
           .from('payments')
           .select('*')
           .eq('user_id', uid)
           .order('submitted_at', { ascending: false })
           .limit(1);
 
-        if (payErr) {
-          console.warn('[Access] Payments query notice:', payErr.message);
-        } else if (payments && payments.length > 0) {
+        if (payments && payments.length > 0) {
           const latestPay = payments[0];
           const s = String(latestPay.status || '').toUpperCase();
-          if (s === 'VERIFIED' || s === 'PAID' || s === 'APPROVED') {
-            isPaidUnlocked = true;
-            userPendingPayment = null;
-          } else if (s === 'PENDING' && !userPendingPayment) {
+          if (s === 'PENDING') {
             userPendingPayment = latestPay;
           }
         }
       } catch (payEx) {
-        console.warn('[Access] Payments check exception:', payEx);
+        console.warn('[Access] Payments check notice:', payEx);
       }
     }
 
-    // After login or refresh: VERIFIED payment -> premium access unlocked automatically
+    // After login or refresh: if paid_unlocked === true -> premium access unlocked automatically
     // and the user must not see the ₹49 payment popup again.
     if (isPaidUnlocked) {
       closePaywallModal();
       updateGates();
       updateProgress();
       renderScenarioCatalog();
+      renderAuth();
     }
 
     const currentCompleted = getCompletedCount();
@@ -895,60 +870,39 @@ async function checkPaymentStatusSilently(isUserAction = false) {
   }
 
   try {
-    // 1. Authoritative check on public.contest_payments table
-    const { data: contestPayments, error: cPayErr } = await client
-      .from('contest_payments')
-      .select('*')
-      .eq('user_id', user.id);
+    // 1. Authoritative check on public.profiles.paid_unlocked
+    const { data: prof, error: profErr } = await client
+      .from('profiles')
+      .select('paid_unlocked')
+      .eq('id', user.id)
+      .maybeSingle();
 
-    if (!cPayErr && contestPayments && contestPayments.length > 0) {
-      const hasVerified = contestPayments.some(p => {
-        const s = String(p.status || '').toUpperCase();
-        return s === 'VERIFIED' || s === 'PAID';
-      });
-
-      if (hasVerified) {
-        isPaidUnlocked = true;
-        userPendingPayment = null;
-        stopPaymentPolling();
-        closePaywallModal();
-        updateGates();
-        updateProgress();
-        if (current) renderScenario();
-        renderScenarioCatalog();
-        updateAdminPortalVisibility();
-        return;
-      }
-
-      const pending = contestPayments.find(p => String(p.status || '').toUpperCase() === 'PENDING');
-      if (pending) {
-        userPendingPayment = pending;
-      }
+    if (!profErr && prof && prof.paid_unlocked === true) {
+      isPaidUnlocked = true;
+      userPendingPayment = null;
+      stopPaymentPolling();
+      closePaywallModal();
+      updateGates();
+      updateProgress();
+      if (current) renderScenario();
+      renderScenarioCatalog();
+      updateAdminPortalVisibility();
+      renderAuth();
+      return;
     }
 
-    // 2. Check latest payment in payments table
-    const { data: payments, error: payErr } = await client
+    // 2. Check latest payment in payments table for pending status notice only
+    const { data: payments } = await client
       .from('payments')
       .select('*')
       .eq('user_id', user.id)
       .order('submitted_at', { ascending: false })
       .limit(1);
 
-    if (!payErr && payments && payments.length > 0) {
+    if (payments && payments.length > 0) {
       const latest = payments[0];
       const s = String(latest.status || '').toUpperCase();
-      if (s === 'VERIFIED' || s === 'PAID' || s === 'APPROVED') {
-        isPaidUnlocked = true;
-        userPendingPayment = null;
-        stopPaymentPolling();
-        closePaywallModal();
-        updateGates();
-        updateProgress();
-        if (current) renderScenario();
-        renderScenarioCatalog();
-        updateAdminPortalVisibility();
-        return;
-      } else if (s === 'PENDING') {
+      if (s === 'PENDING') {
         userPendingPayment = latest;
       }
     }
@@ -2513,10 +2467,17 @@ function renderAuth() {
 
   const displayHandle = currentUsername ? `@${currentUsername}` : (user?.email || 'learner');
   const emailSub = currentUsername && user?.email ? ` <span style="font-size:0.85em;color:var(--muted);">(${escapeHtml(user.email)})</span>` : '';
-  $('authBox').innerHTML=user?'<div class="auth-row"><span>Signed in as <strong>'+escapeHtml(displayHandle)+'</strong>'+emailSub+'</span><button class="linkbtn" onclick="signOut()">Sign out</button></div>':'';
+  const premiumBadge = (user && isPaidUnlocked) ? ' <span class="premium-badge">⭐ PREMIUM</span>' : '';
+  $('authBox').innerHTML=user?'<div class="auth-row"><span>Signed in as <strong>'+escapeHtml(displayHandle)+'</strong>'+emailSub+premiumBadge+'</span><button class="linkbtn" onclick="signOut()">Sign out</button></div>':'';
   if($('authMessage'))$('authMessage').textContent=authNotice;
   $('importGuest').hidden=!user;
   $('importCloud').hidden=!user;
+
+  const headerBadge = $('headerPremiumBadge');
+  if (headerBadge) {
+    headerBadge.style.display = (user && isPaidUnlocked) ? 'inline-flex' : 'none';
+  }
+
   renderProfileAvatar();
 }
 
@@ -2716,10 +2677,11 @@ async function signInWithGoogle() {
   button.innerHTML=`<span>Connecting to Google…</span>`;
   authNotice='';if(message)message.textContent='';
   try {
+    const redirectUrl = getOAuthRedirectUrl();
     const {error}=await client.auth.signInWithOAuth({
       provider:'google',
       options:{
-        redirectTo:location.origin+location.pathname,
+        redirectTo:redirectUrl,
         queryParams:{prompt:'select_account'}
       }
     });
@@ -3145,7 +3107,13 @@ function renderProfileAvatar() {
   }
 
   const ddName = $('dropdownName');
-  if (ddName) ddName.textContent = info.name;
+  if (ddName) {
+    if (user && isPaidUnlocked) {
+      ddName.innerHTML = `${escapeHtml(info.name)} <span class="premium-badge" style="font-size:0.7rem;padding:1px 6px;">⭐ PREMIUM</span>`;
+    } else {
+      ddName.textContent = info.name;
+    }
+  }
 
   const ddEmail = $('dropdownEmail');
   if (ddEmail) ddEmail.textContent = info.email;
