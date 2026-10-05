@@ -16,6 +16,7 @@
     "express": "^5.2.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0"
+    "@playwright/test": "^1.63.0",
+    "supabase": "^2.119.0"
   }
 }

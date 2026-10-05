@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { finalizePayment } from '../_shared/payment-finalization.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -362,132 +363,16 @@ serve(async (req: Request) => {
       });
     }
 
-    // Finalize payment and grant entitlement idempotently
-    const nowIso = new Date().toISOString();
-    const isContestPayment = expectedPurpose !== 'course_unlock' && expectedPurpose !== 'premium_unlock';
-
-    // Try transactional RPC first
-    const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('finalize_razorpay_payment', {
-      p_order_id: persistedOrder.id,
-      p_payment_id: razorpay_payment_id,
-      p_user_id: user.id,
-      p_user_email: user.email || '',
-      p_purpose: expectedPurpose,
-      p_amount_paise: 4900,
-      p_currency: 'INR'
+    // Finalize payment through the shared, atomic payment finalization path.
+    await finalizePayment({
+      orderId: persistedOrder.id,
+      paymentId: razorpay_payment_id,
+      userId: user.id,
+      userEmail: user.email || '',
+      purpose: expectedPurpose,
+      amountPaise: 4900,
+      currency: 'INR',
     });
-
-    if (!rpcErr && rpcRes && rpcRes.success) {
-      return new Response(JSON.stringify({
-        success: true,
-        message: 'Payment verified and access unlocked successfully.',
-        status: 'verified',
-        user_id: user.id,
-        correlation_id: correlationId
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    if (rpcErr) {
-      console.warn(`[verify-razorpay-payment] [${correlationId}] RPC notice, using direct table operations:`, rpcErr.message || rpcErr);
-    }
-
-    // Direct table operations fallback
-    if (isContestPayment) {
-      const { error: cpayUpdateErr } = await supabaseAdmin
-        .from('contest_payments')
-        .upsert({
-          contest_id: expectedPurpose,
-          user_id: user.id,
-          amount: 49,
-          currency: 'INR',
-          status: 'VERIFIED',
-          payment_method: 'RAZORPAY',
-          transaction_ref: razorpay_payment_id,
-          verified_at: nowIso,
-          updated_at: nowIso
-        }, { onConflict: 'contest_id,user_id' });
-
-      if (cpayUpdateErr) {
-        console.error(`[verify-razorpay-payment] [${correlationId}] Failed to update contest_payments:`, cpayUpdateErr);
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'Failed to record contest payment in database',
-          code: 'DATABASE_ERROR',
-          correlation_id: correlationId
-        }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-    } else {
-      // Course unlock: update/insert in payments
-      const { error: payErr } = await supabaseAdmin
-        .from('payments')
-        .upsert({
-          user_id: user.id,
-          user_email: user.email || '',
-          amount: 49,
-          currency: 'INR',
-          payment_method: 'RAZORPAY',
-          transaction_reference: razorpay_payment_id,
-          status: 'verified',
-          submitted_at: nowIso,
-          verified_at: nowIso,
-          updated_at: nowIso
-        }, { onConflict: 'transaction_reference' });
-
-      if (payErr) {
-        // Try insert directly if onConflict column has no unique constraint
-        const { error: insErr } = await supabaseAdmin
-          .from('payments')
-          .insert({
-            user_id: user.id,
-            user_email: user.email || '',
-            amount: 49,
-            currency: 'INR',
-            payment_method: 'RAZORPAY',
-            transaction_reference: razorpay_payment_id,
-            status: 'verified',
-            submitted_at: nowIso,
-            verified_at: nowIso,
-            updated_at: nowIso
-          });
-
-        if (insErr) {
-          console.error(`[verify-razorpay-payment] [${correlationId}] Failed to record payment:`, insErr);
-          return new Response(JSON.stringify({
-            success: false,
-            error: 'Failed to record payment in database',
-            code: 'DATABASE_ERROR',
-            correlation_id: correlationId
-          }), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-      }
-
-      // Try updating profiles.paid_unlocked safely
-      try {
-        await supabaseAdmin
-          .from('profiles')
-          .update({ paid_unlocked: true, last_active: nowIso })
-          .eq('id', user.id);
-      } catch (_) {
-        // Safe ignore if column or trigger denies
-      }
-    }
-
-    // Update razorpay_orders record if exists
-    try {
-      await supabaseAdmin
-        .from('razorpay_orders')
-        .update({ status: 'paid', payment_id: razorpay_payment_id, updated_at: nowIso })
-        .eq('id', persistedOrder.id);
-    } catch (_) {}
 
     return new Response(JSON.stringify({
       success: true,
