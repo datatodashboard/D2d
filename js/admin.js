@@ -436,11 +436,10 @@ async function loadDashboardData() {
         return s > 0 ? `${d} (${s})` : d;
       }).join(', ') || 'None yet';
 
-      // Username, Name & email formatting
+      // Username & email formatting
       const username = p.username ? String(p.username).trim() : null;
-      const name = p.full_name || p.display_name || p.name || null;
       const email = p.email || null;
-      const displayName = username ? `@${username}` : (name || email || 'Anonymous Learner');
+      const displayName = username ? `@${username}` : (email || 'Anonymous Learner');
 
       // Last active date from profiles.last_active, progressRow.updated_at, or profiles.created_at
       const lastActivity = p.last_active || (progressRow?.updated_at ? new Date(progressRow.updated_at).getTime() : null) || p.created_at || null;
@@ -593,7 +592,7 @@ function renderLearnersTable() {
         </td>
         <td>
           <div class="learner-email" style="font-size:0.85rem;color:var(--ink);">
-            ${escapeHtml(emailDisplay)}${l.name && l.name !== l.email && l.name !== l.username ? ` <span style="color:var(--muted);font-size:0.78rem;">(${escapeHtml(l.name)})</span>` : ''}
+            ${escapeHtml(emailDisplay)}
           </div>
         </td>
         <td class="num">
@@ -764,7 +763,7 @@ export async function loadPremiumCustomers() {
 
   try {
     const [profRes, payRes, ordRes] = await Promise.all([
-      client.from('profiles').select('id, name, username, email, is_admin, paid_unlocked, created_at, last_active').limit(3000),
+      client.from('profiles').select('id, username, email, is_admin, paid_unlocked, created_at, last_active').limit(3000),
       client.from('payments').select('*').order('submitted_at', { ascending: false }),
       client.from('razorpay_orders').select('*').order('created_at', { ascending: false })
     ]);
@@ -777,15 +776,29 @@ export async function loadPremiumCustomers() {
     const paymentsByUserId = new Map();
     const paymentsByEmail = new Map();
     paymentsList.forEach(p => {
-      if (p.user_id && !paymentsByUserId.has(p.user_id)) paymentsByUserId.set(p.user_id, p);
-      if (p.user_email && !paymentsByEmail.has(p.user_email.toLowerCase())) paymentsByEmail.set(p.user_email.toLowerCase(), p);
+      if (p.user_id) {
+        if (!paymentsByUserId.has(p.user_id)) paymentsByUserId.set(p.user_id, []);
+        paymentsByUserId.get(p.user_id).push(p);
+      }
+      if (p.user_email) {
+        const em = p.user_email.toLowerCase();
+        if (!paymentsByEmail.has(em)) paymentsByEmail.set(em, []);
+        paymentsByEmail.get(em).push(p);
+      }
     });
 
     const ordersByUserId = new Map();
     const ordersByEmail = new Map();
     ordersList.forEach(o => {
-      if (o.user_id && !ordersByUserId.has(o.user_id)) ordersByUserId.set(o.user_id, o);
-      if (o.user_email && !ordersByEmail.has(o.user_email.toLowerCase())) ordersByEmail.set(o.user_email.toLowerCase(), o);
+      if (o.user_id) {
+        if (!ordersByUserId.has(o.user_id)) ordersByUserId.set(o.user_id, []);
+        ordersByUserId.get(o.user_id).push(o);
+      }
+      if (o.user_email) {
+        const em = o.user_email.toLowerCase();
+        if (!ordersByEmail.has(em)) ordersByEmail.set(em, []);
+        ordersByEmail.get(em).push(o);
+      }
     });
 
     const profilesByEmail = new Map();
@@ -799,13 +812,38 @@ export async function loadPremiumCustomers() {
     premiumData = profilesList
       .filter(p => p.paid_unlocked === true)
       .map(p => {
-        const pay = paymentsByUserId.get(p.id) || (p.email ? paymentsByEmail.get(p.email.toLowerCase()) : null);
-        const ord = ordersByUserId.get(p.id) || (p.email ? ordersByEmail.get(p.email.toLowerCase()) : null);
+        const userPays = [
+          ...(paymentsByUserId.get(p.id) || []),
+          ...(p.email ? paymentsByEmail.get(p.email.toLowerCase()) || [] : [])
+        ];
+        const uniquePaysMap = new Map();
+        userPays.forEach(pay => uniquePaysMap.set(pay.id, pay));
+        const uniquePays = Array.from(uniquePaysMap.values());
 
-        const isRefunded = pay && (String(pay.status || '').toLowerCase() === 'refunded');
+        const userOrds = [
+          ...(ordersByUserId.get(p.id) || []),
+          ...(p.email ? ordersByEmail.get(p.email.toLowerCase()) || [] : [])
+        ];
+        const uniqueOrdsMap = new Map();
+        userOrds.forEach(ord => uniqueOrdsMap.set(ord.id, ord));
+        const uniqueOrds = Array.from(uniqueOrdsMap.values());
+
+        const activePay = uniquePays.find(pay => {
+          const st = String(pay.status || '').toLowerCase();
+          return st === 'verified' || st === 'captured' || st === 'paid';
+        });
+        const refundedPay = uniquePays.find(pay => String(pay.status || '').toLowerCase() === 'refunded');
+
+        const activeOrd = uniqueOrds.find(ord => String(ord.status || '').toLowerCase() === 'paid' || ord.payment_id);
+
+        const pay = activePay || refundedPay || uniquePays[0] || null;
+        const ord = activeOrd || uniqueOrds[0] || null;
+
+        // Refunded users must not be treated as active premium customers unless they have another valid active payment
+        const isRefunded = !activePay && !activeOrd && !!refundedPay;
         const paymentStatus = isRefunded ? 'REFUNDED' : 'PAID';
 
-        const usernameDisplay = p.username || p.name || (p.email ? p.email.split('@')[0] : 'Learner');
+        const usernameDisplay = p.username || (p.email ? p.email.split('@')[0] : 'Learner');
         const formattedAmount = pay?.amount
           ? (pay.amount >= 100 && pay.amount % 100 === 0 ? `₹${pay.amount / 100}` : `₹${pay.amount}`)
           : (ord?.amount ? `₹${ord.amount / 100}` : '₹49');
@@ -836,15 +874,20 @@ export async function loadPremiumCustomers() {
       const isUnlocked = prof?.paid_unlocked === true;
       const s = String(p.status || '').toLowerCase();
 
+      // Users who are already premium must NOT appear in the reconciliation queue
       if (!isUnlocked && (s === 'pending' || s === 'captured' || s === 'paid' || s === 'verified')) {
-        const ord = (p.user_id ? ordersByUserId.get(p.user_id) : null) || (uEmail ? ordersByEmail.get(uEmail) : null);
+        const userOrds = [
+          ...(p.user_id ? ordersByUserId.get(p.user_id) || [] : []),
+          ...(uEmail ? ordersByEmail.get(uEmail) || [] : [])
+        ];
+        const ord = userOrds[0] || null;
         const amountDisplay = p.amount
           ? (p.amount >= 100 && p.amount % 100 === 0 ? `₹${p.amount / 100}` : `₹${p.amount}`)
           : '₹49';
 
         reconciliationQueue.push({
           customer_email: p.user_email || (prof?.email || '—'),
-          username: prof?.username || prof?.name || (p.user_email ? p.user_email.split('@')[0] : '—'),
+          username: prof?.username || (p.user_email ? p.user_email.split('@')[0] : '—'),
           payment_id: p.transaction_reference || p.payment_id || `pay_${p.id}`,
           order_id: ord?.id || p.order_id || '—',
           amount: amountDisplay,
@@ -869,7 +912,7 @@ export async function loadPremiumCustomers() {
       if (!isUnlocked && !alreadyQueued) {
         reconciliationQueue.push({
           customer_email: ord.user_email || (prof?.email || '—'),
-          username: prof?.username || prof?.name || (ord.user_email ? ord.user_email.split('@')[0] : '—'),
+          username: prof?.username || (ord.user_email ? ord.user_email.split('@')[0] : '—'),
           payment_id: ord.payment_id,
           order_id: ord.id || '—',
           amount: ord.amount ? `₹${ord.amount / 100}` : '₹49',
@@ -1210,7 +1253,7 @@ export async function loadPayments() {
   try {
     const [payRes, profRes] = await Promise.all([
       client.from('payments').select('*').order('submitted_at', { ascending: false }),
-      client.from('profiles').select('id, name, username, email').limit(2000)
+      client.from('profiles').select('id, username, email').limit(2000)
     ]);
 
     if (payRes.error) {
@@ -1235,7 +1278,7 @@ export async function loadPayments() {
       const prof = profileMap.get(p.user_id);
       return {
         ...p,
-        user_name: prof?.name || null,
+        user_name: null,
         user_username: prof?.username || null
       };
     });
@@ -1306,7 +1349,7 @@ function renderPaymentsTable() {
           ? `<div style="font-weight:600;color:#dc2626;">Rejected ${formatDate(p.verified_at || p.updated_at)}</div>${p.admin_notes ? `<div style="font-size:0.72rem;color:#b91c1c;margin-top:2px;">Reason: ${escapeHtml(p.admin_notes)}</div>` : ''}`
           : '<span style="color:#d97706;font-size:0.78rem;font-weight:600;">⏳ Match statement in bank / UPI</span>');
 
-    const displayName = p.user_name || (p.user_username ? `@${p.user_username}` : (p.user_email ? p.user_email.split('@')[0] : 'Learner'));
+    const displayName = p.user_username ? `@${p.user_username}` : (p.user_email ? p.user_email.split('@')[0] : 'Learner');
 
     return `
       <tr>
