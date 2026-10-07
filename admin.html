@@ -122,6 +122,7 @@ textarea.form-control{min-height:90px;font-family:inherit;}
       <button id="tabPremiumBtn" class="tab-btn" onclick="window.switchAdminTab('premium')">⭐ Premium Customers <span id="premiumReconcileBadge" class="badge warn" style="display:none;margin-left:4px;">0</span></button>
       <button id="tabPaymentsBtn" class="tab-btn" onclick="window.switchAdminTab('payments')">💳 Payment Verification <span id="pendingPaymentsCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
       <button id="tabContestsBtn" class="tab-btn" onclick="window.switchAdminTab('contests')">🏆 Contest Management</button>
+      <button id="tabNotificationsBtn" class="tab-btn" onclick="window.switchAdminTab('notifications')">📢 Notifications &amp; Announcements</button>
     </nav>
 
     <!-- Tab 1: Learner Directory & Progress -->
@@ -377,6 +378,49 @@ textarea.form-control{min-height:90px;font-family:inherit;}
               </tr>
             </thead>
             <tbody id="participantsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 5: 📢 Notifications & Announcements -->
+    <div id="notificationsTabContent" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <h2 style="margin:0;font-size:1.25rem;">📢 Admin Notifications &amp; Announcements</h2>
+          <div style="color:var(--muted);font-size:0.85rem;">Create, broadcast, and manage announcements, contest launches, and app updates for learners.</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="action primary" onclick="window.openNotificationEditor()">+ Create Notification</button>
+          <button class="action secondary" onclick="window.loadAdminNotifications()">Refresh 🔄</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="num" id="statTotalNotifications">0</div><div class="label">Total Notifications</div></div>
+        <div class="stat"><div class="num" id="statActiveNotifications" style="color:var(--good);">0</div><div class="label">Active Broadcasts</div></div>
+        <div class="stat"><div class="num" id="statContestNotifications" style="color:var(--primary);">0</div><div class="label">Contest Alerts</div></div>
+        <div class="stat"><div class="num" id="statUpdateNotifications" style="color:var(--warn);">0</div><div class="label">App Updates</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="num">#</th>
+                <th>Type</th>
+                <th>Title</th>
+                <th>Message Content</th>
+                <th>Target Destination</th>
+                <th>Status</th>
+                <th>Date Broadcasted</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adminNotificationsTableBody">
+              <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">Loading notifications…</td></tr>
+            </tbody>
           </table>
         </div>
       </div>
@@ -661,6 +705,48 @@ textarea.form-control{min-height:90px;font-family:inherit;}
     <div class="modal-footer">
       <button class="action secondary" onclick="window.closeManualReconcileModal()">Cancel</button>
       <button class="action primary" id="btnExecuteReconcile" onclick="window.submitManualReconciliation()">Verify &amp; Reconcile Payment ✓</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 7: Create / Edit Notification -->
+<div id="notificationEditorModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:580px;">
+    <div class="modal-header">
+      <h3 id="notifModalTitle">Create Notification</h3>
+      <button class="modal-close" onclick="window.closeNotificationEditor()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editNotifId" />
+      <div class="form-group">
+        <label>Notification Type *</label>
+        <select id="notifTypeInput" class="form-control">
+          <option value="announcement">📢 Important Announcement</option>
+          <option value="contest">🚀 Contest Launch</option>
+          <option value="update">✨ App Update / Feature</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Notification Title *</label>
+        <input type="text" id="notifTitleInput" class="form-control" placeholder="e.g. SQL Thinking Contest #2 Live" />
+      </div>
+      <div class="form-group">
+        <label>Notification Message *</label>
+        <textarea id="notifMessageInput" class="form-control" rows="3" placeholder="Enter message text for learners..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Target Action Destination</label>
+        <select id="notifTargetInput" class="form-control">
+          <option value="home">Home / Dashboard</option>
+          <option value="practice">Practice Screen</option>
+          <option value="progress">Progress &amp; Certificates</option>
+        </select>
+      </div>
+      <div id="notifEditorNotice" style="display:none;padding:10px 12px;border-radius:8px;font-size:0.85rem;margin-top:10px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="action secondary" onclick="window.closeNotificationEditor()">Cancel</button>
+      <button class="action primary" id="btnSaveAdminNotif" onclick="window.saveAdminNotification()">Broadcast Notification 📢</button>
     </div>
   </div>
 </div>

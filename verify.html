@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Credential Verification • Data2Dashboard (D2D)</title>
+  <link rel="icon" href="./icon-512.png" type="image/png">
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --primary: #2563eb;
+      --gold: #d97706;
+      --line: #e2e8f0;
+      --good: #16a34a;
+      --bad: #dc2626;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: inherit;
+    }
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+    }
+    .brand-name {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .main-wrap {
+      max-width: 640px;
+      width: 100%;
+      margin: 40px auto;
+      padding: 0 20px;
+      flex: 1;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.05);
+      padding: 28px;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 800;
+      margin-bottom: 6px;
+      letter-spacing: -0.4px;
+    }
+    .lead {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 22px;
+    }
+    .search-box {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus {
+      border-color: var(--primary);
+    }
+    button.btn-primary {
+      padding: 12px 20px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button.btn-primary:hover {
+      background: #1d4ed8;
+    }
+    .cert-result {
+      border-top: 1px solid var(--line);
+      padding-top: 24px;
+      margin-top: 10px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 18px;
+    }
+    .status-valid {
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+    .status-invalid {
+      background: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+    }
+    .field-row {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 14px;
+    }
+    .field-label {
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .field-val {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .field-val.gold {
+      color: var(--gold);
+      font-size: 20px;
+      font-family: Georgia, serif;
+    }
+    .footer {
+      text-align: center;
+      padding: 24px;
+      font-size: 12.5px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      background: var(--surface);
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <header class="header">
+    <a href="./index.html" class="brand-wrap">
+      <img src="./icon-512.png" alt="D2D Logo" class="brand-logo">
+      <div>
+        <div class="brand-name">Crack SQL</div>
+        <div class="brand-sub">Data2Dashboard (D2D)</div>
+      </div>
+    </a>
+    <a href="./index.html" style="font-size: 13.5px; font-weight: 700; color: var(--primary); text-decoration: none;">← Back to App</a>
+  </header>
+
+  <main class="main-wrap">
+    <div class="card">
+      <h1>Credential Verification</h1>
+      <p class="lead">Verify the authenticity of a scenario-based certification issued by Data2Dashboard (D2D).</p>
+
+      <form class="search-box" id="verifyForm" onsubmit="event.preventDefault(); verifyEnteredId();">
+        <input type="text" id="credentialInput" placeholder="Enter Credential ID (e.g. D2D-CSQL-BEG-2026-XXXXXX)" autocomplete="off" required>
+        <button type="submit" class="btn-primary" id="verifyBtn">Verify</button>
+      </form>
+
+      <div id="resultArea" class="cert-result" style="display: none;"></div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div>Data2Dashboard (D2D) • Crack SQL Learning Platform</div>
+    <div style="margin-top: 4px;">Public Credential Verification Service</div>
+  </footer>
+
+  <script>
+    const SUPABASE_URL = 'https://qklnaqfspvmnlequqagf.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_dthVX8zmvd1HvWaYWBaojA_2YbvHWe1';
+    let client = null;
+
+    try {
+      if (window.supabase) {
+        client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      }
+    } catch (e) {
+      console.warn('Supabase init warning:', e);
+    }
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function formatDate(dateStr) {
+      try {
+        const d = dateStr ? new Date(dateStr) : new Date();
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+      } catch (_) {
+        return dateStr || 'Verified';
+      }
+    }
+
+    async function verifyId(credId) {
+      const cleanId = String(credId || '').trim();
+      const resEl = document.getElementById('resultArea');
+      const inputEl = document.getElementById('credentialInput');
+      inputEl.value = cleanId;
+      if (!cleanId) return;
+
+      resEl.style.display = 'block';
+      resEl.innerHTML = '<div style="color:var(--muted);text-align:center;padding:20px;">Verifying credential with Data2Dashboard registry…</div>';
+
+      try {
+        let certData = null;
+
+        // 1. Try public RPC verify_certificate
+        if (client) {
+          try {
+            const { data, error } = await client.rpc('verify_certificate', { p_credential_id: cleanId });
+            if (!error && data && data.valid) {
+              certData = data;
+            } else if (data && data.valid === false) {
+              showNotFound();
+              return;
+            }
+          } catch (_) {}
+
+          // 2. Direct table fallback if RPC unavailable
+          if (!certData) {
+            const { data: row } = await client
+              .from('certificates')
+              .select('credential_id, recipient_name, domain, level, course_title, description, completed_at')
+              .ilike('credential_id', cleanId)
+              .maybeSingle();
+            if (row) {
+              certData = {
+                valid: true,
+                ...row,
+                issuer: 'Data2Dashboard (D2D)',
+                organization: 'Crack SQL Learning Platform'
+              };
+            }
+          }
+        }
+
+        // 3. Check local storage cache as offline fallback
+        if (!certData) {
+          try {
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (k && k.startsWith('cracksql_user_certificates_v1')) {
+                const list = JSON.parse(localStorage.getItem(k) || '[]');
+                const found = list.find(c => c.credential_id && c.credential_id.toLowerCase() === cleanId.toLowerCase());
+                if (found) {
+                  certData = { valid: true, ...found, issuer: 'Data2Dashboard (D2D)', organization: 'Crack SQL Learning Platform' };
+                  break;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (certData && certData.valid) {
+          resEl.innerHTML = `
+            <div class="status-badge status-valid">✓ Authentic &amp; Verified Credential</div>
+            <div class="field-row">
+              <div class="field-label">Recipient Name</div>
+              <div class="field-val gold">${escapeHtml(certData.recipient_name)}</div>
+            </div>
+            <div class="field-row">
+              <div class="field-label">Course Title</div>
+              <div class="field-val">${escapeHtml(certData.course_title)}</div>
+            </div>
+            <div class="field-row">
+              <div class="field-label">Domain &amp; Level</div>
+              <div class="field-val">${escapeHtml(certData.domain)} — ${escapeHtml(certData.level)} Level (20 Scenarios)</div>
+            </div>
+            <div class="field-row">
+              <div class="field-label">Date Awarded</div>
+              <div class="field-val">${formatDate(certData.completed_at)}</div>
+            </div>
+            <div class="field-row">
+              <div class="field-label">Credential ID</div>
+              <div class="field-val" style="font-family:monospace;font-size:14px;color:var(--primary);">${escapeHtml(certData.credential_id)}</div>
+            </div>
+            <div class="field-row">
+              <div class="field-label">Issuing Organization</div>
+              <div class="field-val" style="font-size:14px;">Data2Dashboard (D2D) • Crack SQL Learning Platform</div>
+            </div>
+          `;
+        } else {
+          showNotFound();
+        }
+      } catch (err) {
+        showNotFound();
+      }
+    }
+
+    function showNotFound() {
+      const resEl = document.getElementById('resultArea');
+      resEl.style.display = 'block';
+      resEl.innerHTML = `
+        <div class="status-badge status-invalid">⚠ Certificate not found</div>
+        <p style="font-size:14px;color:var(--ink);margin-bottom:8px;">The credential identifier entered does not match any certificate in the Data2Dashboard verified database.</p>
+        <p style="font-size:12.5px;color:var(--muted);">Please check the spelling of the ID (e.g. <code>D2D-CSQL-BEG-2026-XXXXXX</code>) and try again.</p>
+      `;
+    }
+
+    function verifyEnteredId() {
+      const val = document.getElementById('credentialInput').value;
+      verifyId(val);
+    }
+
+    // Auto-check on page load from URL parameters: ?id=... or ?verify=...
+    window.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      const credId = params.get('id') || params.get('verify');
+      if (credId) {
+        verifyId(credId);
+      }
+    });
+  </script>
+</body>
+</html>

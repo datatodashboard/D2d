@@ -5,7 +5,29 @@ import {createCloudSync} from './cloud.js';
 import {renderSchemaCards} from './schema.js';
 import {escapeHtml, getOAuthRedirectUrl} from './util.js';
 import {SqlEngineManager, loadBrowserPGlite} from './sql-evaluator.js?v=4';
-import {initContest, renderContestCard, closeContestModal} from './contest.js';
+import {initContest, renderContestCard, closeContestModal, getContestState} from './contest.js';
+import {
+  initNotificationsState,
+  getNotifications,
+  claimCertificateNotification,
+  markNotificationRead,
+  markAllNotificationsAsRead,
+  renderNotificationsUI
+} from './notifications.js';
+import {
+  CERTIFICATE_DOMAINS,
+  CERTIFICATE_LEVELS,
+  checkLevelCompletion,
+  getEarnedCertificates,
+  getAllCertificatesStatus,
+  generateCertificateSvg,
+  downloadCertificateImage,
+  printCertificate,
+  getLearnerDisplayName,
+  formatCertificateLevel,
+  formatCertificateDomain,
+  formatCompletionDate
+} from './certificate.js';
 
 const $ = id => document.getElementById(id);
 let data, scenarios=[], ids=new Set(), state=EMPTY(), current=null, user=null;
@@ -100,8 +122,11 @@ const cloud=createCloudSync({
 });
 function persist(sync=true, immediateSync=true) {
   const saved=saveProgress(storage,user?.id,state);
-  if(!saved) $('syncStatus').textContent='Browser storage is unavailable. Keep this page open; local progress cannot be saved.';
-  else if(!user) $('syncStatus').textContent='Guest progress saved on this device.';
+  if(!saved) {
+    if ($('syncStatus')) $('syncStatus').textContent='Browser storage is unavailable. Keep this page open; local progress cannot be saved.';
+  } else if(!user) {
+    if ($('syncStatus')) $('syncStatus').textContent='Guest progress saved on this device.';
+  }
   if(sync && user && client) {
     clearTimeout(syncTimer);
     if (immediateSync) {
@@ -180,6 +205,18 @@ function updateProgress() {
     }
   }
   renderProgressScreen();
+  updateNotificationsUI();
+}
+
+function updateNotificationsUI() {
+  const contestState = typeof getContestState === 'function' ? getContestState() : null;
+  renderNotificationsUI({
+    scenarios,
+    state,
+    user,
+    currentUsername,
+    activeContest: contestState?.contest || null
+  });
 }
 function renderAssessment(result) {
   $('feedback').classList.toggle('active', !!result);
@@ -1720,6 +1757,15 @@ function openMotivationPopup(score) {
       nextBtn.hidden = false;
       nextBtn.style.display = 'inline-flex';
       nextBtn.disabled = false;
+
+      // Check if this completion marks all 20 scenarios complete in this domain and level
+      const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
+      const isLevelComplete = pool.length > 0 && pool.every(s => isCompleted(s, state.entries[s.id]));
+      if (isLevelComplete) {
+        nextBtn.innerHTML = `<span>Complete Level & View Certificate</span> <span class="btn-icon">🏆</span>`;
+      } else {
+        nextBtn.innerHTML = `<span>Next Scenario</span> <span class="btn-icon">→</span>`;
+      }
     } else {
       nextBtn.hidden = true;
       nextBtn.style.display = 'none';
@@ -1763,9 +1809,9 @@ function nextScenario() {
     return;
   }
 
-  const pool=scenarios.filter(s=>s.domain===selectedDomain&&s.level===selectedLevel);
+  const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
   if (!pool.length) return;
-  const currentIndex = pool.findIndex(s=>s.id===current.id);
+  const currentIndex = pool.findIndex(s => s.id === current.id);
   let next = null;
   for (let i = 1; i < pool.length; i++) {
     const candidate = pool[(currentIndex + i) % pool.length];
@@ -1776,11 +1822,195 @@ function nextScenario() {
       break;
     }
   }
+
+  // LEVEL COMPLETION: If all 20 scenarios are completed, DO NOT reset to Question 1!
+  // Permanently mark domain/level completed and display the achievement screen.
   if (!next) {
-    next = pool[(currentIndex + 1) % pool.length];
+    const allCompleted = pool.every(s => isCompleted(s, state.entries[s.id]));
+    if (allCompleted) {
+      openLevelCompletionModal(selectedDomain, selectedLevel);
+      return;
+    }
+    next = pool.find(s => !isCompleted(s, state.entries[s.id]));
+    if (!next) {
+      openLevelCompletionModal(selectedDomain, selectedLevel);
+      return;
+    }
   }
-  current=next;
+
+  current = next;
   renderScenario();
+}
+
+let currentCertificateTarget = null;
+
+function openLevelCompletionModal(domain, level) {
+  closeMotivationModal();
+  domain = domain || selectedDomain || 'Banking';
+  level = level || selectedLevel || 'Beginner';
+  
+  const status = checkLevelCompletion(domain, level, scenarios, state);
+  const learnerName = getLearnerDisplayName(user, currentUsername);
+  
+  currentCertificateTarget = {
+    domain,
+    level,
+    userName: learnerName,
+    completionDate: status.completionDate || formatCompletionDate(Date.now())
+  };
+
+  const modal = $('levelCompletionModal');
+  if (!modal) return;
+
+  if ($('levelCompletionTitle')) {
+    $('levelCompletionTitle').textContent = `${level} Level Completed`;
+  }
+  if ($('levelCompletionSubtitle')) {
+    $('levelCompletionSubtitle').textContent = `You have successfully completed all 20 scenarios in ${domain}.`;
+  }
+  if ($('levelCompletionDomainVal')) {
+    $('levelCompletionDomainVal').textContent = domain;
+  }
+  if ($('levelCompletionDateVal')) {
+    $('levelCompletionDateVal').textContent = currentCertificateTarget.completionDate;
+  }
+
+  // Setup Next Level buttons
+  const navRow = $('levelCompletionNavRow');
+  if (navRow) {
+    if (level === 'Beginner') {
+      navRow.innerHTML = `
+        <button class="action primary" style="width:100%;padding:11px;font-size:14px;font-weight:700;" onclick="startNextLevel('${domain}','Intermediate')">
+          Start Intermediate Level →
+        </button>
+      `;
+    } else if (level === 'Intermediate') {
+      navRow.innerHTML = `
+        <button class="action primary" style="width:100%;padding:11px;font-size:14px;font-weight:700;" onclick="startNextLevel('${domain}','Expert')">
+          Start Expert Level →
+        </button>
+      `;
+    } else if (level === 'Expert') {
+      const begComp = checkLevelCompletion(domain, 'Beginner', scenarios, state).isCompleted;
+      const intComp = checkLevelCompletion(domain, 'Intermediate', scenarios, state).isCompleted;
+      const allThreeDone = begComp && intComp;
+
+      if (allThreeDone) {
+        navRow.innerHTML = `
+          <div style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 14px;border-radius:12px;font-size:13.5px;font-weight:700;">
+            🌟 All three levels completed in ${domain}!
+          </div>
+        `;
+      } else {
+        const remaining = [];
+        if (!begComp) remaining.push(`<button class="action secondary" style="flex:1;padding:9px;font-size:13px;" onclick="startNextLevel('${domain}','Beginner')">Start Beginner</button>`);
+        if (!intComp) remaining.push(`<button class="action secondary" style="flex:1;padding:9px;font-size:13px;" onclick="startNextLevel('${domain}','Intermediate')">Start Intermediate</button>`);
+        navRow.innerHTML = `
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Remaining levels in ${domain}:</div>
+          <div style="display:flex;gap:8px;">${remaining.join('')}</div>
+        `;
+      }
+    }
+  }
+
+  modal.hidden = false;
+}
+
+function closeLevelCompletionModal() {
+  const modal = $('levelCompletionModal');
+  if (modal) modal.hidden = true;
+}
+
+function handleViewCertificateFromAchievement() {
+  closeLevelCompletionModal();
+  if (currentCertificateTarget) {
+    openCertificateModal(currentCertificateTarget);
+  }
+}
+
+function handleDownloadCertificateFromAchievement() {
+  if (currentCertificateTarget) {
+    void handleDownloadCertificatePng();
+  }
+}
+
+function startNextLevel(domain, level) {
+  closeLevelCompletionModal();
+  selectedDomain = domain;
+  selectedLevel = level;
+  document.querySelectorAll('.domain').forEach(x => {
+    x.classList.toggle('active', x.textContent.includes(domain));
+  });
+  document.querySelectorAll('.level').forEach(x => {
+    x.classList.toggle('active', x.textContent.trim() === level);
+  });
+  loadScenario();
+  showScreen('practice');
+}
+
+function handlePracticeAgain() {
+  closeLevelCompletionModal();
+  // Keep the learner on practice screen preserving earned progress
+  showScreen('practice');
+}
+
+function openCertificateModal(certData) {
+  if (!certData) {
+    const learnerName = getLearnerDisplayName(user, currentUsername);
+    const status = checkLevelCompletion(selectedDomain, selectedLevel, scenarios, state);
+    certData = {
+      domain: selectedDomain || 'Banking',
+      level: selectedLevel || 'Beginner',
+      userName: learnerName,
+      completionDate: status.completionDate || formatCompletionDate(Date.now())
+    };
+  }
+
+  currentCertificateTarget = certData;
+
+  const modal = $('certificateModal');
+  if (!modal) return;
+
+  if ($('certModalHeading')) {
+    $('certModalHeading').textContent = `Certificate of Completion — ${certData.domain} (${certData.level})`;
+  }
+
+  const previewCard = $('certPreviewCard');
+  if (previewCard) {
+    previewCard.innerHTML = generateCertificateSvg(certData);
+  }
+
+  modal.hidden = false;
+}
+
+function closeCertificateModal() {
+  const modal = $('certificateModal');
+  if (modal) modal.hidden = true;
+}
+
+async function handleDownloadCertificatePng() {
+  if (!currentCertificateTarget) return;
+  const btn = $('certDownloadPngBtn');
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>Generating PNG...</span>';
+  }
+  try {
+    await downloadCertificateImage(currentCertificateTarget);
+  } catch (err) {
+    console.error('Failed to download certificate image:', err);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+  }
+}
+
+function handlePrintCertificatePdf() {
+  if (!currentCertificateTarget) return;
+  printCertificate(currentCertificateTarget);
 }
 
 let currentActiveScreen = 'home';
@@ -2291,6 +2521,57 @@ function renderProgressScreen() {
       </div>
     `;
   }
+
+  renderCertificatesSection();
+}
+
+function renderCertificatesSection() {
+  const allCerts = getAllCertificatesStatus(scenarios, state, user, currentUsername);
+  const earnedCerts = allCerts.filter(c => c.isCompleted);
+
+  if ($('earnedCertificatesBadge')) {
+    $('earnedCertificatesBadge').textContent = `${earnedCerts.length} / 21 Earned`;
+  }
+
+  const grid = $('certificatesGrid');
+  if (!grid) return;
+
+  grid.innerHTML = allCerts.map(c => {
+    const isEarned = c.isCompleted;
+    const cardClass = isEarned ? 'cert-card-item earned' : 'cert-card-item';
+    const icon = isEarned ? '🏆' : '🔒';
+    const statusText = isEarned
+      ? `Completed 20/20 • Awarded ${c.completionDate}`
+      : `${c.completedCount} / 20 Scenarios Completed`;
+
+    const actions = isEarned ? `
+      <button class="action primary sm" style="padding:6px 12px;font-size:12px;font-weight:700;" onclick="viewCertificate('${c.domain}','${c.level}','${c.completionDate}')">
+        View Certificate
+      </button>
+      <button class="action secondary sm" style="padding:6px 10px;font-size:12px;" onclick="downloadCertificateDirect('${c.domain}','${c.level}','${c.completionDate}')" title="Download High-Res PNG">
+        📥 Download
+      </button>
+    ` : `
+      <button class="ghost-btn-sm" style="padding:6px 12px;font-size:12px;color:var(--primary);font-weight:700;" onclick="practiceDomainAndLevel('${c.domain}','${c.level}')">
+        Continue Practice →
+      </button>
+    `;
+
+    return `
+      <div class="${cardClass}">
+        <div class="cert-card-header">
+          <div>
+            <div class="cert-card-domain">${icon} ${escapeHtml(c.domain)}</div>
+            <div class="cert-card-status">${statusText}</div>
+          </div>
+          <span class="cert-card-level-badge">${c.level}</span>
+        </div>
+        <div class="cert-card-actions">
+          ${actions}
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 function filterProgressDomain() {}
@@ -2460,7 +2741,7 @@ async function importCloudHistory() {
     persist();updateProgress();if(current)renderScenario();
   } catch {if(owner===user?.id)alert('Earlier account history could not be fetched. Your current progress is unchanged.');}
 }
-function retrySync() {if(user&&client)cloud.request();else $('syncStatus').textContent='Sign in to sync. Guest practice is saved only on this device.';}
+function retrySync() {if(user&&client)cloud.request();else if($('syncStatus'))$('syncStatus').textContent='Sign in to sync. Guest practice is saved only on this device.';}
 function renderAuth() {
   const loginMsg = $('loginErrorMessage');
   if (loginMsg && authNotice) loginMsg.textContent = authNotice;
@@ -2470,8 +2751,8 @@ function renderAuth() {
   const premiumBadge = (user && isPaidUnlocked) ? ' <span class="premium-badge">⭐ PREMIUM</span>' : '';
   $('authBox').innerHTML=user?'<div class="auth-row"><span>Signed in as <strong>'+escapeHtml(displayHandle)+'</strong>'+emailSub+premiumBadge+'</span><button class="linkbtn" onclick="signOut()">Sign out</button></div>':'';
   if($('authMessage'))$('authMessage').textContent=authNotice;
-  $('importGuest').hidden=!user;
-  $('importCloud').hidden=!user;
+  if($('importGuest'))$('importGuest').hidden=!user;
+  if($('importCloud'))$('importCloud').hidden=!user;
 
   const headerBadge = $('headerPremiumBadge');
   if (headerBadge) {
@@ -2614,6 +2895,9 @@ async function setSession(session) {
     // 1. Load user's existing progress from Supabase
     await loadAndRestoreUserProgress(user.id);
     if (currentAuthToken !== authSessionCounter) return;
+
+    initNotificationsState(user.id);
+    updateNotificationsUI();
 
     // 2. Authoritative server admin check (awaited before rendering gated features)
     const adminCheckResult = await checkAdminStatus();
@@ -3186,6 +3470,11 @@ function openProfileModal() {
     $('modalProfileSync').style.color = info.isLoggedIn ? '#166534' : '#64748b';
   }
 
+  const earnedCerts = getEarnedCertificates(scenarios, state, user, currentUsername);
+  if ($('modalProfileCertificates')) {
+    $('modalProfileCertificates').textContent = `${earnedCerts.length} / 21 Earned`;
+  }
+
   const authBtn = $('modalAuthActionBtn');
   if (authBtn) {
     authBtn.textContent = info.isLoggedIn ? 'Sign Out' : 'Sign in with Google';
@@ -3327,20 +3616,118 @@ function openAdminPortal() {
   window.location.href = new URL('admin.html', loc.href).href;
 }
 
+function toggleNotificationsDropdown(event) {
+  if (event) event.stopPropagation();
+  closeProfileDropdown();
+  const dropdown = $('notificationsDropdown');
+  if (!dropdown) return;
+  const isHidden = dropdown.hidden;
+  dropdown.hidden = !isHidden;
+  const btn = $('notificationsBtn');
+  if (btn) btn.setAttribute('aria-expanded', String(isHidden));
+  if (isHidden) {
+    updateNotificationsUI();
+  }
+}
+
+function closeNotificationsDropdown() {
+  const dropdown = $('notificationsDropdown');
+  if (dropdown && !dropdown.hidden) {
+    dropdown.hidden = true;
+    const btn = $('notificationsBtn');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function markAllNotificationsRead() {
+  const contestState = typeof getContestState === 'function' ? getContestState() : null;
+  const list = getNotifications({
+    scenarios,
+    state,
+    user,
+    currentUsername,
+    activeContest: contestState?.contest || null
+  });
+  markAllNotificationsAsRead(list);
+  updateNotificationsUI();
+}
+
+function handleNotificationAction(notifId, type, domain, level, completionDate) {
+  if (type === 'certificate') {
+    claimCertificateNotification(notifId);
+    updateNotificationsUI();
+    closeNotificationsDropdown();
+    const learnerName = getLearnerDisplayName(user, currentUsername);
+    openCertificateModal({
+      domain: domain || 'Banking',
+      level: level || 'Beginner',
+      userName: learnerName,
+      completionDate: completionDate || formatCompletionDate(Date.now())
+    });
+  } else if (type === 'contest') {
+    markNotificationRead(notifId);
+    updateNotificationsUI();
+    closeNotificationsDropdown();
+    showScreen('home');
+    const contestCard = $('contestInvitationCard') || $('contestWaitingCard');
+    if (contestCard) contestCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    markNotificationRead(notifId);
+    updateNotificationsUI();
+    closeNotificationsDropdown();
+    showScreen('progressScreen');
+  }
+}
+
 document.addEventListener('click', event => {
   const container = $('profileContainer');
   if (container && !container.contains(event.target)) {
     closeProfileDropdown();
+  }
+  const notifContainer = $('notificationsContainer');
+  if (notifContainer && !notifContainer.contains(event.target)) {
+    closeNotificationsDropdown();
   }
 });
 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     closeProfileDropdown();
+    closeNotificationsDropdown();
     closeProfileModal();
     closeMotivationModal();
+    closeCertificateModal();
+    closeLevelCompletionModal();
   }
 });
+
+// Global helpers for certificate interactions
+window.viewCertificate = (domain, level, completionDate) => {
+  const learnerName = getLearnerDisplayName(user, currentUsername);
+  openCertificateModal({
+    domain,
+    level,
+    userName: learnerName,
+    completionDate: completionDate || formatCompletionDate(Date.now())
+  });
+};
+
+window.downloadCertificateDirect = (domain, level, completionDate) => {
+  const learnerName = getLearnerDisplayName(user, currentUsername);
+  currentCertificateTarget = {
+    domain,
+    level,
+    userName: learnerName,
+    completionDate: completionDate || formatCompletionDate(Date.now())
+  };
+  void downloadCertificateImage(currentCertificateTarget);
+};
+
+window.practiceDomainAndLevel = (domain, level) => {
+  practiceDomain(domain);
+  const lvlIndex = level === 'Beginner' ? 1 : level === 'Intermediate' ? 2 : 3;
+  selectLevel(level, document.querySelector(`.level:nth-child(${lvlIndex})`));
+};
 
 Object.assign(window,{
   selectDomain,selectLevel,evaluatePlan,evaluateSql,nextScenario,goHome,
@@ -3358,10 +3745,20 @@ Object.assign(window,{
   saveFirstTimeUsername,validateUsernameField,closeUsernameModal,
   checkAdminStatus,retryUserAccessCheck,
   openMotivationPopup,closeMotivationModal,handleMotivationRetry,handleMotivationNext,
+  openLevelCompletionModal,closeLevelCompletionModal,
+  handleViewCertificateFromAchievement,handleDownloadCertificateFromAchievement,
+  startNextLevel,handlePracticeAgain,
+  openCertificateModal,closeCertificateModal,
+  handleDownloadCertificatePng,handlePrintCertificatePdf,
+  renderCertificatesSection,
+  checkLevelCompletion,getEarnedCertificates,getAllCertificatesStatus,
+  toggleNotificationsDropdown,closeNotificationsDropdown,markAllNotificationsRead,handleNotificationAction,
+  updateNotificationsUI,
   sqlEngineManager
 });
 try {
   initLandscapeMode();
+  initNotificationsState(null);
   renderProfileAvatar();
   const response=await fetch('./data/scenarios.json');
   if(!response.ok)throw Error('Scenario download failed');
@@ -3429,6 +3826,6 @@ try {
   void initAuth();
   if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 } catch(error) {
-  $('syncStatus').textContent='Could not load exercises. Reconnect and reload this page.';
+  if ($('syncStatus')) $('syncStatus').textContent='Could not load exercises. Reconnect and reload this page.';
   console.error(error);
 }

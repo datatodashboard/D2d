@@ -569,7 +569,7 @@ function renderLearnersTable() {
 
     const emailDisplay = (l.email && l.email !== '—') ? l.email : 'No email';
 
-    const isNeedsReconcile = !l.paidUnlocked && ((l.email || '').toLowerCase() === 'sundar.developer07@gmail.com' || (paymentsData && paymentsData.some(p => (p.user_email || '').toLowerCase() === (l.email || '').toLowerCase() && (p.status === 'pending' || p.status === 'captured'))));
+    const isNeedsReconcile = !l.paidUnlocked && (paymentsData && paymentsData.some(p => (p.user_email || '').toLowerCase() === (l.email || '').toLowerCase() && (p.status === 'pending' || p.status === 'captured')));
 
     const paidBadge = l.paidUnlocked 
       ? '<span class="badge verified" style="display:inline-flex;align-items:center;gap:4px;background:#dcfce7;color:#15803d;border:1px solid #86efac;">⭐ PREMIUM CUSTOMER</span> <span style="color:#16a34a;font-weight:700;font-size:0.75rem;">✓ ACTIVE</span>' 
@@ -727,16 +727,19 @@ export function switchAdminTab(tab) {
   const isPremium = tab === 'premium';
   const isPayments = tab === 'payments';
   const isContests = tab === 'contests';
+  const isNotifications = tab === 'notifications';
 
   if ($('learnersTabContent')) $('learnersTabContent').hidden = !isLearners;
   if ($('premiumTabContent')) $('premiumTabContent').hidden = !isPremium;
   if ($('paymentsTabContent')) $('paymentsTabContent').hidden = !isPayments;
   if ($('contestsTabContent')) $('contestsTabContent').hidden = !isContests;
+  if ($('notificationsTabContent')) $('notificationsTabContent').hidden = !isNotifications;
 
   if ($('tabLearnersBtn')) $('tabLearnersBtn').classList.toggle('active', isLearners);
   if ($('tabPremiumBtn')) $('tabPremiumBtn').classList.toggle('active', isPremium);
   if ($('tabPaymentsBtn')) $('tabPaymentsBtn').classList.toggle('active', isPayments);
   if ($('tabContestsBtn')) $('tabContestsBtn').classList.toggle('active', isContests);
+  if ($('tabNotificationsBtn')) $('tabNotificationsBtn').classList.toggle('active', isNotifications);
 
   if (tab === 'contests') {
     void loadContests();
@@ -744,6 +747,8 @@ export function switchAdminTab(tab) {
     void loadPayments();
   } else if (tab === 'premium') {
     void loadPremiumCustomers();
+  } else if (tab === 'notifications') {
+    void loadAdminNotifications();
   }
 }
 
@@ -800,89 +805,76 @@ export async function loadPremiumCustomers() {
         const isRefunded = pay && (String(pay.status || '').toLowerCase() === 'refunded');
         const paymentStatus = isRefunded ? 'REFUNDED' : 'PAID';
 
-        const usernameDisplay = p.username || (p.email && p.email.toLowerCase().includes('sriramgokul') ? 'Ramgokul' : (p.name || (p.email ? p.email.split('@')[0] : 'Learner')));
+        const usernameDisplay = p.username || p.name || (p.email ? p.email.split('@')[0] : 'Learner');
+        const formattedAmount = pay?.amount
+          ? (pay.amount >= 100 && pay.amount % 100 === 0 ? `₹${pay.amount / 100}` : `₹${pay.amount}`)
+          : (ord?.amount ? `₹${ord.amount / 100}` : '₹49');
 
         return {
           user_id: p.id,
           username: usernameDisplay,
           email: p.email || '—',
           paid_unlocked: true,
-          payment_id: pay?.transaction_reference || ord?.payment_id || 'pay_live_captured',
-          order_id: ord?.id || pay?.transaction_reference || 'order_course_unlock',
-          amount: pay?.amount ? `₹${pay.amount}` : '₹49',
-          currency: pay?.currency || 'INR',
+          payment_id: pay?.transaction_reference || pay?.payment_id || ord?.payment_id || '—',
+          order_id: ord?.id || pay?.order_id || '—',
+          amount: formattedAmount,
+          currency: pay?.currency || ord?.currency || 'INR',
           payment_status: paymentStatus,
           is_refunded: isRefunded,
           paid_on: pay?.submitted_at || pay?.created_at || ord?.created_at || p.created_at || '—',
-          last_updated: p.last_active || pay?.updated_at || '—'
+          last_updated: p.last_active || pay?.updated_at || p.created_at || '—'
         };
       });
-
-    // Ensure example premium customer (sriramgokul6666@gmail.com) is recognized if not yet in database
-    const hasRamgokul = premiumData.some(p => (p.email || '').toLowerCase() === 'sriramgokul6666@gmail.com');
-    if (!hasRamgokul) {
-      const ramProfile = profilesByEmail.get('sriramgokul6666@gmail.com');
-      const ramPay = paymentsByEmail.get('sriramgokul6666@gmail.com');
-      const ramOrd = ordersByEmail.get('sriramgokul6666@gmail.com');
-      premiumData.unshift({
-        user_id: ramProfile?.id || 'usr_ramgokul_premium',
-        username: ramProfile?.username || 'Ramgokul',
-        email: 'sriramgokul6666@gmail.com',
-        paid_unlocked: true,
-        payment_id: ramPay?.transaction_reference || 'pay_ramgokul_captured49',
-        order_id: ramOrd?.id || 'order_ramgokul_course',
-        amount: '₹49',
-        currency: 'INR',
-        payment_status: 'PAID',
-        is_refunded: false,
-        paid_on: ramPay?.submitted_at || new Date(Date.now() - 86400000 * 2).toISOString(),
-        last_updated: ramProfile?.last_active || new Date().toISOString()
-      });
-    }
 
     // 2. Build Reconciliation Queue (payments captured/found where paid_unlocked is NOT true)
     reconciliationQueue = [];
 
-    // Check known example customer: sundar.developer07@gmail.com
-    const sundarProfile = profilesByEmail.get('sundar.developer07@gmail.com');
-    const sundarUnlocked = sundarProfile?.paid_unlocked === true;
-
-    if (!sundarUnlocked) {
-      const sundarPay = paymentsByEmail.get('sundar.developer07@gmail.com');
-      const sundarOrd = ordersByEmail.get('sundar.developer07@gmail.com');
-      reconciliationQueue.push({
-        customer_email: 'sundar.developer07@gmail.com',
-        username: sundarProfile?.username || 'sundar.developer07',
-        payment_id: sundarPay?.transaction_reference || 'pay_sundar_captured49',
-        order_id: sundarOrd?.id || '—',
-        amount: '₹49',
-        currency: 'INR',
-        razorpay_status: 'captured',
-        user_match: sundarProfile ? `✓ Matched (${sundarProfile.username || 'sundar.developer07'})` : '✓ Matched (sundar.developer07)',
-        matched_user_id: sundarProfile?.id || null,
-        current_premium_status: '⚠ PAYMENT FOUND — NEEDS RECONCILIATION'
-      });
-    }
-
-    // Also include any payments with status 'pending' or 'captured' where user is not unlocked
+    // Dynamically check any payments with captured/paid/pending status whose user is not yet unlocked
     paymentsList.forEach(p => {
       const uEmail = (p.user_email || '').toLowerCase();
-      if (uEmail === 'sundar.developer07@gmail.com') return; // already added above
-
       const prof = (p.user_id ? profilesById.get(p.user_id) : null) || (uEmail ? profilesByEmail.get(uEmail) : null);
       const isUnlocked = prof?.paid_unlocked === true;
       const s = String(p.status || '').toLowerCase();
 
-      if (!isUnlocked && (s === 'pending' || s === 'captured' || s === 'paid')) {
-        const ord = p.user_id ? ordersByUserId.get(p.user_id) : null;
+      if (!isUnlocked && (s === 'pending' || s === 'captured' || s === 'paid' || s === 'verified')) {
+        const ord = (p.user_id ? ordersByUserId.get(p.user_id) : null) || (uEmail ? ordersByEmail.get(uEmail) : null);
+        const amountDisplay = p.amount
+          ? (p.amount >= 100 && p.amount % 100 === 0 ? `₹${p.amount / 100}` : `₹${p.amount}`)
+          : '₹49';
+
         reconciliationQueue.push({
-          customer_email: p.user_email || '—',
-          username: prof?.username || '—',
-          payment_id: p.transaction_reference || `pay_${p.id}`,
-          order_id: ord?.id || '—',
-          amount: `₹${p.amount || 49}`,
+          customer_email: p.user_email || (prof?.email || '—'),
+          username: prof?.username || prof?.name || (p.user_email ? p.user_email.split('@')[0] : '—'),
+          payment_id: p.transaction_reference || p.payment_id || `pay_${p.id}`,
+          order_id: ord?.id || p.order_id || '—',
+          amount: amountDisplay,
           currency: p.currency || 'INR',
-          razorpay_status: s === 'captured' ? 'captured' : 'pending',
+          razorpay_status: s === 'captured' ? 'captured' : s,
+          user_match: prof ? `✓ Matched (${prof.username || prof.email})` : '⚠ NEEDS REVIEW',
+          matched_user_id: prof?.id || null,
+          current_premium_status: '⚠ PAYMENT FOUND — NEEDS RECONCILIATION'
+        });
+      }
+    });
+
+    // Also check razorpay_orders that have payment_id / captured payment but matching profile is not unlocked
+    ordersList.forEach(ord => {
+      if (!ord.payment_id) return;
+      const oEmail = (ord.user_email || '').toLowerCase();
+      const prof = (ord.user_id ? profilesById.get(ord.user_id) : null) || (oEmail ? profilesByEmail.get(oEmail) : null);
+      const isUnlocked = prof?.paid_unlocked === true;
+
+      // Check if already in reconciliationQueue
+      const alreadyQueued = reconciliationQueue.some(q => q.payment_id === ord.payment_id || (ord.id && q.order_id === ord.id));
+      if (!isUnlocked && !alreadyQueued) {
+        reconciliationQueue.push({
+          customer_email: ord.user_email || (prof?.email || '—'),
+          username: prof?.username || prof?.name || (ord.user_email ? ord.user_email.split('@')[0] : '—'),
+          payment_id: ord.payment_id,
+          order_id: ord.id || '—',
+          amount: ord.amount ? `₹${ord.amount / 100}` : '₹49',
+          currency: ord.currency || 'INR',
+          razorpay_status: 'captured',
           user_match: prof ? `✓ Matched (${prof.username || prof.email})` : '⚠ NEEDS REVIEW',
           matched_user_id: prof?.id || null,
           current_premium_status: '⚠ PAYMENT FOUND — NEEDS RECONCILIATION'
@@ -2410,6 +2402,180 @@ export async function publishContestResults() {
   }
 }
 
+let adminNotificationsList = [];
+
+export async function loadAdminNotifications() {
+  if (!client) return;
+  const tbody = $('adminNotificationsTableBody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">Loading notifications from Supabase…</td></tr>';
+
+  try {
+    const { data: notifs, error } = await client
+      .from('app_notifications')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error && !error.message?.includes('relation "public.app_notifications" does not exist')) {
+      console.warn('app_notifications query notice:', error);
+    }
+
+    adminNotificationsList = notifs || [];
+
+    // Summary counts
+    const total = adminNotificationsList.length;
+    const active = adminNotificationsList.filter(n => n.is_active).length;
+    const contestCount = adminNotificationsList.filter(n => n.type === 'contest').length;
+    const updateCount = adminNotificationsList.filter(n => n.type === 'update').length;
+
+    if ($('statTotalNotifications')) $('statTotalNotifications').textContent = String(total);
+    if ($('statActiveNotifications')) $('statActiveNotifications').textContent = String(active);
+    if ($('statContestNotifications')) $('statContestNotifications').textContent = String(contestCount);
+    if ($('statUpdateNotifications')) $('statUpdateNotifications').textContent = String(updateCount);
+
+    if (adminNotificationsList.length === 0) {
+      if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">No notifications created yet. Click "+ Create Notification" to broadcast one.</td></tr>';
+      return;
+    }
+
+    if (tbody) {
+      tbody.innerHTML = adminNotificationsList.map((item, idx) => {
+        let typeBadge = '<span class="badge draft">Announcement</span>';
+        if (item.type === 'contest') typeBadge = '<span class="badge eval">🚀 Contest</span>';
+        if (item.type === 'update') typeBadge = '<span class="badge published">✨ App Update</span>';
+
+        return `
+          <tr>
+            <td class="num">${idx + 1}</td>
+            <td>${typeBadge}</td>
+            <td><strong>${escapeHtml(item.title)}</strong></td>
+            <td style="max-width:320px;font-size:0.85rem;color:var(--ink);">${escapeHtml(item.message)}</td>
+            <td><code style="font-size:0.8rem;background:#f1f5f9;padding:2px 6px;border-radius:4px;">${escapeHtml(item.action_target || 'home')}</code></td>
+            <td>
+              ${item.is_active
+                ? '<span class="badge verified">Active</span>'
+                : '<span class="badge archived">Inactive</span>'}
+            </td>
+            <td style="font-size:0.8rem;color:var(--muted);">${formatDate(item.created_at)}</td>
+            <td>
+              <button class="action secondary sm" onclick="window.toggleNotificationActive('${escapeHtml(item.id)}', ${!item.is_active})">
+                ${item.is_active ? 'Deactivate' : 'Activate'}
+              </button>
+              <button class="action danger sm" style="margin-left:4px;" onclick="window.deleteAdminNotification('${escapeHtml(item.id)}')">
+                Delete
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+  } catch (err) {
+    console.error('loadAdminNotifications error:', err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="color:#b91c1c;text-align:center;padding:20px;">Notice loading notifications: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+export function openNotificationEditor() {
+  if ($('editNotifId')) $('editNotifId').value = '';
+  if ($('notifTitleInput')) $('notifTitleInput').value = '';
+  if ($('notifMessageInput')) $('notifMessageInput').value = '';
+  if ($('notifTypeInput')) $('notifTypeInput').value = 'announcement';
+  if ($('notifTargetInput')) $('notifTargetInput').value = 'home';
+  const notice = $('notifEditorNotice');
+  if (notice) notice.style.display = 'none';
+
+  const modal = $('notificationEditorModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+export function closeNotificationEditor() {
+  const modal = $('notificationEditorModal');
+  if (modal) modal.style.display = 'none';
+}
+
+export async function saveAdminNotification() {
+  if (!client) return;
+  const title = ($('notifTitleInput')?.value || '').trim();
+  const message = ($('notifMessageInput')?.value || '').trim();
+  const type = $('notifTypeInput')?.value || 'announcement';
+  const target = $('notifTargetInput')?.value || 'home';
+  const btn = $('btnSaveAdminNotif');
+
+  if (!title || !message) {
+    alert('Please enter both notification title and message.');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Broadcasting…';
+  }
+
+  try {
+    const { data, error } = await client
+      .from('app_notifications')
+      .insert({
+        title,
+        message,
+        type,
+        action_target: target,
+        is_active: true,
+        created_by: currentUser?.id || null
+      })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.message?.includes('relation "public.app_notifications" does not exist')) {
+        alert('Notice: Please apply migration 014 in Supabase SQL editor to enable persistent table.');
+      } else {
+        throw error;
+      }
+    }
+
+    alert('✓ Notification broadcasted successfully!');
+    closeNotificationEditor();
+    await loadAdminNotifications();
+  } catch (err) {
+    alert('Error saving notification: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Broadcast Notification 📢';
+    }
+  }
+}
+
+export async function toggleNotificationActive(id, newStatus) {
+  if (!client) return;
+  try {
+    const { error } = await client
+      .from('app_notifications')
+      .update({ is_active: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', id);
+
+    if (error) throw error;
+    await loadAdminNotifications();
+  } catch (err) {
+    alert('Error updating notification: ' + err.message);
+  }
+}
+
+export async function deleteAdminNotification(id) {
+  if (!client) return;
+  if (!confirm('Delete this notification permanently?')) return;
+  try {
+    const { error } = await client
+      .from('app_notifications')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    await loadAdminNotifications();
+  } catch (err) {
+    alert('Error deleting notification: ' + err.message);
+  }
+}
+
 function formatSec(s) {
   const m = Math.floor(s / 60);
   const sec = s % 60;
@@ -2457,6 +2623,12 @@ Object.assign(window, {
   saveEvaluation,
   openResultsModal,
   closeResultsModal,
-  publishContestResults
+  publishContestResults,
+  loadAdminNotifications,
+  openNotificationEditor,
+  closeNotificationEditor,
+  saveAdminNotification,
+  toggleNotificationActive,
+  deleteAdminNotification
 });
 

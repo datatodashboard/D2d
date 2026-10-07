@@ -1789,5 +1789,288 @@ grant execute on function public.save_contest_draft(uuid, text) to authenticated
 grant execute on function public.submit_contest_attempt(uuid, text) to authenticated;
 grant select on table public.scenario_catalog to authenticated, anon;
 
+-- 13. Level Completion Tracking, Immutable Certificates & Public Verification
+create table if not exists public.certificates (
+  id uuid primary key default gen_random_uuid(),
+  credential_id text not null unique,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  recipient_name text not null,
+  domain text not null,
+  level text not null check (level in ('Beginner', 'Intermediate', 'Expert')),
+  course_title text not null,
+  description text not null,
+  completed_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  constraint uq_certificates_user_domain_level unique (user_id, domain, level)
+);
+
+create index if not exists idx_certificates_user_id on public.certificates(user_id);
+create index if not exists idx_certificates_credential_id on public.certificates(lower(credential_id));
+
+alter table public.certificates enable row level security;
+drop policy if exists "Anyone can read certificates for verification" on public.certificates;
+create policy "Anyone can read certificates for verification" on public.certificates for select using (true);
+drop policy if exists "No direct insert on certificates" on public.certificates;
+create policy "No direct insert on certificates" on public.certificates for insert with check (false);
+drop policy if exists "No direct update on certificates" on public.certificates;
+create policy "No direct update on certificates" on public.certificates for update using (false);
+drop policy if exists "No direct delete on certificates" on public.certificates;
+create policy "No direct delete on certificates" on public.certificates for delete using (false);
+
+create or replace function public.get_domain_code(p_domain text)
+returns text language sql immutable as $$
+  select case lower(trim(p_domain))
+    when 'banking' then 'BAN'
+    when 'healthcare' then 'HEA'
+    when 'insurance' then 'INS'
+    when 'capital markets' then 'CAP'
+    when 'semiconductor' then 'SEM'
+    when 'education' then 'EDU'
+    when 'retail' then 'RET'
+    else null
+  end;
+$$;
+
+create or replace function public.get_level_code(p_level text)
+returns text language sql immutable as $$
+  select case lower(trim(p_level))
+    when 'beginner' then 'BEG'
+    when 'intermediate' then 'INT'
+    when 'expert' then 'EXP'
+    else null
+  end;
+$$;
+
+create or replace function public.claim_level_certificate(
+  p_domain text,
+  p_level text,
+  p_recipient_name text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_uid uuid;
+  v_dom_code text;
+  v_lvl_code text;
+  v_completed_count int;
+  v_clean_name text;
+  v_course_title text;
+  v_description text;
+  v_credential_id text;
+  v_existing_cert record;
+  v_new_cert record;
+  v_rand_hex text;
+begin
+  v_uid := auth.uid();
+  if v_uid is null then
+    raise exception 'Authentication required to claim certificate.';
+  end if;
+
+  v_dom_code := public.get_domain_code(p_domain);
+  v_lvl_code := public.get_level_code(p_level);
+
+  if v_dom_code is null then
+    raise exception 'Invalid domain: %', p_domain;
+  end if;
+
+  if v_lvl_code is null then
+    raise exception 'Invalid level: %', p_level;
+  end if;
+
+  select * into v_existing_cert
+  from public.certificates
+  where user_id = v_uid and domain = p_domain and level = p_level;
+
+  if v_existing_cert.id is not null then
+    return jsonb_build_object(
+      'success', true,
+      'already_issued', true,
+      'certificate', jsonb_build_object(
+        'id', v_existing_cert.id,
+        'credential_id', v_existing_cert.credential_id,
+        'recipient_name', v_existing_cert.recipient_name,
+        'domain', v_existing_cert.domain,
+        'level', v_existing_cert.level,
+        'course_title', v_existing_cert.course_title,
+        'description', v_existing_cert.description,
+        'completed_at', v_existing_cert.completed_at,
+        'issuer', 'Data2Dashboard (D2D)',
+        'organization', 'Crack SQL Learning Platform'
+      )
+    );
+  end if;
+
+  select count(distinct scenario_id) into v_completed_count
+  from public.progress
+  where user_id = v_uid
+    and scenario_id like (v_dom_code || '_' || v_lvl_code || '_%');
+
+  if v_completed_count < 20 then
+    insert into public.progress (user_id, scenario_id)
+    select v_uid, k
+    from public.learning_progress lp,
+         lateral jsonb_each(coalesce(lp.state->'entries', '{}'::jsonb)) as e(k, v)
+    where lp.user_id = v_uid
+      and k like (v_dom_code || '_' || v_lvl_code || '_%')
+      and (
+        (v->>'completed')::boolean = true or
+        ((v->'assessment'->>'score')::numeric >= 7)
+      )
+    on conflict (user_id, scenario_id) do nothing;
+
+    select count(distinct scenario_id) into v_completed_count
+    from public.progress
+    where user_id = v_uid
+      and scenario_id like (v_dom_code || '_' || v_lvl_code || '_%');
+  end if;
+
+  if v_completed_count < 20 then
+    return jsonb_build_object(
+      'success', false,
+      'code', 'LEVEL_INCOMPLETE',
+      'error', 'Level incomplete: ' || v_completed_count || '/20 distinct scenarios completed in ' || p_domain || ' (' || p_level || ').',
+      'completed_count', v_completed_count,
+      'required_count', 20
+    );
+  end if;
+
+  v_clean_name := trim(coalesce(p_recipient_name, ''));
+  if v_clean_name = '' then
+    select username into v_clean_name from public.profiles where id = v_uid;
+  end if;
+  if v_clean_name is null or trim(v_clean_name) = '' then
+    select raw_user_meta_data->>'full_name' into v_clean_name from auth.users where id = v_uid;
+  end if;
+  if v_clean_name is null or trim(v_clean_name) = '' then
+    select split_part(email, '@', 1) into v_clean_name from auth.users where id = v_uid;
+  end if;
+  if v_clean_name is null or trim(v_clean_name) = '' then
+    v_clean_name := 'Learner';
+  end if;
+
+  case v_lvl_code
+    when 'BEG' then v_course_title := 'Crack SQL: Beginner SQL Practitioner';
+    when 'INT' then v_course_title := 'Crack SQL: Intermediate SQL Practitioner';
+    when 'EXP' then v_course_title := 'Crack SQL: Expert SQL Practitioner';
+  end case;
+
+  v_description := 'Successfully completed 20 scenario-based SQL challenges in ' || p_domain || '.';
+  v_rand_hex := upper(substr(md5(random()::text || clock_timestamp()::text || v_uid::text), 1, 6));
+  v_credential_id := 'D2D-CSQL-' || v_lvl_code || '-' || to_char(now(), 'YYYY') || '-' || v_rand_hex;
+
+  insert into public.certificates (
+    credential_id, user_id, recipient_name, domain, level, course_title, description, completed_at
+  ) values (
+    v_credential_id, v_uid, v_clean_name, p_domain, p_level, v_course_title, v_description, now()
+  )
+  on conflict (user_id, domain, level) do update
+    set recipient_name = coalesce(nullif(excluded.recipient_name, 'Learner'), public.certificates.recipient_name)
+  returning * into v_new_cert;
+
+  return jsonb_build_object(
+    'success', true,
+    'already_issued', false,
+    'certificate', jsonb_build_object(
+      'id', v_new_cert.id,
+      'credential_id', v_new_cert.credential_id,
+      'recipient_name', v_new_cert.recipient_name,
+      'domain', v_new_cert.domain,
+      'level', v_new_cert.level,
+      'course_title', v_new_cert.course_title,
+      'description', v_new_cert.description,
+      'completed_at', v_new_cert.completed_at,
+      'issuer', 'Data2Dashboard (D2D)',
+      'organization', 'Crack SQL Learning Platform'
+    )
+  );
+end;
+$$;
+
+create or replace function public.verify_certificate(p_credential_id text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_cert record;
+begin
+  if p_credential_id is null or trim(p_credential_id) = '' then
+    return jsonb_build_object('valid', false, 'message', 'Certificate not found');
+  end if;
+
+  select credential_id, recipient_name, domain, level, course_title, description, completed_at
+  into v_cert
+  from public.certificates
+  where lower(credential_id) = lower(trim(p_credential_id));
+
+  if not found then
+    return jsonb_build_object('valid', false, 'message', 'Certificate not found');
+  end if;
+
+  return jsonb_build_object(
+    'valid', true,
+    'credential_id', v_cert.credential_id,
+    'recipient_name', v_cert.recipient_name,
+    'domain', v_cert.domain,
+    'level', v_cert.level,
+    'course_title', v_cert.course_title,
+    'description', v_cert.description,
+    'completed_at', v_cert.completed_at,
+    'issuer', 'Data2Dashboard (D2D)',
+    'organization', 'Crack SQL Learning Platform'
+  );
+end;
+$$;
+
+create or replace function public.get_user_certificates(p_user_id uuid default auth.uid())
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, pg_temp
+as $$
+declare
+  v_target_id uuid;
+  v_certs jsonb;
+begin
+  v_target_id := coalesce(p_user_id, auth.uid());
+  if v_target_id is null then
+    return '[]'::jsonb;
+  end if;
+
+  if v_target_id <> auth.uid() and not public.is_admin() then
+    raise exception 'Permission denied: Cannot view another user certificates.';
+  end if;
+
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'id', id,
+      'credential_id', credential_id,
+      'recipient_name', recipient_name,
+      'domain', domain,
+      'level', level,
+      'course_title', course_title,
+      'description', description,
+      'completed_at', completed_at,
+      'issuer', 'Data2Dashboard (D2D)',
+      'organization', 'Crack SQL Learning Platform'
+    ) order by completed_at desc
+  ), '[]'::jsonb) into v_certs
+  from public.certificates
+  where user_id = v_target_id;
+
+  return v_certs;
+end;
+$$;
+
+grant select on table public.certificates to authenticated, anon;
+grant execute on function public.claim_level_certificate(text, text, text) to authenticated;
+grant execute on function public.verify_certificate(text) to authenticated, anon;
+grant execute on function public.get_user_certificates(uuid) to authenticated;
+
 -- Reload PostgREST schema cache
 notify pgrst, 'reload schema';

@@ -33,6 +33,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Crack SQL" />
 
+<!-- Fonts (Typography matching image.png) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,400&family=Plus+Jakarta+Sans:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+
 <!-- Supabase (accounts + progress sync) -->
 <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
@@ -1221,6 +1226,207 @@ body.landscape-layout .practice-container {
   align-items: center;
   justify-content: center;
   text-transform: uppercase;
+}
+
+/* Notification Badge & Dropdown */
+.notifications-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.notification-avatar-btn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.notification-avatar-btn:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.22);
+  transform: translateY(-1px) scale(1.04);
+}
+
+.notification-avatar-btn:active {
+  transform: scale(0.96);
+}
+
+.notification-icon {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 2px solid var(--surface);
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+}
+
+.notifications-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.04);
+  padding: 0;
+  z-index: 2500;
+  transform-origin: top right;
+  overflow: hidden;
+  animation: dropdownFadeIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.notifications-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--line);
+}
+
+.notifications-list {
+  max-height: 380px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.15s ease;
+}
+
+.notification-item:last-child {
+  border-bottom: none;
+}
+
+.notification-item.unread {
+  background: #f0fdf4;
+}
+
+.notification-item.read {
+  background: var(--surface);
+  opacity: 0.85;
+}
+
+.notif-icon-box {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.notif-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.notif-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.notif-unread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2563eb;
+  flex-shrink: 0;
+}
+
+.notif-msg {
+  font-size: 11.5px;
+  color: #475569;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.notif-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.notif-time {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.notif-action-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.notif-action-btn.primary {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.notif-action-btn.primary:hover {
+  background: #1d4ed8;
+}
+
+.notif-action-btn.secondary {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.notif-action-btn.secondary:hover {
+  background: #dbeafe;
 }
 
 /* Modern Profile Dropdown Card */
@@ -2807,6 +3013,223 @@ body.landscape-layout .practice-container {
   border: 1px solid #dbeafe;
   font-size: 0.88rem;
 }
+
+/* Certificate & Level Completion Styles */
+.cert-modal-dialog {
+  max-width: 1040px;
+  width: 96%;
+  padding: 16px 20px 20px;
+  background: #ffffff;
+  border-radius: 20px;
+}
+.cert-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.cert-modal-title-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cert-badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1e40af;
+}
+.cert-modal-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.cert-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cert-preview-wrapper {
+  width: 100%;
+  background: #f8fafc;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  padding: 12px;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,0.03);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+.cert-preview-card {
+  width: 100%;
+  max-width: 960px;
+  aspect-ratio: 3 / 2;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12), 0 1px 3px rgba(0,0,0,0.06);
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+  display: flex;
+}
+.cert-preview-card svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Level Completion Achievement Modal */
+.level-completion-dialog {
+  max-width: 480px;
+  width: 100%;
+  padding: 28px 24px 24px;
+  text-align: center;
+  border-radius: 24px;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+}
+.level-completion-trophy {
+  font-size: 54px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.level-completion-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  margin-bottom: 8px;
+}
+.level-completion-title {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--ink);
+}
+.level-completion-subtitle {
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.level-completion-stat-card {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 8px;
+  margin-bottom: 18px;
+}
+.stat-item .stat-number {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.stat-item .stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+.level-completion-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.level-cert-btn {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  color: white;
+  font-weight: 800;
+  padding: 12px;
+  font-size: 15px;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.level-cert-btn:hover {
+  background: linear-gradient(135deg, #1e40af, #1d4ed8);
+}
+.level-completion-nav-row {
+  margin-top: 6px;
+}
+
+/* Certificates Grid in Progress Screen */
+.certificates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.cert-card-item {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.cert-card-item.earned {
+  border-color: #cbd5e1;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.cert-card-item.earned:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  border-color: #93c5fd;
+}
+.cert-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.cert-card-domain {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.cert-card-level-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1e40af;
+}
+.cert-card-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+.cert-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
 </style>
 <script type="module" src="./js/app.js?v=4"></script>
 </head>
@@ -3017,6 +3440,15 @@ body.landscape-layout .practice-container {
           <div style="font-size: 11px; color: var(--muted); font-weight: 700;">Account Status</div>
           <div id="modalProfileSync" style="font-size: 12px; font-weight: 800; color: #166534; margin-top: 6px;">Saved Locally</div>
         </div>
+        <div style="background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px; grid-column: span 2; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 11px; color: var(--muted); font-weight: 700;">Certificates of Completion</div>
+            <div id="modalProfileCertificates" style="font-size: 17px; font-weight: 900; color: #b48324; margin-top: 2px;">0 / 21 Earned</div>
+          </div>
+          <button class="ghost-btn-sm" onclick="closeProfileModal(); showScreen('progress');" style="font-size: 11.5px; padding: 4px 10px;">
+            View All →
+          </button>
+        </div>
       </div>
     </div>
 
@@ -3077,6 +3509,94 @@ body.landscape-layout .practice-container {
   </div>
 </div>
 
+<!-- Certificate Preview & Download Modal -->
+<div id="certificateModal" class="modal-backdrop" hidden onclick="if(event.target===this)closeCertificateModal()">
+  <div class="modal-dialog cert-modal-dialog">
+    <div class="cert-modal-header">
+      <div class="cert-modal-title-box">
+        <span class="cert-badge">Official Credential</span>
+        <h3 id="certModalHeading" class="cert-modal-title">Certificate of Completion</h3>
+      </div>
+      <div class="cert-modal-actions">
+        <button class="action primary sm cert-download-btn" id="certDownloadPngBtn" onclick="handleDownloadCertificatePng()" type="button" title="Download High-Resolution PNG">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Download PNG</span>
+        </button>
+        <button class="action secondary sm cert-print-btn" id="certPrintPdfBtn" onclick="handlePrintCertificatePdf()" type="button" title="Print or Save as Landscape PDF">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 6 2 18 2 18 9"/>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+            <rect x="6" y="14" width="12" height="8"/>
+          </svg>
+          <span>Print / PDF</span>
+        </button>
+        <button class="thinking-modal-close" onclick="closeCertificateModal()" aria-label="Close" type="button">✕</button>
+      </div>
+    </div>
+
+    <!-- Certificate Visual Container (Landscape Aspect Ratio) -->
+    <div class="cert-preview-wrapper" id="certPreviewWrapper">
+      <div class="cert-preview-card" id="certPreviewCard">
+        <!-- Rendered dynamically via generateCertificateSvg() -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Level Completion Achievement Modal (Question 20 Complete) -->
+<div id="levelCompletionModal" class="modal-backdrop" hidden onclick="if(event.target===this)closeLevelCompletionModal()">
+  <div class="modal-dialog level-completion-dialog">
+    <button class="thinking-modal-close" onclick="closeLevelCompletionModal()" aria-label="Close" type="button">✕</button>
+    <div class="level-completion-body">
+      <div class="level-completion-trophy">🏆</div>
+      <div class="level-completion-badge" id="levelCompletionBadge">Level Complete</div>
+      <h2 class="level-completion-title" id="levelCompletionTitle">[Level] Level Completed</h2>
+      <p class="level-completion-subtitle" id="levelCompletionSubtitle">
+        You have successfully completed all 20 scenarios in [Domain].
+      </p>
+      
+      <div class="level-completion-stat-card">
+        <div class="stat-item">
+          <div class="stat-number">20 / 20</div>
+          <div class="stat-label">Scenarios Solved</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number" id="levelCompletionDomainVal">Banking</div>
+          <div class="stat-label">Domain Mastered</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number" id="levelCompletionDateVal">Today</div>
+          <div class="stat-label">Completion Date</div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="level-completion-actions">
+        <button class="action primary level-cert-btn" id="levelCompletionViewCertBtn" onclick="handleViewCertificateFromAchievement()" type="button">
+          <span>🏆 View Certificate</span>
+        </button>
+        <button class="action secondary level-download-btn" id="levelCompletionDownloadCertBtn" onclick="handleDownloadCertificateFromAchievement()" type="button" style="padding: 11px; font-weight: 700;">
+          <span>📥 Download Certificate</span>
+        </button>
+      </div>
+
+      <div class="level-completion-nav-row" id="levelCompletionNavRow">
+        <!-- Start Intermediate / Start Expert / All three levels completed -->
+      </div>
+
+      <div style="margin-top: 14px;">
+        <button class="ghost-btn-sm" onclick="handlePracticeAgain()" type="button" style="color: var(--muted); font-size: 13px;">
+          ↺ Practice Again (Review Scenarios)
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Welcome / Google Login Screen (Login Gate) -->
 <section id="loginScreen" class="login-gate-screen">
   <div class="login-card">
@@ -3124,6 +3644,28 @@ body.landscape-layout .practice-container {
       <button class="ghost-btn-sm" onclick="openOnboarding()">How it works</button>
       <button id="headerAdminPortalBtn" class="action secondary sm" onclick="openAdminPortal()" hidden style="font-weight:700;display:inline-flex;align-items:center;gap:4px;">🛠️ Admin Portal</button>
 
+      <!-- Notification Badge & Dropdown -->
+      <div class="notifications-container" id="notificationsContainer">
+        <button id="notificationsBtn" class="notification-avatar-btn" onclick="toggleNotificationsDropdown(event)" aria-haspopup="true" aria-expanded="false" title="Notifications">
+          <span class="notification-icon">🔔</span>
+          <span id="notificationBadge" class="notification-badge" style="display:none;">0</span>
+        </button>
+
+        <div id="notificationsDropdown" class="notifications-dropdown" hidden>
+          <div class="notifications-header">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:16px;">🔔</span>
+              <span style="font-weight:800;font-size:14px;color:var(--ink);">Notifications</span>
+              <span id="notificationsHeaderCount" class="badge" style="background:#dbeafe;color:#1e40af;font-size:11px;display:none;">0</span>
+            </div>
+            <button class="linkbtn" style="font-size:11.5px;color:var(--primary);font-weight:700;" onclick="markAllNotificationsRead()">Mark all as read</button>
+          </div>
+          <div id="notificationsList" class="notifications-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+
       <!-- Circular Profile Button & Dropdown in top-right corner -->
       <div class="profile-container" id="profileContainer">
         <button id="profileBtn" class="profile-avatar-btn" onclick="toggleProfileDropdown(event)" aria-haspopup="true" aria-expanded="false" title="User Profile">
@@ -3170,22 +3712,6 @@ body.landscape-layout .practice-container {
 
   <div class="auth-card" id="authBox"></div>
 
-  <div class="progress-card">
-    <div class="progress-top">
-      <div class="progress-label" id="progressTrackLabel">Verified SQL Progress (4 Core Domains)</div>
-      <div class="progress-count" id="progressCount">0 / 240</div>
-    </div>
-    <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
-    <p id="progressStages" class="small"></p>
-    <p class="small">Progress is recorded only when your query matches the expected PostgreSQL result.</p>
-    <p id="syncStatus" role="status" aria-live="polite"></p>
-    <button class="progress-reset" onclick="resetProgress()">Reset my progress</button>
-    <button class="progress-reset" onclick="retrySync()">Retry sync</button>
-    <button class="progress-reset" onclick="importOldHistory()">Import earlier device history</button>
-    <button class="progress-reset" id="importGuest" hidden onclick="importGuestProgress()">Import guest practice</button>
-    <button class="progress-reset" id="importCloud" hidden onclick="importCloudHistory()">Import earlier account history</button>
-  </div>
-
   <div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 8px;flex-wrap:wrap;gap:8px;">
     <div class="label" style="margin:0;">Choose Domain</div>
     <div class="track-pills">
@@ -3225,8 +3751,12 @@ body.landscape-layout .practice-container {
     <div style="display:flex;align-items:center;gap:10px;">
       <button class="linkbtn" onclick="goHome()">← Change</button>
     </div>
-    <div style="display:flex;align-items:center;gap:12px;">
+    <div style="display:flex;align-items:center;gap:10px;">
       <div class="meta" id="meta"></div>
+      <button class="notification-avatar-btn" onclick="toggleNotificationsDropdown(event)" aria-haspopup="true" title="Notifications">
+        <span class="notification-icon">🔔</span>
+        <span class="notification-badge" style="display:none;">0</span>
+      </button>
       <button class="profile-avatar-btn" onclick="openProfileModal()" aria-haspopup="true" title="User Profile">
         <span class="profile-avatar-content">👤</span>
       </button>
@@ -3306,9 +3836,15 @@ body.landscape-layout .practice-container {
         <h1 style="margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.4px;">Progress</h1>
         <div class="sub" id="progressTrackSubtitle">4 Core Domains Track</div>
       </div>
-      <button class="profile-avatar-btn" onclick="openProfileModal()" aria-haspopup="true" title="User Profile">
-        <span class="profile-avatar-content">👤</span>
-      </button>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="notification-avatar-btn" onclick="toggleNotificationsDropdown(event)" aria-haspopup="true" title="Notifications">
+          <span class="notification-icon">🔔</span>
+          <span class="notification-badge" style="display:none;">0</span>
+        </button>
+        <button class="profile-avatar-btn" onclick="openProfileModal()" aria-haspopup="true" title="User Profile">
+          <span class="profile-avatar-content">👤</span>
+        </button>
+      </div>
     </div>
 
     <!-- 4 Core Metric Items -->
@@ -3335,6 +3871,24 @@ body.landscape-layout .practice-container {
     <div class="domain-summary-card" id="progressDomainCard" style="margin-top: 14px;">
       <h2 style="font-size: 16px; font-weight: 800; text-align: center; margin: 0 0 16px; color: var(--ink);">Domain-Wise Completed Questions</h2>
       <div class="domain-chart-flex" id="domainChartContent">
+        <!-- Rendered dynamically via renderProgressScreen() -->
+      </div>
+    </div>
+
+    <!-- My Certificates Section (All 21 Domain + Level Certificates) -->
+    <div class="domain-summary-card" id="progressCertificatesCard" style="margin-top: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+        <h2 style="font-size: 16px; font-weight: 800; margin: 0; color: var(--ink); display: flex; align-items: center; gap: 6px;">
+          <span>🏆</span> <span>My Certificates of Completion</span>
+        </h2>
+        <span id="earnedCertificatesBadge" style="font-size: 12px; font-weight: 800; color: #1e40af; background: #eff6ff; padding: 4px 10px; border-radius: 999px; border: 1px solid #bfdbfe;">
+          0 / 21 Earned
+        </span>
+      </div>
+      <p style="font-size: 12.5px; color: var(--muted); margin: 0 0 14px; line-height: 1.4;">
+        Complete all 20 scenario-based challenges in any domain and level to earn your official Crack SQL Certificate of Completion.
+      </p>
+      <div id="certificatesGrid" class="certificates-grid">
         <!-- Rendered dynamically via renderProgressScreen() -->
       </div>
     </div>
