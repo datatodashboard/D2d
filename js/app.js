@@ -1738,7 +1738,13 @@ function openMotivationPopup(score) {
   if (card) {
     card.style.border = `2px solid ${config.theme.cardBorder}`;
     card.style.boxShadow = config.theme.cardGlow;
+    card.classList.remove('score-pop-bounce');
+    void card.offsetWidth;
+    card.classList.add('score-pop-bounce');
   }
+
+  // Play notification chime sound when Thinking Score is displayed
+  playThinkingScoreSound();
 
   // Stars & decorative layer
   if (starsLayer) {
@@ -1842,6 +1848,70 @@ function nextScenario() {
   renderScenario();
 }
 
+function playThinkingScoreSound() {
+  try {
+    const audio = new Audio('./thinking-chime.mp3');
+    audio.volume = 0.65;
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        playWebAudioChime();
+      });
+    }
+  } catch (_) {
+    playWebAudioChime();
+  }
+}
+
+function playWebAudioChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(1046.5, ctx.currentTime);
+    gain1.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.2);
+
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1567.98, ctx.currentTime + 0.12);
+    gain2.gain.setValueAtTime(0.2, ctx.currentTime + 0.12);
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(ctx.currentTime + 0.12);
+    osc2.stop(ctx.currentTime + 0.6);
+  } catch (_) {}
+}
+
+function triggerLevelCompletionCelebration() {
+  const container = $('levelCompletionSparks');
+  if (!container) return;
+  const colors = ['#f59e0b', '#2563eb', '#10b981', '#ec4899', '#8b5cf6', '#38bdf8', '#fbbf24'];
+  let html = '';
+  for (let i = 0; i < 18; i++) {
+    const angle = (i / 18) * Math.PI * 2 + (Math.random() * 0.3 - 0.15);
+    const dist = 60 + Math.random() * 90;
+    const dx = Math.round(Math.cos(angle) * dist);
+    const dy = Math.round(Math.sin(angle) * dist - 30);
+    const color = colors[i % colors.length];
+    const size = 6 + Math.floor(Math.random() * 6);
+    html += `<span class="spark-particle" style="--dx:${dx}px; --dy:${dy}px; background:${color}; width:${size}px; height:${size}px;"></span>`;
+  }
+  container.innerHTML = html;
+}
+
 let currentCertificateTarget = null;
 
 function openLevelCompletionModal(domain, level) {
@@ -1862,11 +1932,14 @@ function openLevelCompletionModal(domain, level) {
   const modal = $('levelCompletionModal');
   if (!modal) return;
 
+  if ($('levelCompletionBadge')) {
+    $('levelCompletionBadge').textContent = `${domain} — ${level}`;
+  }
   if ($('levelCompletionTitle')) {
-    $('levelCompletionTitle').textContent = `${level} Level Completed`;
+    $('levelCompletionTitle').textContent = `🎉 ${domain} — ${level} Level Completed!`;
   }
   if ($('levelCompletionSubtitle')) {
-    $('levelCompletionSubtitle').textContent = `You have successfully completed all 20 scenarios in ${domain}.`;
+    $('levelCompletionSubtitle').textContent = `Congratulations! You have successfully completed all 20 scenarios in ${domain} (${level} Level).`;
   }
   if ($('levelCompletionDomainVal')) {
     $('levelCompletionDomainVal').textContent = domain;
@@ -1874,6 +1947,8 @@ function openLevelCompletionModal(domain, level) {
   if ($('levelCompletionDateVal')) {
     $('levelCompletionDateVal').textContent = currentCertificateTarget.completionDate;
   }
+
+  triggerLevelCompletionCelebration();
 
   // Setup Next Level buttons
   const navRow = $('levelCompletionNavRow');
@@ -2525,34 +2600,93 @@ function renderProgressScreen() {
   renderCertificatesSection();
 }
 
+let currentCertFilter = 'all';
+
+function filterAllCertificatesModal(filter) {
+  currentCertFilter = filter;
+  if ($('certFilterAll')) $('certFilterAll').classList.toggle('active', filter === 'all');
+  if ($('certFilterEarned')) $('certFilterEarned').classList.toggle('active', filter === 'earned');
+  if ($('certFilterLocked')) $('certFilterLocked').classList.toggle('active', filter === 'locked');
+  renderCertificatesSection();
+}
+
+function openAllCertificatesModal() {
+  renderCertificatesSection();
+  const modal = $('allCertificatesModal');
+  if (modal) modal.hidden = false;
+}
+
+function closeAllCertificatesModal() {
+  const modal = $('allCertificatesModal');
+  if (modal) modal.hidden = true;
+}
+
 function renderCertificatesSection() {
   const allCerts = getAllCertificatesStatus(scenarios, state, user, currentUsername);
   const earnedCerts = allCerts.filter(c => c.isCompleted);
 
+  const badgeText = `${earnedCerts.length} / 21 Earned`;
   if ($('earnedCertificatesBadge')) {
-    $('earnedCertificatesBadge').textContent = `${earnedCerts.length} / 21 Earned`;
+    $('earnedCertificatesBadge').textContent = badgeText;
+  }
+  if ($('allCertsModalEarnedBadge')) {
+    $('allCertsModalEarnedBadge').textContent = badgeText;
   }
 
   const grid = $('certificatesGrid');
   if (!grid) return;
 
-  grid.innerHTML = allCerts.map(c => {
+  let filtered = allCerts;
+  if (currentCertFilter === 'earned') {
+    filtered = allCerts.filter(c => c.isCompleted);
+  } else if (currentCertFilter === 'locked') {
+    filtered = allCerts.filter(c => !c.isCompleted);
+  }
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 32px 16px; color: var(--muted); background: #f8fafc; border: 1px dashed var(--line); border-radius: 16px;">
+        <div style="font-size: 28px; margin-bottom: 8px;">${currentCertFilter === 'earned' ? '🏆' : '🔒'}</div>
+        <div style="font-weight: 700; font-size: 14px; color: var(--ink);">
+          ${currentCertFilter === 'earned' ? 'No certificates earned yet.' : 'All 21 certificates earned!'}
+        </div>
+        <div style="font-size: 12px; margin-top: 4px;">
+          ${currentCertFilter === 'earned' ? 'Complete 20 scenarios in any domain and level to claim your first certificate.' : 'Great job mastering all 7 domains and 3 levels!'}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(c => {
     const isEarned = c.isCompleted;
     const cardClass = isEarned ? 'cert-card-item earned' : 'cert-card-item';
-    const icon = isEarned ? '🏆' : '🔒';
+    const icon = isEarned ? '🏆' : c.completedCount > 0 ? '⚡' : '🔒';
+
+    let statusBadgeHtml = '';
+    if (isEarned) {
+      statusBadgeHtml = `<span style="font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;">✓ Earned</span>`;
+    } else if (c.completedCount > 0) {
+      statusBadgeHtml = `<span style="font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #92400e; border: 1px solid #fde68a;">In Progress (${c.completedCount}/20)</span>`;
+    } else {
+      statusBadgeHtml = `<span style="font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;">Locked (0/20)</span>`;
+    }
+
     const statusText = isEarned
       ? `Completed 20/20 • Awarded ${c.completionDate}`
-      : `${c.completedCount} / 20 Scenarios Completed`;
+      : `${c.completedCount} / 20 Scenarios Solved`;
+
+    const pct = Math.round((c.completedCount / 20) * 100);
 
     const actions = isEarned ? `
-      <button class="action primary sm" style="padding:6px 12px;font-size:12px;font-weight:700;" onclick="viewCertificate('${c.domain}','${c.level}','${c.completionDate}')">
+      <button class="action primary sm" style="padding:6px 12px;font-size:12px;font-weight:700;" onclick="closeAllCertificatesModal(); viewCertificate('${c.domain}','${c.level}','${c.completionDate}')">
         View Certificate
       </button>
       <button class="action secondary sm" style="padding:6px 10px;font-size:12px;" onclick="downloadCertificateDirect('${c.domain}','${c.level}','${c.completionDate}')" title="Download High-Res PNG">
         📥 Download
       </button>
     ` : `
-      <button class="ghost-btn-sm" style="padding:6px 12px;font-size:12px;color:var(--primary);font-weight:700;" onclick="practiceDomainAndLevel('${c.domain}','${c.level}')">
+      <button class="ghost-btn-sm" style="padding:6px 12px;font-size:12px;color:var(--primary);font-weight:700;" onclick="closeAllCertificatesModal(); practiceDomainAndLevel('${c.domain}','${c.level}')">
         Continue Practice →
       </button>
     `;
@@ -2561,12 +2695,27 @@ function renderCertificatesSection() {
       <div class="${cardClass}">
         <div class="cert-card-header">
           <div>
-            <div class="cert-card-domain">${icon} ${escapeHtml(c.domain)}</div>
-            <div class="cert-card-status">${statusText}</div>
+            <div class="cert-card-domain" style="display:flex;align-items:center;gap:6px;">
+              <span>${icon}</span>
+              <span>${escapeHtml(c.domain)}</span>
+            </div>
+            <div class="cert-card-status" style="margin-top:2px;">${statusText}</div>
           </div>
-          <span class="cert-card-level-badge">${c.level}</span>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            <span class="cert-card-level-badge">${c.level}</span>
+            ${statusBadgeHtml}
+          </div>
         </div>
-        <div class="cert-card-actions">
+
+        ${!isEarned ? `
+          <div style="margin-top: 6px; margin-bottom: 4px;">
+            <div class="progress-track" style="height: 5px;">
+              <div class="progress-fill" style="width: ${pct}%;"></div>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="cert-card-actions" style="margin-top: auto; padding-top: 6px;">
           ${actions}
         </div>
       </div>
@@ -3697,6 +3846,7 @@ document.addEventListener('keydown', event => {
     closeProfileModal();
     closeMotivationModal();
     closeCertificateModal();
+    closeAllCertificatesModal();
     closeLevelCompletionModal();
   }
 });
@@ -3744,11 +3894,12 @@ Object.assign(window,{
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   saveFirstTimeUsername,validateUsernameField,closeUsernameModal,
   checkAdminStatus,retryUserAccessCheck,
-  openMotivationPopup,closeMotivationModal,handleMotivationRetry,handleMotivationNext,
+  openMotivationPopup,closeMotivationModal,handleMotivationRetry,handleMotivationNext,playThinkingScoreSound,
   openLevelCompletionModal,closeLevelCompletionModal,
   handleViewCertificateFromAchievement,handleDownloadCertificateFromAchievement,
   startNextLevel,handlePracticeAgain,
   openCertificateModal,closeCertificateModal,
+  openAllCertificatesModal,closeAllCertificatesModal,filterAllCertificatesModal,
   handleDownloadCertificatePng,handlePrintCertificatePdf,
   renderCertificatesSection,
   checkLevelCompletion,getEarnedCertificates,getAllCertificatesStatus,

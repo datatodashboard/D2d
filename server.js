@@ -127,7 +127,8 @@ const ALLOWED_ROOT_FILES = [
   'icon-512.png',
   'icon-maskable-512.png',
   'icon-maskable-512.jpeg',
-  'd2d-logo.svg'
+  'd2d-logo.svg',
+  'thinking-chime.mp3'
 ];
 
 ALLOWED_ROOT_FILES.forEach(fileName => {
