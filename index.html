@@ -3561,6 +3561,36 @@ body.landscape-layout .practice-container {
       <span id="motivationTipText"></span>
     </div>
 
+    <!-- Feedback Section (Every 5 Completed Questions) -->
+    <div id="motivationFeedbackSection" class="thinking-popup-feedback-box" hidden style="margin-top: 12px; padding: 12px 14px; background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; text-align: left;">
+      <div style="font-size: 13px; font-weight: 800; color: var(--ink); margin-bottom: 8px; text-align: center;">
+        How did this question feel?
+      </div>
+      <div class="feedback-emoji-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px;">
+        <button type="button" class="feedback-emoji-btn" data-emoji="Too Easy" onclick="selectFeedbackEmoji('Too Easy', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">🥱</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Too Easy</span>
+        </button>
+        <button type="button" class="feedback-emoji-btn" data-emoji="Good Challenge" onclick="selectFeedbackEmoji('Good Challenge', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">👍</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Good Challenge</span>
+        </button>
+        <button type="button" class="feedback-emoji-btn" data-emoji="Hard but Fair" onclick="selectFeedbackEmoji('Hard but Fair', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">🤔</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Hard but Fair</span>
+        </button>
+        <button type="button" class="feedback-emoji-btn" data-emoji="Too Hard" onclick="selectFeedbackEmoji('Too Hard', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">🤯</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Too Hard</span>
+        </button>
+        <button type="button" class="feedback-emoji-btn" data-emoji="Confusing" onclick="selectFeedbackEmoji('Confusing', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">❓</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Confusing</span>
+        </button>
+      </div>
+      <textarea id="feedbackTextInput" placeholder="Optional comments or suggestions..." style="width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; font-family: inherit; resize: vertical; box-sizing: border-box; outline: none;" rows="2"></textarea>
+    </div>
+
     <!-- Actions (Retry & Next Scenario) -->
     <div class="thinking-popup-actions" id="motivationActions">
       <button class="thinking-retry-btn" id="motivationRetryBtn" onclick="handleMotivationRetry()" type="button">
@@ -3818,6 +3848,9 @@ body.landscape-layout .practice-container {
       </div>
     </div>
   </div>
+
+  <!-- Compact Contest Card Container (Directly below Crack SQL Header) -->
+  <div id="contestCardWrapper" style="display:none; margin-bottom:16px;"></div>
 
   <div class="install-banner" id="installBanner">
     <div class="txt">📲 Install Think and Crack SQL as an app for quick access & offline practice.</div>

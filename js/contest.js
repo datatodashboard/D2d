@@ -240,10 +240,11 @@ export function renderContestWaitingCard() {
   if (!wrapper) {
     wrapper = document.createElement('div');
     wrapper.id = 'contestCardWrapper';
+    wrapper.style.marginBottom = '16px';
     const home = $('home');
-    const progressCard = document.querySelector('.progress-card');
-    if (home && progressCard) {
-      home.insertBefore(wrapper, progressCard);
+    const header = home ? home.querySelector('.header') : null;
+    if (home && header && header.nextSibling) {
+      home.insertBefore(wrapper, header.nextSibling);
     } else if (home) {
       home.prepend(wrapper);
     }
@@ -273,10 +274,11 @@ export function renderAdminNoContestCard() {
   if (!wrapper) {
     wrapper = document.createElement('div');
     wrapper.id = 'contestCardWrapper';
+    wrapper.style.marginBottom = '16px';
     const home = $('home');
-    const progressCard = document.querySelector('.progress-card');
-    if (home && progressCard) {
-      home.insertBefore(wrapper, progressCard);
+    const header = home ? home.querySelector('.header') : null;
+    if (home && header && header.nextSibling) {
+      home.insertBefore(wrapper, header.nextSibling);
     } else if (home) {
       home.prepend(wrapper);
     }
@@ -314,11 +316,11 @@ export function renderContestCard() {
   if (!wrapper) {
     wrapper = document.createElement('div');
     wrapper.id = 'contestCardWrapper';
-    // Insert nicely on the Home screen right above the progress card
+    wrapper.style.marginBottom = '16px';
     const home = $('home');
-    const progressCard = document.querySelector('.progress-card');
-    if (home && progressCard) {
-      home.insertBefore(wrapper, progressCard);
+    const header = home ? home.querySelector('.header') : null;
+    if (home && header && header.nextSibling) {
+      home.insertBefore(wrapper, header.nextSibling);
     } else if (home) {
       home.prepend(wrapper);
     }
@@ -357,37 +359,28 @@ export function renderContestCard() {
     ? 'ADMIN EXEMPT' 
     : (Number(currentContest.entry_fee) > 0 ? `₹${currentContest.entry_fee}` : 'FREE ENTRY');
 
-  const subtitleHtml = activeIsAdmin && currentCompletedCount < 18
-    ? 'Administrator Contest Access — Testing Mode (Payment &amp; 18-Question Exempt)'
-    : 'Congratulations! You have completed 18 SQL thinking challenges and are now eligible for Think and Crack SQL contests.';
-
   wrapper.innerHTML = `
-    <div class="contest-invitation-card" style="border: 2px solid #2563eb; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);">
-      <div class="contest-card-glow"></div>
-      <div class="contest-card-header">
-        <div class="contest-tag" style="background:#dcfce7;color:#15803d;padding:4px 10px;border-radius:999px;font-weight:800;font-size:0.8rem;">
-          <span class="pulse-dot"></span>
-          <span>${activeIsAdmin ? '🛠️ Admin Contest' : '🏆 Contest Eligible'}</span>
-          <span class="${badgeClass}" style="margin-left:6px;">${badgeText}</span>
+    <div class="contest-invitation-card" style="border: 1.5px solid #bfdbfe; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%); border-radius: 16px; padding: 14px 16px; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 16px;">🏆</span>
+          <span style="font-weight: 800; font-size: 13.5px; color: #1e40af;">
+            ${activeIsAdmin ? 'Admin Contest Mode' : 'Crack SQL Contest'}
+          </span>
+          <span class="${badgeClass}" style="font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px;">${badgeText}</span>
         </div>
-        <div class="contest-fee-badge">${feeDisplay}</div>
+        <div style="font-size: 12px; font-weight: 800; color: #0284c7; background: #e0f2fe; padding: 3px 10px; border-radius: 999px;">${feeDisplay}</div>
       </div>
 
-      <div style="font-size:0.88rem;font-weight:700;color:#1e40af;margin-top:8px;line-height:1.4;">
-        ${subtitleHtml}
-      </div>
-
-      <h3 class="contest-card-title" style="margin-top:6px;">${escapeHtml(currentContest.title)}</h3>
-      <p class="contest-card-tagline">Think beyond syntax. Solve with logic.</p>
+      <div style="font-size: 14.5px; font-weight: 800; color: var(--ink); margin-bottom: 6px; line-height: 1.35;">${escapeHtml(currentContest.title)}</div>
       
-      <div class="contest-card-prizes">
-        <div class="prize-pill">🥇 1st: <strong>${escapeHtml(currentContest.first_prize || '₹1,000')}</strong></div>
-        <div class="prize-pill">🥈 2nd: <strong>${escapeHtml(currentContest.second_prize || '₹500')}</strong></div>
-        <div class="prize-pill">🥉 3rd: <strong>${escapeHtml(currentContest.third_prize || '₹250')}</strong></div>
-      </div>
-
-      <div class="contest-card-footer">
-        <button id="contestJoinBtn" class="contest-action-btn">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; border-top: 1px solid #dbeafe; padding-top: 10px;">
+        <div style="font-size: 12px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap;">
+          <span>🥇 1st: <strong>${escapeHtml(currentContest.first_prize || '₹1,000')}</strong></span>
+          <span>🥈 2nd: <strong>${escapeHtml(currentContest.second_prize || '₹500')}</strong></span>
+          <span>🥉 3rd: <strong>${escapeHtml(currentContest.third_prize || '₹250')}</strong></span>
+        </div>
+        <button id="contestJoinBtn" class="action primary sm" style="padding: 7px 16px; font-weight: 800; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
           <span>${btnIcon}</span>
           <span>${btnLabel}</span>
         </button>

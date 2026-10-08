@@ -123,6 +123,7 @@ textarea.form-control{min-height:90px;font-family:inherit;}
       <button id="tabPaymentsBtn" class="tab-btn" onclick="window.switchAdminTab('payments')">💳 Payment Verification <span id="pendingPaymentsCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
       <button id="tabContestsBtn" class="tab-btn" onclick="window.switchAdminTab('contests')">🏆 Contest Management</button>
       <button id="tabNotificationsBtn" class="tab-btn" onclick="window.switchAdminTab('notifications')">📢 Notifications &amp; Announcements</button>
+      <button id="tabFeedbackBtn" class="tab-btn" onclick="window.switchAdminTab('feedback')">💬 Learner Feedback <span id="feedbackCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
     </nav>
 
     <!-- Tab 1: Learner Directory & Progress -->
@@ -424,6 +425,71 @@ textarea.form-control{min-height:90px;font-family:inherit;}
           </table>
         </div>
       </div>
+    </div>
+
+    <!-- Tab 6: 💬 Learner Feedback -->
+    <div id="feedbackTabContent" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <h2 style="margin:0;font-size:1.25rem;">💬 Question Feedback &amp; Learner Insights</h2>
+          <div style="color:var(--muted);font-size:0.85rem;">Feedback submitted every 5 completed questions across all domains and levels.</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="action secondary" onclick="window.loadAdminFeedback()">Refresh Feedback 🔄</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="num" id="statTotalFeedback">0</div><div class="label">Total Feedback Entries</div></div>
+        <div class="stat"><div class="num" id="statUniqueLearnersFeedback">0</div><div class="label">Learners Submitted</div></div>
+        <div class="stat"><div class="num" id="statTopRating" style="color:var(--primary);font-size:1.1rem;margin-top:2px;">—</div><div class="label">Most Frequent Rating</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="controls" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="feedbackSearch" placeholder="Search learner, question, domain, feedback..." oninput="window.filterFeedbackTable()" style="flex:1;min-width:220px;" />
+          <select id="feedbackEmojiFilter" onchange="window.filterFeedbackTable()" style="padding:8px 12px;border-radius:6px;background:var(--card-bg,#1e293b);color:var(--ink,#f8fafc);border:1px solid var(--border,#334155);font-size:0.88rem;">
+            <option value="">All Emoji Ratings</option>
+            <option value="Too Easy">🥱 Too Easy</option>
+            <option value="Good Challenge">👍 Good Challenge</option>
+            <option value="Hard but Fair">🤔 Hard but Fair</option>
+            <option value="Too Hard">🤯 Too Hard</option>
+            <option value="Confusing">❓ Confusing</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="num">#</th>
+              <th>Learner</th>
+              <th>Question Title</th>
+              <th>Domain &amp; Level</th>
+              <th>Selected Rating</th>
+              <th>Feedback Comment</th>
+              <th>Submitted Date / Time</th>
+            </tr>
+          </thead>
+          <tbody id="feedbackTableBody">
+            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">Loading feedback…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Learner Feedback History -->
+<div id="learnerFeedbackModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:850px;">
+    <div class="modal-header">
+      <h3 id="learnerFeedbackModalTitle">Learner Feedback History</h3>
+      <button class="modal-close" onclick="window.closeLearnerFeedbackModal()">✕</button>
+    </div>
+    <div class="modal-body" id="learnerFeedbackModalBody" style="padding:20px;">
+      <!-- Detailed feedback entries table -->
     </div>
   </div>
 </div>

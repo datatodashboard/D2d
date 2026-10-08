@@ -1779,7 +1779,92 @@ function openMotivationPopup(score) {
     }
   }
 
+  // Feedback Checkpoint: Every 5 completed questions (5, 10, 15, 20...)
+  const feedbackSection = $('motivationFeedbackSection');
+  const completedCount = getCompletedCount();
+  const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
+  const domainLevelCompleted = pool.filter(s => isCompleted(s, state.entries[s.id])).length;
+
+  window.currentSelectedFeedbackEmoji = null;
+
+  if (feedbackSection) {
+    const isCheckpoint = clampedScore >= 7 && ((completedCount > 0 && completedCount % 5 === 0) || (domainLevelCompleted > 0 && domainLevelCompleted % 5 === 0));
+    if (isCheckpoint) {
+      feedbackSection.hidden = false;
+      feedbackSection.style.display = 'block';
+      document.querySelectorAll('.feedback-emoji-btn').forEach(btn => {
+        btn.style.borderColor = 'var(--line)';
+        btn.style.background = '#ffffff';
+        btn.style.boxShadow = 'none';
+      });
+      if ($('feedbackTextInput')) $('feedbackTextInput').value = '';
+
+      if (nextBtn && clampedScore >= 7) {
+        nextBtn.disabled = true;
+      }
+    } else {
+      feedbackSection.hidden = true;
+      feedbackSection.style.display = 'none';
+    }
+  }
+
   modal.hidden = false;
+}
+
+function selectFeedbackEmoji(emoji, btnEl) {
+  window.currentSelectedFeedbackEmoji = emoji;
+  document.querySelectorAll('.feedback-emoji-btn').forEach(btn => {
+    btn.style.borderColor = 'var(--line)';
+    btn.style.background = '#ffffff';
+    btn.style.boxShadow = 'none';
+  });
+  if (btnEl) {
+    btnEl.style.borderColor = 'var(--primary)';
+    btnEl.style.background = '#eff6ff';
+    btnEl.style.boxShadow = '0 0 0 2px rgba(37,99,235,0.2)';
+  }
+  const nextBtn = $('nextButton');
+  if (nextBtn) {
+    nextBtn.disabled = false;
+  }
+}
+
+async function saveSubmittedFeedback() {
+  const emoji = window.currentSelectedFeedbackEmoji;
+  if (!emoji || !current) return;
+
+  const learnerName = getLearnerDisplayName(user, currentUsername);
+  const feedbackText = ($('feedbackTextInput')?.value || '').trim();
+  const timestamp = new Date().toISOString();
+
+  const record = {
+    user_id: user?.id || null,
+    username: learnerName,
+    question_id: current.id,
+    question_title: current.title,
+    domain: current.domain || selectedDomain || 'General SQL',
+    level: current.level || selectedLevel || 'Beginner',
+    emoji: emoji,
+    feedback_text: feedbackText,
+    created_at: timestamp
+  };
+
+  if (client) {
+    try {
+      await client.from('question_feedback').insert(record);
+    } catch (err) {
+      console.warn('Feedback Supabase insert notice:', err);
+    }
+  }
+
+  try {
+    const rawLocal = localStorage.getItem('cracksql_feedback_history');
+    let localList = rawLocal ? JSON.parse(rawLocal) : [];
+    localList.unshift(record);
+    localStorage.setItem('cracksql_feedback_history', JSON.stringify(localList.slice(0, 100)));
+  } catch (_) {}
+
+  window.currentSelectedFeedbackEmoji = null;
 }
 
 function closeMotivationModal() {
@@ -1795,7 +1880,11 @@ function handleMotivationRetry() {
   }
 }
 
-function handleMotivationNext() {
+async function handleMotivationNext() {
+  const feedbackSection = $('motivationFeedbackSection');
+  if (feedbackSection && !feedbackSection.hidden && window.currentSelectedFeedbackEmoji) {
+    await saveSubmittedFeedback();
+  }
   closeMotivationModal();
   nextScenario();
 }
@@ -3974,6 +4063,7 @@ try {
   updateProgress();
   renderScenarioCatalog();
   initAppChrome();
+  window.selectFeedbackEmoji = selectFeedbackEmoji;
   void initAuth();
   if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 } catch(error) {

@@ -727,18 +727,21 @@ export function switchAdminTab(tab) {
   const isPayments = tab === 'payments';
   const isContests = tab === 'contests';
   const isNotifications = tab === 'notifications';
+  const isFeedback = tab === 'feedback';
 
   if ($('learnersTabContent')) $('learnersTabContent').hidden = !isLearners;
   if ($('premiumTabContent')) $('premiumTabContent').hidden = !isPremium;
   if ($('paymentsTabContent')) $('paymentsTabContent').hidden = !isPayments;
   if ($('contestsTabContent')) $('contestsTabContent').hidden = !isContests;
   if ($('notificationsTabContent')) $('notificationsTabContent').hidden = !isNotifications;
+  if ($('feedbackTabContent')) $('feedbackTabContent').hidden = !isFeedback;
 
   if ($('tabLearnersBtn')) $('tabLearnersBtn').classList.toggle('active', isLearners);
   if ($('tabPremiumBtn')) $('tabPremiumBtn').classList.toggle('active', isPremium);
   if ($('tabPaymentsBtn')) $('tabPaymentsBtn').classList.toggle('active', isPayments);
   if ($('tabContestsBtn')) $('tabContestsBtn').classList.toggle('active', isContests);
   if ($('tabNotificationsBtn')) $('tabNotificationsBtn').classList.toggle('active', isNotifications);
+  if ($('tabFeedbackBtn')) $('tabFeedbackBtn').classList.toggle('active', isFeedback);
 
   if (tab === 'contests') {
     void loadContests();
@@ -748,6 +751,8 @@ export function switchAdminTab(tab) {
     void loadPremiumCustomers();
   } else if (tab === 'notifications') {
     void loadAdminNotifications();
+  } else if (tab === 'feedback') {
+    void loadAdminFeedback();
   }
 }
 
@@ -2625,6 +2630,232 @@ function formatSec(s) {
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
+// ------------------------------------------------------------
+// 💬 Learner Feedback Controller
+// ------------------------------------------------------------
+let feedbackData = [];
+let feedbackSearchQuery = '';
+
+export async function loadAdminFeedback() {
+  if (!client) return;
+  const tbody = $('feedbackLearnersTableBody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">Loading learner feedback from database...</td></tr>';
+
+  try {
+    let remoteFeedback = [];
+    try {
+      const { data, error } = await client
+        .from('question_feedback')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        remoteFeedback = data;
+      }
+    } catch (e) {
+      console.warn('question_feedback query notice:', e);
+    }
+
+    // Combine with local feedback history if available
+    let localFeedback = [];
+    try {
+      const rawLocal = localStorage.getItem('cracksql_feedback_history');
+      if (rawLocal) localFeedback = JSON.parse(rawLocal);
+    } catch (_) {}
+
+    const map = new Map();
+    [...remoteFeedback, ...localFeedback].forEach(f => {
+      const key = `${f.user_id || f.username || 'anon'}_${f.question_id || f.question_title}_${f.created_at || f.timestamp}`;
+      if (!map.has(key)) map.set(key, f);
+    });
+
+    feedbackData = Array.from(map.values());
+
+    renderFeedbackStats();
+    renderFeedbackTable();
+  } catch (err) {
+    console.error('loadAdminFeedback error:', err);
+    const tbody = $('feedbackTableBody') || $('feedbackLearnersTableBody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="color:#b91c1c;text-align:center;padding:20px;">Error loading feedback: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function renderFeedbackStats() {
+  const total = feedbackData.length;
+  const uniqueLearners = new Set(feedbackData.map(f => f.username || f.user_id || f.user_email || 'Guest')).size;
+
+  const counts = {};
+  feedbackData.forEach(f => {
+    if (f.emoji) {
+      counts[f.emoji] = (counts[f.emoji] || 0) + 1;
+    }
+  });
+
+  let topRating = '—';
+  let maxCount = 0;
+  Object.entries(counts).forEach(([rating, count]) => {
+    if (count > maxCount) {
+      maxCount = count;
+      topRating = rating;
+    }
+  });
+
+  if ($('statTotalFeedback')) $('statTotalFeedback').textContent = String(total);
+  if ($('statUniqueLearnersFeedback')) $('statUniqueLearnersFeedback').textContent = String(uniqueLearners);
+  if ($('statTopRating')) $('statTopRating').textContent = topRating;
+
+  const badge = $('feedbackCountBadge');
+  if (badge) {
+    badge.textContent = String(total);
+    badge.style.display = total > 0 ? 'inline-block' : 'none';
+  }
+}
+
+export function filterFeedbackTable() {
+  feedbackSearchQuery = ($('feedbackSearch')?.value || '').toLowerCase().trim();
+  renderFeedbackTable();
+}
+
+function renderFeedbackTable() {
+  const tbody = $('feedbackTableBody') || $('feedbackLearnersTableBody');
+  if (!tbody) return;
+
+  let list = [...feedbackData];
+  list.sort((a, b) => new Date(b.created_at || b.timestamp || 0) - new Date(a.created_at || a.timestamp || 0));
+
+  const emojiFilter = ($('feedbackEmojiFilter')?.value || '').toLowerCase().trim();
+
+  if (feedbackSearchQuery) {
+    list = list.filter(f => {
+      const name = (f.username || f.user_email || f.user_id || '').toLowerCase();
+      const q = (f.question_title || f.question_id || '').toLowerCase();
+      const dom = (f.domain || '').toLowerCase();
+      const lev = String(f.level || '').toLowerCase();
+      const txt = (f.feedback_text || '').toLowerCase();
+      const em = (f.emoji || '').toLowerCase();
+      return name.includes(feedbackSearchQuery) ||
+        q.includes(feedbackSearchQuery) ||
+        dom.includes(feedbackSearchQuery) ||
+        lev.includes(feedbackSearchQuery) ||
+        txt.includes(feedbackSearchQuery) ||
+        em.includes(feedbackSearchQuery);
+    });
+  }
+
+  if (emojiFilter) {
+    list = list.filter(f => (f.emoji || '').toLowerCase().includes(emojiFilter));
+  }
+
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted);">No matching feedback records found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map((f, idx) => {
+    const learnerName = f.username || (f.user_email ? f.user_email.split('@')[0] : 'Learner');
+    const learnerSub = f.user_email ? f.user_email : (f.user_id ? `ID: ${f.user_id.slice(0, 8)}…` : '');
+    const qTitle = f.question_title || f.question_id || 'Scenario Question';
+    const domainLvl = `${f.domain || 'General'} • Level ${f.level || 1}`;
+    const emojiStr = f.emoji || '👍 Good Challenge';
+    const commentText = f.feedback_text ? escapeHtml(f.feedback_text) : '<span style="color:var(--muted);font-style:italic;">No comment written</span>';
+    const dateStr = formatDate(f.created_at || f.timestamp);
+
+    let badgeStyle = 'background:rgba(59, 130, 246, 0.15); color:#60a5fa; border:1px solid rgba(59, 130, 246, 0.3);';
+    if (emojiStr.includes('Too Easy')) {
+      badgeStyle = 'background:rgba(34, 197, 94, 0.15); color:#4ade80; border:1px solid rgba(34, 197, 94, 0.3);';
+    } else if (emojiStr.includes('Hard but Fair')) {
+      badgeStyle = 'background:rgba(168, 85, 247, 0.15); color:#c084fc; border:1px solid rgba(168, 85, 247, 0.3);';
+    } else if (emojiStr.includes('Too Hard')) {
+      badgeStyle = 'background:rgba(239, 68, 68, 0.15); color:#f87171; border:1px solid rgba(239, 68, 68, 0.3);';
+    } else if (emojiStr.includes('Confusing')) {
+      badgeStyle = 'background:rgba(245, 158, 11, 0.15); color:#fbbf24; border:1px solid rgba(245, 158, 11, 0.3);';
+    }
+
+    return `
+      <tr>
+        <td class="num">${idx + 1}</td>
+        <td>
+          <div style="font-weight:700;color:var(--ink);cursor:pointer;" onclick="window.openLearnerFeedbackHistory('${escapeHtml(learnerName)}')">
+            ${escapeHtml(learnerName)}
+          </div>
+          ${learnerSub ? `<div style="font-size:0.75rem;color:var(--muted);">${escapeHtml(learnerSub)}</div>` : ''}
+        </td>
+        <td>
+          <div style="font-weight:600;color:var(--ink);">${escapeHtml(qTitle)}</div>
+        </td>
+        <td>
+          <span style="font-size:0.78rem;font-weight:600;padding:3px 8px;border-radius:4px;background:rgba(255,255,255,0.06);color:var(--primary);border:1px solid rgba(255,255,255,0.1);">
+            ${escapeHtml(domainLvl)}
+          </span>
+        </td>
+        <td>
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:0.82rem;font-weight:700;${badgeStyle}">
+            ${escapeHtml(emojiStr)}
+          </span>
+        </td>
+        <td style="max-width:280px;font-size:0.85rem;color:var(--ink);word-break:break-word;">
+          ${commentText}
+        </td>
+        <td style="font-size:0.8rem;color:var(--muted);white-space:nowrap;">
+          ${dateStr}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+export function openLearnerFeedbackHistory(usernameKey) {
+  const matchingEntries = feedbackData.filter(f => (f.username || 'Guest Learner').trim() === usernameKey.trim());
+  matchingEntries.sort((a, b) => new Date(b.created_at || b.timestamp || 0) - new Date(a.created_at || a.timestamp || 0));
+
+  const titleEl = $('learnerFeedbackModalTitle');
+  if (titleEl) titleEl.textContent = `Feedback History — ${usernameKey} (${matchingEntries.length} Entries)`;
+
+  const bodyEl = $('learnerFeedbackModalBody');
+  if (bodyEl) {
+    if (matchingEntries.length === 0) {
+      bodyEl.innerHTML = '<p style="color:var(--muted);">No feedback records found for this learner.</p>';
+    } else {
+      bodyEl.innerHTML = `
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="num">#</th>
+                <th>Question Title</th>
+                <th>Domain &amp; Level</th>
+                <th>Selected Emoji Rating</th>
+                <th>Feedback Comments</th>
+                <th>Date / Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${matchingEntries.map((e, idx) => `
+                <tr>
+                  <td class="num">${idx + 1}</td>
+                  <td><strong>${escapeHtml(e.question_title || e.question_id || 'Scenario')}</strong></td>
+                  <td><span class="badge draft">${escapeHtml(e.domain || 'Domain')} (${escapeHtml(e.level || 'Level')})</span></td>
+                  <td><strong style="color:var(--primary);">${escapeHtml(e.emoji)}</strong></td>
+                  <td style="font-size:0.88rem;color:var(--ink);">${e.feedback_text ? escapeHtml(e.feedback_text) : '<span style="color:var(--muted);font-style:italic;">No written comment</span>'}</td>
+                  <td style="font-size:0.8rem;color:var(--muted);">${formatDate(e.created_at || e.timestamp)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
+
+  const modal = $('learnerFeedbackModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+export function closeLearnerFeedbackModal() {
+  const modal = $('learnerFeedbackModal');
+  if (modal) modal.style.display = 'none';
+}
+
 // Expose on window for inline handlers
 Object.assign(window, {
   switchAdminTab,
@@ -2672,6 +2903,10 @@ Object.assign(window, {
   closeNotificationEditor,
   saveAdminNotification,
   toggleNotificationActive,
-  deleteAdminNotification
+  deleteAdminNotification,
+  loadAdminFeedback,
+  filterFeedbackTable,
+  openLearnerFeedbackHistory,
+  closeLearnerFeedbackModal
 });
 
