@@ -482,30 +482,428 @@ pre {
   align-items:center;
   gap:6px;
 }
+/* Mobile & Cross-device Responsive Styling System */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+img, svg, canvas, video {
+  max-width: 100%;
+  height: auto;
+}
+
+pre, code, .schema-text, textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+p, h1, h2, h3, h4, .problem, .meta, .small, .pick-title, .pick-note,
+.notif-title, .notif-msg, .dropdown-user-name, .dropdown-user-email,
+.schema-col-name, #assessmentMessage, .score-headline, .step-title {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+.tablewrap, .table-scroll, .sample-table-container, .eval-table-container {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+button, .pick, .level, .tab-btn, .sample-tab, .nav-item, .tool-btn, .ide-tool-btn, .action, .thinking-retry-btn, .thinking-next-btn {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+}
+
 @media (max-width: 768px) {
   input[type="text"], input[type="email"], input[type="number"], select, textarea {
     font-size: 16px !important;
   }
 }
-button, .pick, .level, .tab-btn, .sample-tab, .nav-item, .tool-btn, .ide-tool-btn, .action {
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
+
+/* Tablet & Medium Screen Adapters (481px - 859px) */
+@media (min-width: 481px) and (max-width: 859px) {
+  .app {
+    width: 100%;
+    padding: 16px 18px max(82px, calc(70px + env(safe-area-inset-bottom, 12px)));
+  }
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
 }
-@media (max-width:360px) {
-  .app { padding-left: 10px; padding-right: 10px; }
-  .actions { grid-template-columns:1fr; gap: 8px; }
-  .grid { grid-template-columns:1fr; gap: 8px; }
-  .pick { padding: 12px 10px; border-radius: 16px; }
-  .pick-title { font-size: 13.5px; }
-  .pick-note { font-size: 11px; }
-  .icon { font-size: 22px; margin-bottom: 4px; }
-  h1 { font-size: 22px; }
-  h2 { font-size: 18px; }
+
+/* Standard Mobile Range (361px - 480px) */
+@media (max-width: 480px) {
+  .app {
+    width: 100%;
+    max-width: 100%;
+    padding: 14px 12px max(80px, calc(68px + env(safe-area-inset-bottom, 10px)));
+  }
+  .header {
+    margin-bottom: 16px;
+    gap: 8px;
+  }
+  h1 {
+    font-size: 24px;
+    letter-spacing: -0.5px;
+  }
+  .sub {
+    font-size: 12.5px;
+  }
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .pick {
+    padding: 13px 10px;
+    border-radius: 16px;
+  }
+  .pick-title {
+    font-size: 13.5px;
+  }
+  .pick-note {
+    font-size: 11px;
+  }
+  .icon {
+    font-size: 22px;
+    margin-bottom: 4px;
+  }
+  .levels {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+  }
+  .level {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    padding: 10px 4px;
+    font-size: 12px;
+  }
+  .card {
+    padding: 14px 12px;
+    border-radius: 18px;
+    margin-bottom: 12px;
+  }
+  h2 {
+    font-size: 19px;
+  }
+  .problem {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .topbar {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .meta {
+    font-size: 11px;
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .actions {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .action {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 13.5px;
+    border-radius: 12px;
+  }
+  .optional-sql-card {
+    padding: 16px 12px !important;
+  }
+  #copyFiddleBtn {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 11px 12px !important;
+    font-size: 13px !important;
+    white-space: normal !important;
+    text-align: center !important;
+  }
+  .score-ring-container {
+    padding: 12px 10px;
+    gap: 12px;
+  }
+  .score-ring {
+    width: 68px;
+    height: 68px;
+  }
+  .score-ring-inner {
+    width: 52px;
+    height: 52px;
+  }
+  .score-number {
+    font-size: 16px;
+  }
+  .bottom-nav {
+    width: calc(100% - 18px);
+    max-width: 440px;
+    padding: 4px 6px;
+    bottom: max(10px, env(safe-area-inset-bottom, 10px));
+    border-radius: 20px;
+  }
+  .nav-item {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 3px;
+  }
+  .nav-icon {
+    font-size: 18px;
+  }
+  .nav-label {
+    font-size: 10.5px;
+  }
+  .fab-practice {
+    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 58px);
+    right: 14px;
+  }
+  .progress-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .progress-metric-card {
+    padding: 12px 8px;
+    min-height: 82px;
+    border-radius: 16px;
+  }
+  .progress-metric-card .metric-val {
+    font-size: 20px;
+  }
+  .progress-metric-card .metric-label {
+    font-size: 11px;
+    margin-top: 4px;
+  }
+  .domain-summary-card {
+    padding: 16px 12px;
+    border-radius: 18px;
+  }
+  .domain-chart-flex {
+    gap: 14px;
+  }
+  .domain-legend-list {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    gap: 6px;
+  }
+  .domain-legend-row {
+    padding: 6px 10px;
+    font-size: 11.5px;
+  }
+  .profile-dropdown, .notifications-dropdown {
+    width: min(280px, calc(100vw - 20px)) !important;
+    max-width: calc(100vw - 20px) !important;
+    right: 0 !important;
+  }
+  .modal-backdrop {
+    padding: max(10px, env(safe-area-inset-top, 10px)) 10px max(14px, env(safe-area-inset-bottom, 14px));
+  }
+  .modal-dialog {
+    max-width: calc(100vw - 20px) !important;
+    padding: 18px 14px 16px !important;
+    border-radius: 20px !important;
+  }
+  .thinking-modal-dialog {
+    max-width: calc(100vw - 20px) !important;
+    padding: 18px 14px 16px !important;
+    border-radius: 22px !important;
+  }
+  .thinking-popup-body {
+    gap: 10px;
+  }
+  .thinking-popup-character {
+    width: 76px !important;
+    height: 76px !important;
+  }
+  .thinking-popup-character svg {
+    width: 76px !important;
+    height: 76px !important;
+  }
+  .thinking-popup-score {
+    font-size: 26px !important;
+  }
+  .thinking-popup-title {
+    font-size: 18px !important;
+  }
+  .thinking-popup-subtitle {
+    font-size: 12px !important;
+  }
+  .feedback-emoji-grid {
+    gap: 4px !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+  .feedback-emoji-btn {
+    padding: 6px 2px !important;
+    border-radius: 8px !important;
+  }
+  .feedback-emoji-btn span:first-child {
+    font-size: 18px !important;
+  }
+  .feedback-emoji-btn span:last-child {
+    font-size: 9px !important;
+    line-height: 1.1 !important;
+    word-break: break-word !important;
+  }
+  .thinking-popup-actions {
+    gap: 8px;
+  }
+  .thinking-retry-btn, .thinking-next-btn {
+    height: 42px;
+    font-size: 13.5px;
+  }
 }
-@media (min-width: 361px) and (max-width: 480px) {
-  .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .actions { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .pick { padding: 14px 10px; }
+
+/* Compact Mobile (320px - 360px) */
+@media (max-width: 360px) {
+  .app {
+    padding: 10px 8px max(74px, calc(64px + env(safe-area-inset-bottom, 8px)));
+  }
+  .header {
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 20px;
+    letter-spacing: -0.3px;
+  }
+  .sub {
+    font-size: 11.5px;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .pick {
+    padding: 11px 10px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+  }
+  .pick .icon {
+    font-size: 20px;
+    margin-bottom: 0;
+    flex-shrink: 0;
+  }
+  .pick-title {
+    font-size: 13px;
+  }
+  .pick-note {
+    font-size: 10.5px;
+    margin-top: 2px;
+  }
+  .levels {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+  }
+  .level {
+    width: 100%;
+    padding: 9px 8px;
+    font-size: 12px;
+    text-align: center;
+  }
+  .meta {
+    max-width: 110px;
+    font-size: 10.5px;
+  }
+  .card {
+    padding: 12px 10px;
+    border-radius: 15px;
+    margin-bottom: 10px;
+  }
+  h2 {
+    font-size: 17px;
+  }
+  .problem {
+    font-size: 13px;
+  }
+  .score-ring-container {
+    flex-direction: column;
+    text-align: center;
+    padding: 10px 8px;
+    gap: 8px;
+  }
+  .score-actions-row, .score-chips-row {
+    justify-content: center;
+  }
+  .optional-sql-card {
+    padding: 12px 8px !important;
+  }
+  #copyFiddleBtn {
+    font-size: 12px !important;
+    padding: 9px 8px !important;
+  }
+  .bottom-nav {
+    width: calc(100% - 12px);
+    padding: 3px 2px;
+  }
+  .nav-item {
+    padding: 4px 2px;
+  }
+  .nav-icon {
+    font-size: 16px;
+  }
+  .nav-label {
+    font-size: 9.5px;
+  }
+  .thinking-modal-dialog {
+    padding: 14px 10px 12px !important;
+    border-radius: 18px !important;
+  }
+  .thinking-popup-body {
+    flex-direction: column;
+    text-align: center;
+    gap: 6px;
+  }
+  .thinking-popup-info {
+    text-align: center;
+  }
+  .thinking-popup-character {
+    width: 60px !important;
+    height: 60px !important;
+    margin: 0 auto;
+  }
+  .thinking-popup-character svg {
+    width: 60px !important;
+    height: 60px !important;
+  }
+  .feedback-emoji-grid {
+    gap: 2px !important;
+  }
+  .feedback-emoji-btn {
+    padding: 4px 1px !important;
+  }
+  .feedback-emoji-btn span:first-child {
+    font-size: 15px !important;
+  }
+  .feedback-emoji-btn span:last-child {
+    font-size: 8px !important;
+    letter-spacing: -0.3px;
+  }
+  .thinking-popup-actions {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .progress-metrics-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
 }
 </style>
 <style>

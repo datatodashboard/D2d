@@ -1786,6 +1786,10 @@ function openMotivationPopup(score) {
   window.currentSelectedFeedbackEmoji = null;
 
   function openFeedbackTab() {
+    // When feedback section/page opens: Fetch latest feedback from Supabase
+    if (user?.id) {
+      void fetchUserFeedbackFromSupabase(user.id);
+    }
     if (feedbackSection) {
       feedbackSection.hidden = false;
       feedbackSection.style.display = 'block';
@@ -1830,6 +1834,36 @@ function selectFeedbackEmoji(emoji, btnEl) {
   }
 }
 
+// Supabase = Single Source of Truth for feedback
+async function fetchUserFeedbackFromSupabase(userId) {
+  if (!client) return [];
+  try {
+    const targetUid = userId || user?.id;
+    let query = client.from('question_feedback').select('*').order('created_at', { ascending: false }).limit(200);
+    if (targetUid) {
+      query = query.eq('user_id', targetUid);
+    }
+    const { data, error } = await query;
+    if (!error && Array.isArray(data)) {
+      window.userFeedbackList = data;
+      try {
+        localStorage.setItem('cracksql_feedback_history', JSON.stringify(data.slice(0, 100)));
+      } catch (_) {}
+      updateFeedbackUI();
+      return data;
+    }
+  } catch (err) {
+    console.warn('fetchUserFeedbackFromSupabase notice:', err);
+  }
+  return [];
+}
+
+function updateFeedbackUI() {
+  window.dispatchEvent(new CustomEvent('cracksql:feedback-updated', {
+    detail: { feedback: window.userFeedbackList || [] }
+  }));
+}
+
 async function saveSubmittedFeedback() {
   const emoji = window.currentSelectedFeedbackEmoji;
   if (!emoji || !current) return;
@@ -1850,20 +1884,31 @@ async function saveSubmittedFeedback() {
     created_at: timestamp
   };
 
+  // 1. Supabase = Single Source of Truth: Save feedback to Supabase
   if (client) {
     try {
-      await client.from('question_feedback').insert(record);
+      const { data, error } = await client.from('question_feedback').insert(record).select();
+      if (!error && data && data[0]) {
+        record.id = data[0].id;
+      }
     } catch (err) {
       console.warn('Feedback Supabase insert notice:', err);
     }
   }
 
+  // 2. Update local state immediately
+  if (!Array.isArray(window.userFeedbackList)) {
+    window.userFeedbackList = [];
+  }
+  window.userFeedbackList.unshift(record);
+
+  // 3. Cache in localStorage
   try {
-    const rawLocal = localStorage.getItem('cracksql_feedback_history');
-    let localList = rawLocal ? JSON.parse(rawLocal) : [];
-    localList.unshift(record);
-    localStorage.setItem('cracksql_feedback_history', JSON.stringify(localList.slice(0, 100)));
+    localStorage.setItem('cracksql_feedback_history', JSON.stringify(window.userFeedbackList.slice(0, 100)));
   } catch (_) {}
+
+  // 4. Update local UI immediately
+  updateFeedbackUI();
 
   window.currentSelectedFeedbackEmoji = null;
 }
@@ -3135,6 +3180,10 @@ async function setSession(session) {
     await loadAndRestoreUserProgress(user.id);
     if (currentAuthToken !== authSessionCounter) return;
 
+    // Fetch user's feedback from Supabase (Single Source of Truth)
+    await fetchUserFeedbackFromSupabase(user.id);
+    if (currentAuthToken !== authSessionCounter) return;
+
     initNotificationsState(user.id);
     updateNotificationsUI();
 
@@ -4065,6 +4114,8 @@ try {
   renderScenarioCatalog();
   initAppChrome();
   window.selectFeedbackEmoji = selectFeedbackEmoji;
+  window.fetchUserFeedbackFromSupabase = fetchUserFeedbackFromSupabase;
+  window.saveSubmittedFeedback = saveSubmittedFeedback;
   void initAuth();
   if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 } catch(error) {

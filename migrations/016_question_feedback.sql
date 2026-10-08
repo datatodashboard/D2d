@@ -22,8 +22,9 @@ CREATE POLICY "Anyone can insert question feedback" ON public.question_feedback
   FOR INSERT WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Admins can view all question feedback" ON public.question_feedback;
-CREATE POLICY "Admins can view all question feedback" ON public.question_feedback
-  FOR SELECT USING (public.is_admin());
+DROP POLICY IF EXISTS "Users can view their own question feedback" ON public.question_feedback;
+CREATE POLICY "Users can view their own question feedback" ON public.question_feedback
+  FOR SELECT USING (auth.uid() = user_id OR public.is_admin());
 
 GRANT SELECT, INSERT ON public.question_feedback TO authenticated, anon;
 

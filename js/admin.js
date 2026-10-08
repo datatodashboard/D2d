@@ -344,10 +344,11 @@ async function loadDashboardData() {
   updateStatus('Reading existing learner records from public.profiles & public.learning_progress…');
 
   try {
-    // Fetch directly from the two source-of-truth tables used by the application
-    const [profilesRes, progressRes] = await Promise.all([
+    // Fetch directly from the source-of-truth tables used by the application
+    const [profilesRes, progressRes, directProgressRes] = await Promise.all([
       client.from('profiles').select('*').order('created_at', { ascending: false }).limit(2000),
-      client.from('learning_progress').select('user_id, state, updated_at').limit(2000)
+      client.from('learning_progress').select('user_id, state, updated_at').limit(2000),
+      client.from('progress').select('user_id, scenario_id, completed_at').limit(10000)
     ]);
 
     if (profilesRes.error) {
@@ -356,9 +357,13 @@ async function loadDashboardData() {
     if (progressRes.error) {
       console.warn('Learning progress query notice:', progressRes.error);
     }
+    if (directProgressRes?.error) {
+      console.warn('Direct progress query notice:', directProgressRes.error);
+    }
 
     const profiles = profilesRes.data || [];
     const learningRows = progressRes.data || [];
+    const directProgressRows = directProgressRes?.data || [];
 
     // Map learning_progress rows by user_id
     const learningProgressMap = new Map();
@@ -366,17 +371,29 @@ async function loadDashboardData() {
       if (row.user_id) learningProgressMap.set(row.user_id, row);
     });
 
-    // Collect all distinct user IDs from profiles and learning_progress
+    // Map direct progress table rows by user_id
+    const userDirectProgressMap = new Map();
+    directProgressRows.forEach(row => {
+      if (row.user_id && row.scenario_id) {
+        if (!userDirectProgressMap.has(row.user_id)) {
+          userDirectProgressMap.set(row.user_id, []);
+        }
+        userDirectProgressMap.get(row.user_id).push(row);
+      }
+    });
+
+    // Collect all distinct user IDs from profiles, learning_progress, and progress
     const allUserIds = new Set();
     profiles.forEach(p => allUserIds.add(p.id));
     learningRows.forEach(row => allUserIds.add(row.user_id));
+    directProgressRows.forEach(row => allUserIds.add(row.user_id));
 
     const profilesMap = new Map();
     profiles.forEach(p => profilesMap.set(p.id, p));
 
     let globalTotalSolved = 0;
 
-    // Process each learner's real progress using the exact stage() rules from progress.js
+    // Process each learner's real progress using COUNT(DISTINCT scenario_id)
     learnersData = Array.from(allUserIds).map(userId => {
       const p = profilesMap.get(userId) || { id: userId };
       const progressRow = learningProgressMap.get(userId);
@@ -386,7 +403,9 @@ async function loadDashboardData() {
         ? stateObj.entries
         : {};
 
-      let userSolvedCount = 0;
+      // Requirement: COUNT(DISTINCT scenario_id)
+      // If the same user completes the same scenario multiple times, it must count as ONE solved scenario.
+      const uniqueCompletedScenarioIds = new Set();
       let userAttemptedCount = 0;
       const domainSolved = {};
       const domainAttempted = {};
@@ -411,11 +430,32 @@ async function loadDashboardData() {
         }
 
         if (isSolved) {
-          userSolvedCount++;
-          domainSolved[domain] = (domainSolved[domain] || 0) + 1;
+          uniqueCompletedScenarioIds.add(scenarioId);
           const ts = entry.evaluationAt || entry.updatedAt;
           if (ts) solvedTimestamps.push(Number(ts));
         }
+      }
+
+      // Also merge any confirmed completions from public.progress table:
+      // COUNT(DISTINCT scenario_id) ensures duplicates are counted only once
+      const directRows = userDirectProgressMap.get(userId) || [];
+      for (const row of directRows) {
+        if (row.scenario_id) {
+          uniqueCompletedScenarioIds.add(row.scenario_id);
+          if (row.completed_at) {
+            solvedTimestamps.push(new Date(row.completed_at).getTime());
+          }
+        }
+      }
+
+      // uniqueCompletedScenarios = COUNT(DISTINCT scenario_id)
+      const userSolvedCount = uniqueCompletedScenarioIds.size;
+
+      // Calculate domain solved breakdown based on UNIQUE completed scenarios
+      for (const sId of uniqueCompletedScenarioIds) {
+        const scenario = scenariosMap.get(sId);
+        const domain = scenario?.domain || 'General SQL';
+        domainSolved[domain] = (domainSolved[domain] || 0) + 1;
       }
 
       globalTotalSolved += userSolvedCount;
