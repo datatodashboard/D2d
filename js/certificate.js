@@ -716,20 +716,31 @@ export function generateInstagramShareSvg({ userName, level, domain, completionD
   </g>
 
   <!-- Date & Handle -->
-  <g transform="translate(540, 720)">
+  <g transform="translate(540, 715)">
     <text text-anchor="middle" font-size="14" font-weight="600" fill="#64748b">
       Earned on ${escapeXml(dateDisplay)}
     </text>
   </g>
 
-  <!-- Footer Branding -->
-  <g transform="translate(540, 850)">
-    <text text-anchor="middle" font-size="16" font-weight="700" fill="#0a2246">
-      Built with <tspan fill="#0052cc">Data To Dashboard</tspan>
+  <!-- Divider Line -->
+  <line x1="280" y1="755" x2="800" y2="755" stroke="#e2e8f0" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Footer Branding with D2D Logo -->
+  <g transform="translate(540, 840)">
+    <!-- Small D2D Badge Mark -->
+    <g transform="translate(-18, -42) scale(0.075)">
+      <circle cx="250" cy="250" r="240" fill="#0b172a"/>
+      <path d="M 105,185 A 165,165 0 0,1 405,305" fill="none" stroke="url(#igGold)" stroke-width="14" stroke-linecap="round"/>
+      <circle cx="105" cy="185" r="14" fill="url(#igGold)"/>
+      <circle cx="395" cy="310" r="14" fill="url(#igGold)"/>
+      <path d="M 124,180 L 174,180 C 205,180 220,198 220,238 C 220,278 205,296 174,296 L 124,296 Z M 148,204 L 148,272 L 168,272 C 188,272 196,262 196,238 C 196,214 188,204 168,204 Z" fill="#ffffff"/>
+      <path d="M 294,180 L 344,180 C 375,180 390,198 390,238 C 390,278 375,296 344,296 L 294,296 Z M 318,204 L 318,272 L 338,272 C 358,272 366,262 366,238 C 366,214 358,204 338,204 Z" fill="#ffffff"/>
+      <path d="M 212,208 C 212,190 226,178 250,178 C 274,178 288,190 288,207 C 288,223 277,236 261,250 L 235,272 L 289,272 L 289,296 L 214,296 L 214,275 L 249,242 C 260,231 266,223 266,211 C 266,202 259,197 249,197 C 238,197 232,203 232,212 Z" fill="url(#igGold)"/>
+    </g>
+    <text text-anchor="middle" y="0" font-size="16" font-weight="800" fill="#0a2246">
+      Data To Dashboard
     </text>
-  </g>
-  <g transform="translate(540, 885)">
-    <text text-anchor="middle" font-size="15" font-weight="800" fill="#2563eb" letter-spacing="1">
+    <text text-anchor="middle" y="24" font-size="14" font-weight="700" fill="#2563eb" letter-spacing="0.5">
       @data_to_dashboard_
     </text>
   </g>
@@ -737,8 +748,8 @@ export function generateInstagramShareSvg({ userName, level, domain, completionD
 }
 
 export function getInstagramShareCaption({ userName, level, domain }) {
-  const levelDisplay = formatCertificateLevel(level).replace(/ LEVEL/i, '').trim();
-  const domainDisplay = formatCertificateDomain(domain);
+  const levelDisplay = String(level || 'Beginner').trim();
+  const domainDisplay = String(domain || 'Banking').trim();
   return `🎓 I’ve successfully completed the ${domainDisplay} – ${levelDisplay} level on Crack SQL!
 
 ✅ 20 Questions Completed
@@ -749,6 +760,20 @@ Built with Data To Dashboard.
 @data_to_dashboard_
 
 #CrackSQL #DataToDashboard #SQL #DataEngineering #Learning #Certificate`;
+}
+
+export function getLinkedInShareCaption({ userName, level, domain }) {
+  const levelDisplay = String(level || 'Beginner').trim();
+  const domainDisplay = String(domain || 'Banking').trim();
+  return `🎓 Excited to share that I have successfully completed the ${domainDisplay} – ${levelDisplay} level on Crack SQL!
+
+✅ 20/20 Production SQL Scenarios Solved
+🚀 Strengthening data engineering thinking, query planning, and problem-solving skills.
+
+Explore Crack SQL by Data To Dashboard:
+https://crack-sql-d2d.netlify.app
+
+#DataEngineering #SQL #PostgreSQL #DataToDashboard #CrackSQL #LifelongLearning`;
 }
 
 export async function downloadInstagramShareImage(data) {
@@ -809,6 +834,10 @@ export async function downloadInstagramShareImage(data) {
       reject(err);
     }
   });
+}
+
+export async function downloadLinkedInShareImage(data) {
+  return downloadInstagramShareImage(data);
 }
 
 

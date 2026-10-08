@@ -11,7 +11,10 @@ import {
   getLearnerDisplayName,
   formatCertificateLevel,
   formatCertificateDomain,
-  formatCompletionDate
+  formatCompletionDate,
+  getInstagramShareCaption,
+  getLinkedInShareCaption,
+  generateInstagramShareSvg
 } from '../js/certificate.js';
 import { isCompleted, EMPTY } from '../js/progress.js';
 
@@ -298,5 +301,37 @@ describe('Crack SQL Certificate of Completion System', () => {
     assert.ok(indexHtml.includes('id="progressCertificatesCard"'), 'index.html must have progressCertificatesCard');
     assert.ok(indexHtml.includes('id="certificatesGrid"'), 'index.html must have certificatesGrid');
     assert.ok(indexHtml.includes('id="modalProfileCertificates"'), 'index.html must have modalProfileCertificates');
+  });
+
+  // 10. Prototype Matching Sharing UI & Caption Verification
+  it('verifies Instagram and LinkedIn captions and sharing page structures', () => {
+    const indexHtml = fs.readFileSync('./index.html', 'utf8');
+
+    // Check Instagram & LinkedIn modal containers exist in HTML
+    assert.ok(indexHtml.includes('id="instagramShareModal"'), 'index.html must contain instagramShareModal');
+    assert.ok(indexHtml.includes('id="linkedInShareModal"'), 'index.html must contain linkedInShareModal');
+
+    // Check certificate page buttons
+    assert.ok(indexHtml.includes('navigateToInstagramSharePage()'), 'Must have Instagram navigate button');
+    assert.ok(indexHtml.includes('navigateToLinkedInSharePage()'), 'Must have LinkedIn navigate button');
+    assert.ok(indexHtml.includes('handleCertContinueNextLevel()'), 'Must have continue next level button');
+
+    // Check captions
+    const certSample = { userName: 'Sundararajan V', level: 'Beginner', domain: 'Banking' };
+    const igCaption = getInstagramShareCaption(certSample);
+    assert.ok(igCaption.includes('@data_to_dashboard_'), 'Instagram caption must include @data_to_dashboard_');
+    assert.ok(igCaption.includes('Banking'), 'Instagram caption must include domain');
+    assert.ok(igCaption.includes('Beginner'), 'Instagram caption must include level');
+    assert.ok(igCaption.includes('#CrackSQL'), 'Instagram caption must include hashtags');
+
+    const liCaption = getLinkedInShareCaption(certSample);
+    assert.ok(liCaption.includes('Banking'), 'LinkedIn caption must include domain');
+    assert.ok(liCaption.includes('Beginner'), 'LinkedIn caption must include level');
+    assert.ok(liCaption.includes('Data To Dashboard'), 'LinkedIn caption must include Data To Dashboard');
+
+    // Check SVG artwork includes D2D branding
+    const svg = generateInstagramShareSvg(certSample);
+    assert.ok(svg.includes('Data To Dashboard'), 'Share SVG must include Data To Dashboard');
+    assert.ok(svg.includes('@data_to_dashboard_'), 'Share SVG must include @data_to_dashboard_');
   });
 });

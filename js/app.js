@@ -39,7 +39,9 @@ import {
   formatCompletionDate,
   generateInstagramShareSvg,
   getInstagramShareCaption,
-  downloadInstagramShareImage
+  downloadInstagramShareImage,
+  getLinkedInShareCaption,
+  downloadLinkedInShareImage
 } from './certificate.js';
 
 const $ = id => document.getElementById(id);
@@ -2675,6 +2677,51 @@ function handlePrintCertificatePdf() {
   printCertificate(currentCertificateTarget);
 }
 
+let instagramDownloadCompleted = false;
+let instagramCaptionCopied = false;
+
+let linkedInDownloadCompleted = false;
+let linkedInCaptionCopied = false;
+
+function navigateToInstagramSharePage() {
+  const certPage = $('certificateModal');
+  if (certPage) certPage.hidden = true;
+  openInstagramShareModal(currentCertificateTarget);
+}
+
+function navigateToLinkedInSharePage() {
+  const certPage = $('certificateModal');
+  if (certPage) certPage.hidden = true;
+  openLinkedInShareModal(currentCertificateTarget);
+}
+
+function returnToCertificatePage() {
+  closeInstagramShareModal();
+  closeLinkedInShareModal();
+  if (currentCertificateTarget) {
+    openCertificateModal(currentCertificateTarget);
+  }
+}
+
+function handleCertContinueNextLevel() {
+  closeCertificateModal();
+  if (!currentCertificateTarget) {
+    showScreen('practice');
+    return;
+  }
+  const domain = currentCertificateTarget.domain || selectedDomain || 'Banking';
+  const level = currentCertificateTarget.level || selectedLevel || 'Beginner';
+  const nextTarget = getNextProgressionTarget(domain, level);
+
+  if (nextTarget.type === 'level' && nextTarget.nextLevel) {
+    startNextLevel(domain, nextTarget.nextLevel);
+  } else if (nextTarget.type === 'domain' && nextTarget.nextDomain) {
+    startNextDomain(nextTarget.nextDomain);
+  } else {
+    showScreen('practice');
+  }
+}
+
 function openInstagramShareModal(certData) {
   if (!certData && currentCertificateTarget) {
     certData = currentCertificateTarget;
@@ -2690,6 +2737,11 @@ function openInstagramShareModal(certData) {
     };
   }
   currentCertificateTarget = certData;
+
+  // Reset 3-step unlock flow states
+  instagramDownloadCompleted = false;
+  instagramCaptionCopied = false;
+  updateInstagramModalStates();
 
   const previewCard = $('instagramPreviewCard');
   if (previewCard) {
@@ -2710,37 +2762,336 @@ function closeInstagramShareModal() {
   if (modal) modal.hidden = true;
 }
 
-async function handleDownloadInstagramImage() {
-  if (!currentCertificateTarget) return;
-  const btn = $('igDownloadBtn');
-  const origText = btn ? btn.innerHTML : '';
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span>Generating IG Image...</span>';
+function updateInstagramModalStates() {
+  const btnDownload = $('igDownloadCertBtn');
+  const btnCopy = $('igCopyCaptionBtn');
+  const btnShare = $('igShareToInstagramBtn');
+  const badge1 = $('igStepBadge1');
+  const badge2 = $('igStepBadge2');
+  const badge3 = $('igStepBadge3');
+  const status1 = $('igStepStatus1');
+  const status2 = $('igStepStatus2');
+  const status3 = $('igStepStatus3');
+  const card1 = $('igStepCard1');
+  const card2 = $('igStepCard2');
+  const card3 = $('igStepCard3');
+  const downloadText = $('igDownloadCertBtnText');
+  const copyText = $('igCopyCaptionBtnText');
+  const shareText = $('igShareToInstagramBtnText');
+
+  // Step 1: Download
+  if (btnDownload) {
+    btnDownload.disabled = false;
+    if (instagramDownloadCompleted) {
+      if (downloadText) downloadText.textContent = 'Downloaded ✓ (Download Again)';
+      if (status1) { status1.textContent = 'Completed ✓'; status1.style.color = '#86efac'; }
+      if (badge1) { badge1.className = 'share-step-badge done'; badge1.textContent = '✓ Step 1'; }
+      if (card1) { card1.className = 'share-step-card completed-step'; }
+    } else {
+      if (downloadText) downloadText.textContent = 'Download Image';
+      if (status1) { status1.textContent = 'Ready'; status1.style.color = '#94a3b8'; }
+      if (badge1) { badge1.className = 'share-step-badge current'; badge1.textContent = '🟢 Step 1'; }
+      if (card1) { card1.className = 'share-step-card active-step'; }
+    }
   }
-  try {
-    await downloadInstagramShareImage(currentCertificateTarget);
-  } catch (err) {
-    console.error('Failed to download Instagram image:', err);
-    alert('Failed to generate Instagram image. Please try again.');
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = origText;
+
+  // Step 2: Copy Caption
+  if (btnCopy) {
+    if (instagramDownloadCompleted) {
+      btnCopy.disabled = false;
+      btnCopy.style.background = '#2563eb';
+      btnCopy.style.color = '#ffffff';
+      btnCopy.style.cursor = 'pointer';
+      if (instagramCaptionCopied) {
+        if (copyText) copyText.textContent = 'Caption copied ✓';
+        if (status2) { status2.textContent = 'Completed ✓'; status2.style.color = '#86efac'; }
+        if (badge2) { badge2.className = 'share-step-badge done'; badge2.textContent = '✓ Step 2'; }
+        if (card2) { card2.className = 'share-step-card completed-step'; }
+      } else {
+        if (copyText) copyText.textContent = 'Copy Caption';
+        if (status2) { status2.textContent = 'Unlocked'; status2.style.color = '#93c5fd'; }
+        if (badge2) { badge2.className = 'share-step-badge current'; badge2.textContent = '🟢 Step 2'; }
+        if (card2) { card2.className = 'share-step-card active-step'; }
+      }
+    } else {
+      btnCopy.disabled = true;
+      btnCopy.style.background = 'rgba(255, 255, 255, 0.08)';
+      btnCopy.style.color = '#64748b';
+      btnCopy.style.cursor = 'not-allowed';
+      if (copyText) copyText.textContent = 'Copy Caption';
+      if (status2) { status2.textContent = 'Locked (Complete Step 1)'; status2.style.color = '#64748b'; }
+      if (badge2) { badge2.className = 'share-step-badge'; badge2.textContent = 'Step 2'; }
+      if (card2) { card2.className = 'share-step-card'; }
+    }
+  }
+
+  // Step 3: Open Instagram
+  if (btnShare) {
+    if (instagramCaptionCopied) {
+      btnShare.disabled = false;
+      btnShare.style.opacity = '1';
+      btnShare.style.cursor = 'pointer';
+      btnShare.style.filter = 'none';
+      if (shareText) shareText.textContent = 'Open Instagram';
+      if (status3) { status3.textContent = 'Ready to Share'; status3.style.color = '#fcb045'; }
+      if (badge3) { badge3.className = 'share-step-badge current'; badge3.textContent = '🟢 Step 3'; }
+      if (card3) { card3.className = 'share-step-card active-step'; }
+    } else {
+      btnShare.disabled = true;
+      btnShare.style.opacity = '0.45';
+      btnShare.style.cursor = 'not-allowed';
+      btnShare.style.filter = 'grayscale(0.6)';
+      if (shareText) shareText.textContent = 'Open Instagram';
+      if (status3) { status3.textContent = 'Locked (Complete Step 2)'; status3.style.color = '#64748b'; }
+      if (badge3) { badge3.className = 'share-step-badge'; badge3.textContent = 'Step 3'; }
+      if (card3) { card3.className = 'share-step-card'; }
     }
   }
 }
 
+async function handleDownloadInstagramImage() {
+  if (!currentCertificateTarget) return;
+  const btn = $('igDownloadCertBtn');
+  const textEl = $('igDownloadCertBtnText');
+  const origText = textEl ? textEl.textContent : 'Download Image';
+  if (btn) btn.disabled = true;
+  if (textEl) textEl.textContent = 'Saving PNG image...';
+  try {
+    await downloadInstagramShareImage(currentCertificateTarget);
+    instagramDownloadCompleted = true;
+    updateInstagramModalStates();
+  } catch (err) {
+    console.error('Failed to download Instagram image:', err);
+    alert('Failed to generate Instagram image. Please try again.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function handleCopyInstagramCaption() {
+  if (!instagramDownloadCompleted) return;
   const captionBox = $('instagramCaptionBox');
   if (!captionBox) return;
   try {
     await navigator.clipboard.writeText(captionBox.value);
-    alert('Instagram caption copied to clipboard! ✨ (@data_to_dashboard_ included)');
+    instagramCaptionCopied = true;
+    updateInstagramModalStates();
   } catch (err) {
     captionBox.select();
     document.execCommand('copy');
-    alert('Instagram caption copied to clipboard! ✨ (@data_to_dashboard_ included)');
+    instagramCaptionCopied = true;
+    updateInstagramModalStates();
+  }
+}
+
+async function handleShareToInstagram() {
+  if (!instagramCaptionCopied) return;
+  try {
+    const svgString = generateInstagramShareSvg(currentCertificateTarget);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1080;
+      canvas.height = 1080;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 1080, 1080);
+      canvas.toBlob(async (pngBlob) => {
+        const file = new File([pngBlob], 'Crack_SQL_Instagram_Certificate.png', { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              title: 'Crack SQL Certificate',
+              text: $('instagramCaptionBox').value,
+              files: [file]
+            });
+            URL.revokeObjectURL(url);
+            return;
+          } catch (shareErr) {
+            if (shareErr.name !== 'AbortError') {
+              console.warn('Web share failed:', shareErr);
+            }
+          }
+        }
+        URL.revokeObjectURL(url);
+        window.open('https://www.instagram.com/', '_blank');
+      }, 'image/png');
+    };
+    img.src = url;
+  } catch (err) {
+    window.open('https://www.instagram.com/', '_blank');
+  }
+}
+
+// LinkedIn Dedicated Page Flow
+function openLinkedInShareModal(certData) {
+  if (!certData && currentCertificateTarget) {
+    certData = currentCertificateTarget;
+  }
+  if (!certData) {
+    const learnerName = getLearnerDisplayName(user, currentUsername);
+    const status = checkLevelCompletion(selectedDomain, selectedLevel, scenarios, state);
+    certData = {
+      domain: selectedDomain || 'Banking',
+      level: selectedLevel || 'Beginner',
+      userName: learnerName,
+      completionDate: status.completionDate || formatCompletionDate(Date.now())
+    };
+  }
+  currentCertificateTarget = certData;
+
+  linkedInDownloadCompleted = false;
+  linkedInCaptionCopied = false;
+  updateLinkedInModalStates();
+
+  const previewCard = $('linkedInPreviewCard');
+  if (previewCard) {
+    previewCard.innerHTML = generateInstagramShareSvg(certData);
+  }
+
+  const captionBox = $('linkedInCaptionBox');
+  if (captionBox) {
+    captionBox.value = getLinkedInShareCaption(certData);
+  }
+
+  const modal = $('linkedInShareModal');
+  if (modal) modal.hidden = false;
+}
+
+function closeLinkedInShareModal() {
+  const modal = $('linkedInShareModal');
+  if (modal) modal.hidden = true;
+}
+
+function updateLinkedInModalStates() {
+  const btnDownload = $('liDownloadCertBtn');
+  const btnCopy = $('liCopyCaptionBtn');
+  const btnShare = $('liShareToLinkedInBtn');
+  const badge1 = $('liStepBadge1');
+  const badge2 = $('liStepBadge2');
+  const badge3 = $('liStepBadge3');
+  const status1 = $('liStepStatus1');
+  const status2 = $('liStepStatus2');
+  const status3 = $('liStepStatus3');
+  const card1 = $('liStepCard1');
+  const card2 = $('liStepCard2');
+  const card3 = $('liStepCard3');
+  const downloadText = $('liDownloadCertBtnText');
+  const copyText = $('liCopyCaptionBtnText');
+  const shareText = $('liShareToLinkedInBtnText');
+
+  // Step 1: Download
+  if (btnDownload) {
+    btnDownload.disabled = false;
+    if (linkedInDownloadCompleted) {
+      if (downloadText) downloadText.textContent = 'Downloaded ✓ (Download Again)';
+      if (status1) { status1.textContent = 'Completed ✓'; status1.style.color = '#86efac'; }
+      if (badge1) { badge1.className = 'share-step-badge done'; badge1.textContent = '✓ Step 1'; }
+      if (card1) { card1.className = 'share-step-card completed-step'; }
+    } else {
+      if (downloadText) downloadText.textContent = 'Download Image';
+      if (status1) { status1.textContent = 'Ready'; status1.style.color = '#94a3b8'; }
+      if (badge1) { badge1.className = 'share-step-badge current'; badge1.textContent = '🟢 Step 1'; }
+      if (card1) { card1.className = 'share-step-card active-step'; }
+    }
+  }
+
+  // Step 2: Copy Caption
+  if (btnCopy) {
+    if (linkedInDownloadCompleted) {
+      btnCopy.disabled = false;
+      btnCopy.style.background = '#2563eb';
+      btnCopy.style.color = '#ffffff';
+      btnCopy.style.cursor = 'pointer';
+      if (linkedInCaptionCopied) {
+        if (copyText) copyText.textContent = 'Caption copied ✓';
+        if (status2) { status2.textContent = 'Completed ✓'; status2.style.color = '#86efac'; }
+        if (badge2) { badge2.className = 'share-step-badge done'; badge2.textContent = '✓ Step 2'; }
+        if (card2) { card2.className = 'share-step-card completed-step'; }
+      } else {
+        if (copyText) copyText.textContent = 'Copy Caption';
+        if (status2) { status2.textContent = 'Unlocked'; status2.style.color = '#93c5fd'; }
+        if (badge2) { badge2.className = 'share-step-badge current'; badge2.textContent = '🟢 Step 2'; }
+        if (card2) { card2.className = 'share-step-card active-step'; }
+      }
+    } else {
+      btnCopy.disabled = true;
+      btnCopy.style.background = 'rgba(255, 255, 255, 0.08)';
+      btnCopy.style.color = '#64748b';
+      btnCopy.style.cursor = 'not-allowed';
+      if (copyText) copyText.textContent = 'Copy Caption';
+      if (status2) { status2.textContent = 'Locked (Complete Step 1)'; status2.style.color = '#64748b'; }
+      if (badge2) { badge2.className = 'share-step-badge'; badge2.textContent = 'Step 2'; }
+      if (card2) { card2.className = 'share-step-card'; }
+    }
+  }
+
+  // Step 3: Open LinkedIn
+  if (btnShare) {
+    if (linkedInCaptionCopied) {
+      btnShare.disabled = false;
+      btnShare.style.opacity = '1';
+      btnShare.style.cursor = 'pointer';
+      btnShare.style.filter = 'none';
+      if (shareText) shareText.textContent = 'Open LinkedIn';
+      if (status3) { status3.textContent = 'Ready to Share'; status3.style.color = '#93c5fd'; }
+      if (badge3) { badge3.className = 'share-step-badge current'; badge3.textContent = '🟢 Step 3'; }
+      if (card3) { card3.className = 'share-step-card active-step'; }
+    } else {
+      btnShare.disabled = true;
+      btnShare.style.opacity = '0.45';
+      btnShare.style.cursor = 'not-allowed';
+      btnShare.style.filter = 'grayscale(0.6)';
+      if (shareText) shareText.textContent = 'Open LinkedIn';
+      if (status3) { status3.textContent = 'Locked (Complete Step 2)'; status3.style.color = '#64748b'; }
+      if (badge3) { badge3.className = 'share-step-badge'; badge3.textContent = 'Step 3'; }
+      if (card3) { card3.className = 'share-step-card'; }
+    }
+  }
+}
+
+async function handleDownloadLinkedInImage() {
+  if (!currentCertificateTarget) return;
+  const btn = $('liDownloadCertBtn');
+  const textEl = $('liDownloadCertBtnText');
+  if (btn) btn.disabled = true;
+  if (textEl) textEl.textContent = 'Saving PNG image...';
+  try {
+    await downloadLinkedInShareImage(currentCertificateTarget);
+    linkedInDownloadCompleted = true;
+    updateLinkedInModalStates();
+  } catch (err) {
+    console.error('Failed to download LinkedIn image:', err);
+    alert('Failed to generate share image. Please try again.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function handleCopyLinkedInCaption() {
+  if (!linkedInDownloadCompleted) return;
+  const captionBox = $('linkedInCaptionBox');
+  if (!captionBox) return;
+  try {
+    await navigator.clipboard.writeText(captionBox.value);
+    linkedInCaptionCopied = true;
+    updateLinkedInModalStates();
+  } catch (err) {
+    captionBox.select();
+    document.execCommand('copy');
+    linkedInCaptionCopied = true;
+    updateLinkedInModalStates();
+  }
+}
+
+async function handleShareToLinkedIn() {
+  if (!linkedInCaptionCopied) return;
+  try {
+    const url = 'https://www.linkedin.com/feed/';
+    window.open(url, '_blank');
+  } catch (err) {
+    window.open('https://www.linkedin.com/', '_blank');
   }
 }
 
@@ -4537,6 +4888,7 @@ document.addEventListener('keydown', event => {
     closeAllCertificatesModal();
     closeLevelCompletionModal();
     closeInstagramShareModal();
+    closeLinkedInShareModal();
   }
 });
 
@@ -4588,8 +4940,11 @@ Object.assign(window,{
   handleViewCertificateFromAchievement,handleDownloadCertificateFromAchievement,
   startNextLevel,handlePracticeAgain,
   openCertificateModal,closeCertificateModal,
+  navigateToInstagramSharePage,navigateToLinkedInSharePage,returnToCertificatePage,handleCertContinueNextLevel,
   openInstagramShareModal,closeInstagramShareModal,
-  handleDownloadInstagramImage,handleCopyInstagramCaption,handleOpenInstagramWeb,
+  handleDownloadInstagramImage,handleCopyInstagramCaption,handleShareToInstagram,handleOpenInstagramWeb,
+  openLinkedInShareModal,closeLinkedInShareModal,
+  handleDownloadLinkedInImage,handleCopyLinkedInCaption,handleShareToLinkedIn,
   openAllCertificatesModal,closeAllCertificatesModal,filterAllCertificatesModal,
   handleDownloadCertificatePng,handlePrintCertificatePdf,
   renderCertificatesSection,
