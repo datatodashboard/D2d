@@ -17,6 +17,16 @@ import {
 import {
   CERTIFICATE_DOMAINS,
   CERTIFICATE_LEVELS,
+  ORDERED_DOMAINS,
+  ORDERED_LEVELS,
+  isDomainUnlocked,
+  isDomainCompleted,
+  isLevelUnlocked,
+  isLevelCompleted,
+  isLevelQuestionsCompleted,
+  isLevelFeedbackSubmitted,
+  getFirstUnlockedLevel,
+  getNextProgressionTarget,
   checkLevelCompletion,
   getEarnedCertificates,
   getAllCertificatesStatus,
@@ -26,7 +36,10 @@ import {
   getLearnerDisplayName,
   formatCertificateLevel,
   formatCertificateDomain,
-  formatCompletionDate
+  formatCompletionDate,
+  generateInstagramShareSvg,
+  getInstagramShareCaption,
+  downloadInstagramShareImage
 } from './certificate.js';
 
 const $ = id => document.getElementById(id);
@@ -1336,11 +1349,203 @@ async function payCourseUnlockWithRazorpay() {
 
 window.payCourseUnlockWithRazorpay = payCourseUnlockWithRazorpay;
 
+const EXTRA_DOMAINS = ['Capital Markets', 'Semiconductor', 'Education'];
+
+const DOMAIN_METAS = {
+  'Banking': { icon: '🏦', note: 'Accounts & transactions (60)' },
+  'Healthcare': { icon: '🏥', note: 'Patients & visits (60)' },
+  'Insurance': { icon: '🛡️', note: 'Policies & claims (60)' },
+  'Retail': { icon: '🛒', note: 'Orders & products (60)' },
+  'Capital Markets': { icon: '📈', note: 'Investors & trades (60)' },
+  'Semiconductor': { icon: '🔬', note: 'Batches & chip tests (60)' },
+  'Education': { icon: '🎓', note: 'Students & assessments (60)' }
+};
+
+let currentProgressionNoticeAction = null;
+
+function showProgressionNoticeModal({ title, message, actionLabel, onAction }) {
+  const modal = $('progressionNoticeModal');
+  if (!modal) return;
+  if ($('progressionNoticeTitle')) $('progressionNoticeTitle').textContent = title || 'Level Locked';
+  if ($('progressionNoticeMessage')) $('progressionNoticeMessage').textContent = message || '';
+  const btn = $('progressionNoticeActionBtn');
+  if (btn) {
+    btn.textContent = actionLabel || 'Continue Practice →';
+    currentProgressionNoticeAction = onAction || null;
+  }
+  modal.hidden = false;
+}
+
+function closeProgressionNoticeModal() {
+  const modal = $('progressionNoticeModal');
+  if (modal) modal.hidden = true;
+  currentProgressionNoticeAction = null;
+}
+
+function handleProgressionNoticeAction() {
+  const action = currentProgressionNoticeAction;
+  closeProgressionNoticeModal();
+  if (typeof action === 'function') {
+    action();
+  }
+}
+
+function onLockedDomainClick(domain) {
+  const idx = ORDERED_DOMAINS.indexOf(domain);
+  const prevDom = idx > 0 ? ORDERED_DOMAINS[idx - 1] : 'Banking';
+  showProgressionNoticeModal({
+    title: `🔒 ${domain} is Locked`,
+    message: `Complete all 3 levels in ${prevDom} (Beginner → Intermediate → Expert) and submit mandatory feedback to unlock ${domain}.`,
+    actionLabel: `Continue ${prevDom}`,
+    onAction: () => {
+      selectDomain(prevDom);
+    }
+  });
+}
+
+function onLockedLevelClick(domain, level) {
+  if (!isDomainUnlocked(domain, scenarios, state)) {
+    onLockedDomainClick(domain);
+    return;
+  }
+
+  if (level === 'Intermediate') {
+    const begQuestionsDone = isLevelQuestionsCompleted(domain, 'Beginner', scenarios, state);
+    const begFeedbackDone = isLevelFeedbackSubmitted(domain, 'Beginner', state);
+    if (begQuestionsDone && !begFeedbackDone) {
+      openMandatoryLevelFeedbackModal(domain, 'Beginner');
+      return;
+    }
+    const pool = scenarios.filter(s => s.domain === domain && s.level === 'Beginner');
+    const solved = pool.filter(s => isCompleted(s, state.entries[s.id])).length;
+    showProgressionNoticeModal({
+      title: '🔒 Intermediate Level is Locked',
+      message: `Complete all 20 questions in Beginner Level (${solved}/20 completed) and submit mandatory feedback to unlock Intermediate.`,
+      actionLabel: 'Practice Beginner Level',
+      onAction: () => {
+        selectedDomain = domain;
+        selectedLevel = 'Beginner';
+        renderDomainAndLevelPickers();
+        loadScenario();
+        showScreen('practice');
+      }
+    });
+    return;
+  }
+
+  if (level === 'Expert') {
+    const intQuestionsDone = isLevelQuestionsCompleted(domain, 'Intermediate', scenarios, state);
+    const intFeedbackDone = isLevelFeedbackSubmitted(domain, 'Intermediate', state);
+    if (intQuestionsDone && !intFeedbackDone) {
+      openMandatoryLevelFeedbackModal(domain, 'Intermediate');
+      return;
+    }
+    const pool = scenarios.filter(s => s.domain === domain && s.level === 'Intermediate');
+    const solved = pool.filter(s => isCompleted(s, state.entries[s.id])).length;
+    showProgressionNoticeModal({
+      title: '🔒 Expert Level is Locked',
+      message: `Complete all 20 questions in Intermediate Level (${solved}/20 completed) and submit mandatory feedback to unlock Expert.`,
+      actionLabel: 'Practice Intermediate Level',
+      onAction: () => {
+        selectedDomain = domain;
+        selectedLevel = 'Intermediate';
+        renderDomainAndLevelPickers();
+        loadScenario();
+        showScreen('practice');
+      }
+    });
+    return;
+  }
+}
+
+function renderDomainAndLevelPickers() {
+  selectedDomain = selectedDomain || 'Banking';
+  if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
+    selectedDomain = 'Banking';
+  }
+  if (!isLevelUnlocked(selectedDomain, selectedLevel, scenarios, state)) {
+    selectedLevel = getFirstUnlockedLevel(selectedDomain, scenarios, state);
+  }
+
+  function renderDomainCard(domain) {
+    const meta = DOMAIN_METAS[domain] || { icon: '📁', note: `${domain} (60)` };
+    const unlocked = isDomainUnlocked(domain, scenarios, state);
+    const completed = isDomainCompleted(domain, scenarios, state);
+    const isActive = selectedDomain === domain;
+
+    if (!unlocked) {
+      return `
+        <div class="pick domain locked" onclick="onLockedDomainClick('${domain}')" role="button" tabindex="-1" aria-disabled="true">
+          <div class="icon">${meta.icon}</div>
+          <div class="pick-title">${escapeHtml(domain)}</div>
+          <div class="pick-note">${escapeHtml(meta.note)}</div>
+          <div style="margin-top: 6px; font-size: 11px; font-weight: 700; color: #64748b; background: #f1f5f9; padding: 2px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e2e8f0;">
+            <span>🔒 Locked</span>
+          </div>
+        </div>
+      `;
+    }
+
+    if (completed) {
+      return `
+        <div class="pick domain completed-domain ${isActive ? 'active' : ''}" onclick="selectDomain('${domain}', this)" role="button" tabindex="0">
+          <div class="icon">${meta.icon}</div>
+          <div class="pick-title">${escapeHtml(domain)}</div>
+          <div class="pick-note">${escapeHtml(meta.note)}</div>
+          <div style="margin-top: 6px; font-size: 11px; font-weight: 800; color: #166534; background: #dcfce7; padding: 2px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #bbf7d0;">
+            <span>✅ Completed</span>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="pick domain ${isActive ? 'active' : ''}" onclick="selectDomain('${domain}', this)" role="button" tabindex="0">
+        <div class="icon">${meta.icon}</div>
+        <div class="pick-title">${escapeHtml(domain)}</div>
+        <div class="pick-note">${escapeHtml(meta.note)}</div>
+      </div>
+    `;
+  }
+
+  const coreGrid = $('coreDomainsGrid');
+  if (coreGrid) {
+    coreGrid.innerHTML = CORE_DOMAINS.map(renderDomainCard).join('');
+  }
+
+  const extraGrid = $('extraDomainsGrid');
+  if (extraGrid) {
+    extraGrid.innerHTML = EXTRA_DOMAINS.map(renderDomainCard).join('');
+  }
+
+  // Render Levels with lock icons on locked levels
+  const levelsContainer = $('levelsPicker') || document.querySelector('.levels');
+  if (levelsContainer) {
+    levelsContainer.innerHTML = ORDERED_LEVELS.map(lvl => {
+      const isUnlocked = isLevelUnlocked(selectedDomain, lvl, scenarios, state);
+      const isCurrent = selectedLevel === lvl;
+      if (isUnlocked) {
+        return `<div role="button" tabindex="0" class="level ${isCurrent ? 'active' : ''}" onclick="selectLevel('${lvl}', this)">${lvl}</div>`;
+      } else {
+        return `<div role="button" tabindex="-1" class="level locked" onclick="onLockedLevelClick('${selectedDomain}', '${lvl}')" aria-disabled="true" title="Complete previous level to unlock ${lvl}">🔒 ${lvl}</div>`;
+      }
+    }).join('');
+  }
+}
+
 function loadScenario() {
-  if(!selectedDomain||!selectedLevel) return;
-  const pool=scenarios.filter(s=>s.domain===selectedDomain&&s.level===selectedLevel);
-  const next=chooseNext(pool,state,null)||pool[0];
-  if(next) {
+  selectedDomain = selectedDomain || 'Banking';
+  if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
+    selectedDomain = 'Banking';
+  }
+  selectedLevel = selectedLevel || 'Beginner';
+  if (!isLevelUnlocked(selectedDomain, selectedLevel, scenarios, state)) {
+    selectedLevel = getFirstUnlockedLevel(selectedDomain, scenarios, state);
+  }
+
+  const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
+  const next = chooseNext(pool, state, null) || pool[0];
+  if (next) {
     const isTargetCompleted = isCompleted(next, state.entries[next.id]);
     const completedCount = getCompletedCount();
     if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
@@ -1352,19 +1557,32 @@ function loadScenario() {
       openPaywallModal();
       return;
     }
-    current=next;
+    current = next;
     renderScenario();
   }
 }
-function selectDomain(domain,el) {
-  selectedDomain=domain;
-  document.querySelectorAll('.domain').forEach(x=>x.classList.toggle('active',x===el));
+
+function selectDomain(domain, el) {
+  if (!isDomainUnlocked(domain, scenarios, state)) {
+    onLockedDomainClick(domain);
+    return;
+  }
+  selectedDomain = domain;
+  if (!isLevelUnlocked(domain, selectedLevel, scenarios, state)) {
+    selectedLevel = getFirstUnlockedLevel(domain, scenarios, state);
+  }
+  renderDomainAndLevelPickers();
   renderScenarioCatalog();
   loadScenario();
 }
-function selectLevel(level,el) {
-  selectedLevel=level;
-  document.querySelectorAll('.level').forEach(x=>x.classList.toggle('active',x===el));
+
+function selectLevel(level, el) {
+  if (!isLevelUnlocked(selectedDomain, level, scenarios, state)) {
+    onLockedLevelClick(selectedDomain, level);
+    return;
+  }
+  selectedLevel = level;
+  renderDomainAndLevelPickers();
   renderScenarioCatalog();
   loadScenario();
 }
@@ -1758,6 +1976,10 @@ function openMotivationPopup(score) {
   }
 
   // Next Scenario is shown only for scores 7, 8, 9, 10
+  const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
+  const isLevelComplete = pool.length > 0 && pool.every(s => isCompleted(s, state.entries[s.id]));
+  const feedbackSubmitted = isLevelFeedbackSubmitted(selectedDomain, selectedLevel, state);
+
   if (nextBtn) {
     if (config.showNext && clampedScore >= 7) {
       nextBtn.hidden = false;
@@ -1765,10 +1987,16 @@ function openMotivationPopup(score) {
       nextBtn.disabled = false;
 
       // Check if this completion marks all 20 scenarios complete in this domain and level
-      const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
-      const isLevelComplete = pool.length > 0 && pool.every(s => isCompleted(s, state.entries[s.id]));
       if (isLevelComplete) {
-        nextBtn.innerHTML = `<span>Complete Level & View Certificate</span> <span class="btn-icon">🏆</span>`;
+        if (!feedbackSubmitted) {
+          const nextTarget = getNextProgressionTarget(selectedDomain, selectedLevel);
+          const nextLabel = (selectedLevel === 'Expert')
+            ? (nextTarget.type === 'domain' ? nextTarget.nextDomain : 'Final Domain')
+            : nextTarget.nextLevel;
+          nextBtn.innerHTML = `<span>Submit Feedback to Unlock ${nextLabel}</span> <span class="btn-icon">📝</span>`;
+        } else {
+          nextBtn.innerHTML = `<span>Complete Level & View Certificate</span> <span class="btn-icon">🏆</span>`;
+        }
       } else {
         nextBtn.innerHTML = `<span>Next Scenario</span> <span class="btn-icon">→</span>`;
       }
@@ -1779,9 +2007,11 @@ function openMotivationPopup(score) {
     }
   }
 
-  // Feedback Checkpoint: Every 5 completed questions (5, 10, 15, 20...)
+  // Feedback Checkpoint:
+  // Every 5 completed questions in the level (5, 10, 15) triggers quick feedback
+  // But Question 20 is different: Question 20 requires MANDATORY feedback form to unlock the next level!
   const feedbackSection = $('motivationFeedbackSection');
-  const completedQuestions = getCompletedCount();
+  const levelSolvedCount = pool.filter(s => isCompleted(s, state.entries[s.id])).length;
 
   window.currentSelectedFeedbackEmoji = null;
 
@@ -1806,7 +2036,13 @@ function openMotivationPopup(score) {
     }
   }
 
-  if (completedQuestions > 0 && completedQuestions % 5 === 0) {
+  if (levelSolvedCount === 20 && !feedbackSubmitted) {
+    // End of level 20-question checkpoint: Hide inline quick feedback so mandatory feedback modal handles it
+    if (feedbackSection) {
+      feedbackSection.hidden = true;
+      feedbackSection.style.display = 'none';
+    }
+  } else if (levelSolvedCount > 0 && levelSolvedCount % 5 === 0 && levelSolvedCount < 20) {
     openFeedbackTab();
   } else if (feedbackSection) {
     feedbackSection.hidden = true;
@@ -1832,6 +2068,174 @@ function selectFeedbackEmoji(emoji, btnEl) {
   if (nextBtn) {
     nextBtn.disabled = false;
   }
+}
+
+let currentMandatoryFeedbackTarget = null;
+let currentMandatoryFeedbackEmoji = 'Good Challenge';
+
+function openMandatoryLevelFeedbackModal(domain, level) {
+  closeMotivationModal();
+  domain = domain || selectedDomain || 'Banking';
+  level = level || selectedLevel || 'Beginner';
+  currentMandatoryFeedbackTarget = { domain, level };
+  currentMandatoryFeedbackEmoji = 'Good Challenge';
+
+  const modal = $('mandatoryFeedbackModal');
+  if (!modal) return;
+
+  const nextTarget = getNextProgressionTarget(domain, level);
+
+  if ($('mandatoryFeedbackBadge')) {
+    $('mandatoryFeedbackBadge').textContent = `${domain} • ${level} (20/20 Completed)`;
+  }
+  if ($('mandatoryFeedbackTitle')) {
+    $('mandatoryFeedbackTitle').textContent = `🎉 ${domain} — ${level} Completed!`;
+  }
+  if ($('mandatoryFeedbackSubtitle')) {
+    if (level === 'Expert') {
+      $('mandatoryFeedbackSubtitle').textContent = nextTarget.type === 'domain'
+        ? `Submit your mandatory feedback to complete ${domain} and unlock ${nextTarget.nextDomain}! 🔓`
+        : `Submit your mandatory feedback to complete all domains! 🎓`;
+    } else {
+      $('mandatoryFeedbackSubtitle').textContent = `Submit your mandatory feedback on ${level} Level to unlock ${nextTarget.nextLevel}! 🔓`;
+    }
+  }
+  if ($('submitMandatoryFeedbackBtnText')) {
+    if (level === 'Expert') {
+      $('submitMandatoryFeedbackBtnText').textContent = nextTarget.type === 'domain'
+        ? `Submit Feedback & Unlock ${nextTarget.nextDomain}`
+        : `Submit Feedback & Complete All Domains`;
+    } else {
+      $('submitMandatoryFeedbackBtnText').textContent = `Submit Feedback & Unlock ${nextTarget.nextLevel}`;
+    }
+  }
+
+  const textarea = $('mandatoryFeedbackText');
+  if (textarea) textarea.value = '';
+  const errEl = $('mandatoryFeedbackError');
+  if (errEl) errEl.style.display = 'none';
+
+  document.querySelectorAll('.mandatory-emoji-btn').forEach(btn => {
+    const isDefault = btn.getAttribute('data-emoji') === 'Good Challenge';
+    btn.style.borderColor = isDefault ? 'var(--primary)' : 'var(--line)';
+    btn.style.background = isDefault ? '#eff6ff' : '#ffffff';
+    btn.style.boxShadow = isDefault ? '0 0 0 2px rgba(37,99,235,0.2)' : 'none';
+  });
+
+  modal.hidden = false;
+  setTimeout(() => textarea?.focus(), 100);
+}
+
+function selectMandatoryFeedbackEmoji(emoji, btnEl) {
+  currentMandatoryFeedbackEmoji = emoji;
+  document.querySelectorAll('.mandatory-emoji-btn').forEach(btn => {
+    btn.style.borderColor = 'var(--line)';
+    btn.style.background = '#ffffff';
+    btn.style.boxShadow = 'none';
+  });
+  if (btnEl) {
+    btnEl.style.borderColor = 'var(--primary)';
+    btnEl.style.background = '#eff6ff';
+    btnEl.style.boxShadow = '0 0 0 2px rgba(37,99,235,0.2)';
+  }
+}
+
+function onMandatoryFeedbackInput() {
+  const errEl = $('mandatoryFeedbackError');
+  if (errEl) errEl.style.display = 'none';
+}
+
+async function submitMandatoryLevelFeedback() {
+  if (!currentMandatoryFeedbackTarget) return;
+  const { domain, level } = currentMandatoryFeedbackTarget;
+  const textarea = $('mandatoryFeedbackText');
+  const feedbackText = (textarea?.value || '').trim();
+  const errEl = $('mandatoryFeedbackError');
+
+  if (!feedbackText || feedbackText.length < 2) {
+    if (errEl) {
+      errEl.textContent = 'Please type your feedback before submitting.';
+      errEl.style.display = 'block';
+    }
+    textarea?.focus();
+    return;
+  }
+
+  const btn = $('submitMandatoryFeedbackBtn');
+  if (btn) btn.disabled = true;
+
+  const learnerName = getLearnerDisplayName(user, currentUsername);
+  const emoji = currentMandatoryFeedbackEmoji || 'Good Challenge';
+  const now = Date.now();
+  const timestamp = new Date(now).toISOString();
+
+  // 1. Save in state.levelFeedback
+  state.levelFeedback = state.levelFeedback || {};
+  const levelKey = `${domain}_${level}`;
+  state.levelFeedback[levelKey] = {
+    submittedAt: now,
+    text: feedbackText,
+    emoji: emoji
+  };
+
+  // 2. Save locally
+  saveProgress(storage, user?.id, state);
+
+  // 3. Save to Supabase (question_feedback)
+  if (client) {
+    try {
+      await client.from('question_feedback').insert({
+        user_id: user?.id || null,
+        username: learnerName,
+        question_id: `${domain}_${level}_completion`,
+        question_title: `${domain} - ${level} Level Completion`,
+        domain: domain,
+        level: level,
+        emoji: emoji,
+        feedback_text: feedbackText,
+        created_at: timestamp
+      });
+    } catch (dbErr) {
+      console.warn('[D2D Progress] Mandatory feedback Supabase insert notice:', dbErr);
+    }
+  }
+
+  // 4. Update local userFeedbackList
+  if (!Array.isArray(window.userFeedbackList)) {
+    window.userFeedbackList = [];
+  }
+  window.userFeedbackList.unshift({
+    user_id: user?.id || null,
+    username: learnerName,
+    question_id: `${domain}_${level}_completion`,
+    question_title: `${domain} - ${level} Level Completion`,
+    domain: domain,
+    level: level,
+    emoji: emoji,
+    feedback_text: feedbackText,
+    created_at: timestamp
+  });
+  try {
+    localStorage.setItem('cracksql_feedback_history', JSON.stringify(window.userFeedbackList.slice(0, 100)));
+  } catch (_) {}
+  updateFeedbackUI();
+
+  // 5. Cloud sync
+  cloud.request();
+
+  if (btn) btn.disabled = false;
+
+  // 6. Close mandatory feedback modal
+  const modal = $('mandatoryFeedbackModal');
+  if (modal) modal.hidden = true;
+
+  // 7. Update UI: lock states become active/unlocked
+  renderDomainAndLevelPickers();
+  renderScenarioCatalog();
+  updateProgress();
+
+  // 8. Open Level Completion Celebration Modal with unlocked next level / domain!
+  openLevelCompletionModal(domain, level);
 }
 
 // Supabase = Single Source of Truth for feedback
@@ -1927,6 +2331,16 @@ function handleMotivationRetry() {
 }
 
 async function handleMotivationNext() {
+  const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
+  const questionsDone = pool.length > 0 && pool.every(s => isCompleted(s, state.entries[s.id]));
+  const feedbackDone = isLevelFeedbackSubmitted(selectedDomain, selectedLevel, state);
+
+  if (questionsDone && !feedbackDone) {
+    closeMotivationModal();
+    openMandatoryLevelFeedbackModal(selectedDomain, selectedLevel);
+    return;
+  }
+
   const feedbackSection = $('motivationFeedbackSection');
   if (feedbackSection && !feedbackSection.hidden && window.currentSelectedFeedbackEmoji) {
     await saveSubmittedFeedback();
@@ -1969,11 +2383,19 @@ function nextScenario() {
   if (!next) {
     const allCompleted = pool.every(s => isCompleted(s, state.entries[s.id]));
     if (allCompleted) {
+      if (!isLevelFeedbackSubmitted(selectedDomain, selectedLevel, state)) {
+        openMandatoryLevelFeedbackModal(selectedDomain, selectedLevel);
+        return;
+      }
       openLevelCompletionModal(selectedDomain, selectedLevel);
       return;
     }
     next = pool.find(s => !isCompleted(s, state.entries[s.id]));
     if (!next) {
+      if (!isLevelFeedbackSubmitted(selectedDomain, selectedLevel, state)) {
+        openMandatoryLevelFeedbackModal(selectedDomain, selectedLevel);
+        return;
+      }
       openLevelCompletionModal(selectedDomain, selectedLevel);
       return;
     }
@@ -2053,6 +2475,12 @@ function openLevelCompletionModal(domain, level) {
   closeMotivationModal();
   domain = domain || selectedDomain || 'Banking';
   level = level || selectedLevel || 'Beginner';
+
+  // Feedback is mandatory to unlock subsequent levels and complete the level!
+  if (!isLevelFeedbackSubmitted(domain, level, state)) {
+    openMandatoryLevelFeedbackModal(domain, level);
+    return;
+  }
   
   const status = checkLevelCompletion(domain, level, scenarios, state);
   const learnerName = getLearnerDisplayName(user, currentUsername);
@@ -2085,7 +2513,7 @@ function openLevelCompletionModal(domain, level) {
 
   triggerLevelCompletionCelebration();
 
-  // Setup Next Level buttons
+  // Setup Next Level / Next Domain progression buttons
   const navRow = $('levelCompletionNavRow');
   if (navRow) {
     if (level === 'Beginner') {
@@ -2101,18 +2529,30 @@ function openLevelCompletionModal(domain, level) {
         </button>
       `;
     } else if (level === 'Expert') {
-      const begComp = checkLevelCompletion(domain, 'Beginner', scenarios, state).isCompleted;
-      const intComp = checkLevelCompletion(domain, 'Intermediate', scenarios, state).isCompleted;
-      const allThreeDone = begComp && intComp;
+      const allThreeDone = isDomainCompleted(domain, scenarios, state);
+      const nextTarget = getNextProgressionTarget(domain, level);
 
       if (allThreeDone) {
-        navRow.innerHTML = `
-          <div style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 14px;border-radius:12px;font-size:13.5px;font-weight:700;">
-            🌟 All three levels completed in ${domain}!
-          </div>
-        `;
+        if (nextTarget.type === 'domain' && nextTarget.nextDomain) {
+          navRow.innerHTML = `
+            <div style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 14px;border-radius:12px;font-size:13.5px;font-weight:700;margin-bottom:8px;">
+              🌟 All three levels completed in ${domain}! ${nextTarget.nextDomain} is now unlocked! 🔓
+            </div>
+            <button class="action primary" style="width:100%;padding:11px;font-size:14px;font-weight:700;" onclick="startNextDomain('${nextTarget.nextDomain}')">
+              Start ${nextTarget.nextDomain} (Beginner) →
+            </button>
+          `;
+        } else {
+          navRow.innerHTML = `
+            <div style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 14px;border-radius:12px;font-size:13.5px;font-weight:700;">
+              🎓 Fantastic! You have completed all domains and levels!
+            </div>
+          `;
+        }
       } else {
         const remaining = [];
+        const begComp = checkLevelCompletion(domain, 'Beginner', scenarios, state).isCompleted;
+        const intComp = checkLevelCompletion(domain, 'Intermediate', scenarios, state).isCompleted;
         if (!begComp) remaining.push(`<button class="action secondary" style="flex:1;padding:9px;font-size:13px;" onclick="startNextLevel('${domain}','Beginner')">Start Beginner</button>`);
         if (!intComp) remaining.push(`<button class="action secondary" style="flex:1;padding:9px;font-size:13px;" onclick="startNextLevel('${domain}','Intermediate')">Start Intermediate</button>`);
         navRow.innerHTML = `
@@ -2146,14 +2586,26 @@ function handleDownloadCertificateFromAchievement() {
 
 function startNextLevel(domain, level) {
   closeLevelCompletionModal();
+  if (!isLevelUnlocked(domain, level, scenarios, state)) {
+    onLockedLevelClick(domain, level);
+    return;
+  }
   selectedDomain = domain;
   selectedLevel = level;
-  document.querySelectorAll('.domain').forEach(x => {
-    x.classList.toggle('active', x.textContent.includes(domain));
-  });
-  document.querySelectorAll('.level').forEach(x => {
-    x.classList.toggle('active', x.textContent.trim() === level);
-  });
+  renderDomainAndLevelPickers();
+  loadScenario();
+  showScreen('practice');
+}
+
+function startNextDomain(domain) {
+  closeLevelCompletionModal();
+  if (!isDomainUnlocked(domain, scenarios, state)) {
+    onLockedDomainClick(domain);
+    return;
+  }
+  selectedDomain = domain;
+  selectedLevel = 'Beginner';
+  renderDomainAndLevelPickers();
   loadScenario();
   showScreen('practice');
 }
@@ -2223,6 +2675,79 @@ function handlePrintCertificatePdf() {
   printCertificate(currentCertificateTarget);
 }
 
+function openInstagramShareModal(certData) {
+  if (!certData && currentCertificateTarget) {
+    certData = currentCertificateTarget;
+  }
+  if (!certData) {
+    const learnerName = getLearnerDisplayName(user, currentUsername);
+    const status = checkLevelCompletion(selectedDomain, selectedLevel, scenarios, state);
+    certData = {
+      domain: selectedDomain || 'Banking',
+      level: selectedLevel || 'Beginner',
+      userName: learnerName,
+      completionDate: status.completionDate || formatCompletionDate(Date.now())
+    };
+  }
+  currentCertificateTarget = certData;
+
+  const previewCard = $('instagramPreviewCard');
+  if (previewCard) {
+    previewCard.innerHTML = generateInstagramShareSvg(certData);
+  }
+
+  const captionBox = $('instagramCaptionBox');
+  if (captionBox) {
+    captionBox.value = getInstagramShareCaption(certData);
+  }
+
+  const modal = $('instagramShareModal');
+  if (modal) modal.hidden = false;
+}
+
+function closeInstagramShareModal() {
+  const modal = $('instagramShareModal');
+  if (modal) modal.hidden = true;
+}
+
+async function handleDownloadInstagramImage() {
+  if (!currentCertificateTarget) return;
+  const btn = $('igDownloadBtn');
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>Generating IG Image...</span>';
+  }
+  try {
+    await downloadInstagramShareImage(currentCertificateTarget);
+  } catch (err) {
+    console.error('Failed to download Instagram image:', err);
+    alert('Failed to generate Instagram image. Please try again.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+  }
+}
+
+async function handleCopyInstagramCaption() {
+  const captionBox = $('instagramCaptionBox');
+  if (!captionBox) return;
+  try {
+    await navigator.clipboard.writeText(captionBox.value);
+    alert('Instagram caption copied to clipboard! ✨ (@data_to_dashboard_ included)');
+  } catch (err) {
+    captionBox.select();
+    document.execCommand('copy');
+    alert('Instagram caption copied to clipboard! ✨ (@data_to_dashboard_ included)');
+  }
+}
+
+function handleOpenInstagramWeb() {
+  window.open('https://www.instagram.com/', '_blank');
+}
+
 let currentActiveScreen = 'home';
 const pageScrollPositions = { home: 0, practice: 0 };
 
@@ -2266,6 +2791,7 @@ function showScreen(name) {
       renderScenario();
     }
   } else if (name === 'home') {
+    renderDomainAndLevelPickers();
     renderScenarioCatalog();
     if (user && client) {
       void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
@@ -2292,6 +2818,11 @@ function openScenario(id) {
   const target = scenarios.find(s => s.id === id);
   if (!target) return;
 
+  if (!isDomainUnlocked(target.domain, scenarios, state) || !isLevelUnlocked(target.domain, target.level, scenarios, state)) {
+    onLockedLevelClick(target.domain, target.level);
+    return;
+  }
+
   const isTargetCompleted = isCompleted(target, state.entries[target.id]);
   const completedCount = getCompletedCount();
   if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
@@ -2302,12 +2833,7 @@ function openScenario(id) {
   current = target;
   selectedDomain = target.domain;
   selectedLevel = target.level;
-  document.querySelectorAll('.domain').forEach(x => {
-    x.classList.toggle('active', x.textContent.includes(selectedDomain));
-  });
-  document.querySelectorAll('.level').forEach(x => {
-    x.classList.toggle('active', x.textContent.trim() === selectedLevel);
-  });
+  renderDomainAndLevelPickers();
   renderScenario();
   showScreen('practice');
 }
@@ -2864,14 +3390,15 @@ function filterProgressSearch() {}
 function renderProgressTable() {}
 
 function practiceDomain(domain) {
+  if (!isDomainUnlocked(domain, scenarios, state)) {
+    onLockedDomainClick(domain);
+    return;
+  }
   selectedDomain = domain;
-  selectedLevel = selectedLevel || 'Beginner';
-  document.querySelectorAll('.domain').forEach(x => {
-    x.classList.toggle('active', x.textContent.includes(domain));
-  });
-  document.querySelectorAll('.level').forEach(x => {
-    x.classList.toggle('active', x.textContent.trim() === selectedLevel);
-  });
+  if (!isLevelUnlocked(domain, selectedLevel, scenarios, state)) {
+    selectedLevel = getFirstUnlockedLevel(domain, scenarios, state);
+  }
+  renderDomainAndLevelPickers();
   loadScenario();
   showScreen('practice');
 }
@@ -3073,13 +3600,34 @@ async function loadAndRestoreUserProgress(userId) {
         console.log('[D2D Progress] Cloud progress found');
         // 3. Sanitize cloud state
         const cloudState = sanitize(row.state, ids);
-        const cloudHasEntries = cloudState && Object.keys(cloudState.entries).length > 0;
-        if (cloudHasEntries) {
-          // 4. Merge cloud and local progress safely (preserves score >= 7 completions)
-          workingState = mergeProgress(workingState, cloudState, ids);
-        }
+        workingState = mergeProgress(workingState, cloudState, ids);
       } else {
         console.log('[D2D Progress] No existing cloud progress found for user');
+      }
+
+      // Reconcile level feedback from question_feedback table in Supabase
+      try {
+        const { data: qfRows } = await client
+          .from('question_feedback')
+          .select('domain, level, created_at, feedback_text, emoji')
+          .eq('user_id', userId);
+        if (qfRows && Array.isArray(qfRows)) {
+          workingState.levelFeedback = workingState.levelFeedback || {};
+          for (const item of qfRows) {
+            if (item.domain && item.level) {
+              const key = `${item.domain}_${item.level}`;
+              if (!workingState.levelFeedback[key]) {
+                workingState.levelFeedback[key] = {
+                  submittedAt: new Date(item.created_at).getTime() || Date.now(),
+                  text: item.feedback_text || '',
+                  emoji: item.emoji || ''
+                };
+              }
+            }
+          }
+        }
+      } catch (qfErr) {
+        console.warn('[D2D Progress] question_feedback sync notice:', qfErr);
       }
 
       // 3. Authoritative reconciliation with public.progress
@@ -3139,6 +3687,7 @@ async function loadAndRestoreUserProgress(userId) {
   // 7. Update progress UI & render scenarios
   renderAuth();
   updateProgress();
+  renderDomainAndLevelPickers();
   renderScenarioCatalog();
   if (current) renderScenario();
 
@@ -3987,6 +4536,7 @@ document.addEventListener('keydown', event => {
     closeCertificateModal();
     closeAllCertificatesModal();
     closeLevelCompletionModal();
+    closeInstagramShareModal();
   }
 });
 
@@ -4038,13 +4588,25 @@ Object.assign(window,{
   handleViewCertificateFromAchievement,handleDownloadCertificateFromAchievement,
   startNextLevel,handlePracticeAgain,
   openCertificateModal,closeCertificateModal,
+  openInstagramShareModal,closeInstagramShareModal,
+  handleDownloadInstagramImage,handleCopyInstagramCaption,handleOpenInstagramWeb,
   openAllCertificatesModal,closeAllCertificatesModal,filterAllCertificatesModal,
   handleDownloadCertificatePng,handlePrintCertificatePdf,
   renderCertificatesSection,
   checkLevelCompletion,getEarnedCertificates,getAllCertificatesStatus,
   toggleNotificationsDropdown,closeNotificationsDropdown,markAllNotificationsRead,handleNotificationAction,
   updateNotificationsUI,
-  sqlEngineManager
+  sqlEngineManager,
+  selectMandatoryFeedbackEmoji,
+  onMandatoryFeedbackInput,
+  submitMandatoryLevelFeedback,
+  onLockedLevelClick,
+  onLockedDomainClick,
+  closeProgressionNoticeModal,
+  handleProgressionNoticeAction,
+  startNextDomain,
+  openMandatoryLevelFeedbackModal,
+  renderDomainAndLevelPickers
 });
 try {
   initLandscapeMode();
@@ -4110,7 +4672,10 @@ try {
       }
     });
   }
+  selectedDomain = selectedDomain || 'Banking';
+  selectedLevel = selectedLevel || getFirstUnlockedLevel(selectedDomain, scenarios, state);
   updateProgress();
+  renderDomainAndLevelPickers();
   renderScenarioCatalog();
   initAppChrome();
   window.selectFeedbackEmoji = selectFeedbackEmoji;

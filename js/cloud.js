@@ -77,7 +77,9 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
               const mergedState = {
                 version: 2,
                 resetAt: Math.max(context.state?.resetAt || 0, row?.state?.resetAt || 0),
-                entries: mergedEntries
+                entries: mergedEntries,
+                skills: { ...(row?.state?.skills || {}), ...(context.state?.skills || {}) },
+                levelFeedback: { ...(row?.state?.levelFeedback || {}), ...(context.state?.levelFeedback || {}) }
               };
 
               const { error: upsertErr } = await activeClient

@@ -33,6 +33,9 @@ export function sanitize(value, ids) {
   if (value.skills && typeof value.skills === 'object') {
     result.skills = value.skills;
   }
+  if (value.levelFeedback && typeof value.levelFeedback === 'object' && !Array.isArray(value.levelFeedback)) {
+    result.levelFeedback = value.levelFeedback;
+  }
   return result;
 }
 export function isCompleted(scenario, entry) {
@@ -67,6 +70,12 @@ export function saveProgress(storage,userId,state) {
 export function mergeProgress(a,b,ids) {
   a=sanitize(a,ids); b=sanitize(b,ids);
   const result=EMPTY(); result.resetAt=Math.max(a.resetAt,b.resetAt);
+  if (a.skills || b.skills) {
+    result.skills = { ...(a.skills || {}), ...(b.skills || {}) };
+  }
+  if (a.levelFeedback || b.levelFeedback) {
+    result.levelFeedback = { ...(a.levelFeedback || {}), ...(b.levelFeedback || {}) };
+  }
   const allIds = new Set([...(ids || []), ...Object.keys(a.entries), ...Object.keys(b.entries)]);
   for(const id of allIds) {
     if (ids && ids.size > 0 && !ids.has(id)) continue;

@@ -195,6 +195,44 @@ h1 { margin:0; font-size:31px; letter-spacing:-.9px; }
   color:white;
   border-color:var(--primary);
 }
+.level.locked {
+  background:#f1f5f9;
+  color:#94a3b8;
+  border-color:#e2e8f0;
+  cursor:not-allowed;
+  opacity:0.75;
+  user-select:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+}
+.level.locked:hover {
+  background:#f1f5f9;
+  border-color:#e2e8f0;
+  color:#94a3b8;
+}
+.pick.domain.locked {
+  background:#f8fafc;
+  border-color:#e2e8f0;
+  cursor:not-allowed;
+  opacity:0.65;
+  user-select:none;
+}
+.pick.domain.locked .icon {
+  filter:grayscale(0.8);
+}
+.pick.domain.locked .pick-title {
+  color:#64748b;
+}
+.pick.domain.completed-domain {
+  border-color:#86efac;
+  background:#f0fdf4;
+}
+.pick.domain.completed-domain.active {
+  border-color:var(--primary);
+  background:#eff6ff;
+}
 .hint { color:var(--muted); text-align:center; margin-top:20px; font-size:13px; }
 .topbar {
   display:flex;
@@ -4106,6 +4144,14 @@ body.landscape-layout .practice-container {
           </svg>
           <span>Print / PDF</span>
         </button>
+        <button class="action secondary sm cert-instagram-btn" onclick="openInstagramShareModal()" type="button" title="Share on Instagram" style="background: #fdf2f8; color: #db2777; border-color: #fbcfe8;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
+          </svg>
+          <span>Share on IG</span>
+        </button>
         <button class="thinking-modal-close" onclick="closeCertificateModal()" aria-label="Close" type="button">✕</button>
       </div>
     </div>
@@ -4115,6 +4161,53 @@ body.landscape-layout .practice-container {
       <div class="cert-preview-card" id="certPreviewCard">
         <!-- Rendered dynamically via generateCertificateSvg() -->
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Instagram Share Modal -->
+<div id="instagramShareModal" class="modal-backdrop" hidden onclick="if(event.target===this)closeInstagramShareModal()">
+  <div class="modal-dialog" style="max-width: 520px; width: 100%; padding: 24px; border-radius: 24px; background: #ffffff; box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 24px;">📸</span>
+        <div>
+          <h3 style="margin: 0; font-size: 18px; font-weight: 900; color: var(--ink);">Share on Instagram</h3>
+          <p style="margin: 0; font-size: 12px; color: var(--muted);">Optional achievement sharing for your profile (@data_to_dashboard_)</p>
+        </div>
+      </div>
+      <button class="thinking-modal-close" onclick="closeInstagramShareModal()" aria-label="Close" type="button">✕</button>
+    </div>
+
+    <!-- Instagram Square Preview Card -->
+    <div style="width: 100%; aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: #071b38; margin-bottom: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);" id="instagramPreviewCard">
+      <!-- Dynamic SVG Preview -->
+    </div>
+
+    <!-- Caption Box -->
+    <div style="margin-bottom: 16px;">
+      <label style="font-size: 12px; font-weight: 700; color: var(--ink); display: block; margin-bottom: 6px;">
+        Instagram Caption (Ready to Copy)
+      </label>
+      <textarea id="instagramCaptionBox" readonly style="width: 100%; height: 120px; font-size: 12px; font-family: inherit; padding: 10px; border: 1.5px solid var(--line); border-radius: 10px; background: #f8fafc; color: var(--ink); resize: none; box-sizing: border-box;"></textarea>
+    </div>
+
+    <!-- Action Buttons -->
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <button class="action primary sm" onclick="handleCopyInstagramCaption()" type="button" style="flex: 1; justify-content: center; font-weight: 700;">
+        📋 Copy Caption
+      </button>
+      <button class="action secondary sm" id="igDownloadBtn" onclick="handleDownloadInstagramImage()" type="button" style="flex: 1; justify-content: center; font-weight: 700;">
+        📥 Download IG Image
+      </button>
+      <button class="action secondary sm" onclick="handleOpenInstagramWeb()" type="button" style="flex: 1; justify-content: center; font-weight: 700; background: #fdf2f8; color: #db2777; border-color: #fbcfe8;">
+        📸 Open Instagram
+      </button>
+    </div>
+    <div style="text-align: center; margin-top: 12px;">
+      <button class="ghost-btn-sm" onclick="closeInstagramShareModal()" type="button" style="color: var(--muted); font-size: 12px;">
+        Continue Learning (Optional)
+      </button>
     </div>
   </div>
 </div>
@@ -4164,6 +4257,9 @@ body.landscape-layout .practice-container {
         <button class="action secondary level-download-btn" id="levelCompletionDownloadCertBtn" onclick="handleDownloadCertificateFromAchievement()" type="button" style="padding: 11px; font-weight: 700;">
           <span>📥 Download Certificate</span>
         </button>
+        <button class="action secondary level-instagram-btn" onclick="openInstagramShareModal()" type="button" style="padding: 11px; font-weight: 700; background: #fdf2f8; color: #db2777; border-color: #fbcfe8; grid-column: span 2;">
+          <span>📸 Share on Instagram (Optional)</span>
+        </button>
       </div>
 
       <div class="level-completion-nav-row" id="levelCompletionNavRow">
@@ -4175,6 +4271,92 @@ body.landscape-layout .practice-container {
           ↺ Practice Again (Review Scenarios)
         </button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mandatory Level Feedback Modal (Question 20 Complete) -->
+<div id="mandatoryFeedbackModal" class="modal-backdrop" hidden>
+  <div class="modal-dialog" style="max-width: 480px; width: 100%; padding: 26px 22px 22px; text-align: center; border-radius: 24px; box-sizing: border-box; box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);">
+    <div style="font-size: 46px; line-height: 1; margin-bottom: 8px;">🎉</div>
+    <div style="display: inline-block; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; padding: 4px 12px; border-radius: 999px; background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; margin-bottom: 8px;" id="mandatoryFeedbackBadge">
+      All 20 Questions Completed
+    </div>
+    <h2 style="margin: 0 0 6px; font-size: 21px; font-weight: 900; color: var(--ink);" id="mandatoryFeedbackTitle">
+      Level Completed!
+    </h2>
+    <p style="margin: 0 0 16px; font-size: 13.5px; color: var(--muted); line-height: 1.45;" id="mandatoryFeedbackSubtitle">
+      Feedback is mandatory to unlock the next level. Please type your feedback below.
+    </p>
+
+    <!-- Emoji / Feeling Selection -->
+    <div style="text-align: left; margin-bottom: 12px;">
+      <label style="font-size: 12px; font-weight: 700; color: var(--ink); display: block; margin-bottom: 6px;">
+        How did this level feel?
+      </label>
+      <div class="feedback-emoji-grid" id="mandatoryEmojiGrid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;">
+        <button type="button" class="feedback-emoji-btn mandatory-emoji-btn" data-emoji="Too Easy" onclick="selectMandatoryFeedbackEmoji('Too Easy', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">🥱</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Too Easy</span>
+        </button>
+        <button type="button" class="feedback-emoji-btn mandatory-emoji-btn" data-emoji="Good Challenge" onclick="selectMandatoryFeedbackEmoji('Good Challenge', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">👍</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Good Challenge</span>
+        </button>
+        <button type="button" class="feedback-emoji-btn mandatory-emoji-btn" data-emoji="Hard but Fair" onclick="selectMandatoryFeedbackEmoji('Hard but Fair', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">🤔</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Hard but Fair</span>
+        </button>
+        <button type="button" class="feedback-emoji-btn mandatory-emoji-btn" data-emoji="Too Hard" onclick="selectMandatoryFeedbackEmoji('Too Hard', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">🤯</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Too Hard</span>
+        </button>
+        <button type="button" class="feedback-emoji-btn mandatory-emoji-btn" data-emoji="Confusing" onclick="selectMandatoryFeedbackEmoji('Confusing', this)" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border: 1.5px solid var(--line); border-radius: 10px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;">
+          <span style="font-size: 20px;">❓</span>
+          <span style="font-size: 10px; font-weight: 700; color: var(--muted); margin-top: 4px; text-align: center; line-height: 1.1;">Confusing</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Required Text Area -->
+    <div style="text-align: left; margin-bottom: 14px;">
+      <label for="mandatoryFeedbackText" style="font-size: 12px; font-weight: 700; color: var(--ink); display: block; margin-bottom: 6px;">
+        Your Written Feedback <span style="color: #dc2626;">* (Mandatory to unlock next level)</span>
+      </label>
+      <textarea id="mandatoryFeedbackText" rows="3" placeholder="Tell us what you learned, what was clear, or what can be improved (required)..." style="width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 13px; font-family: inherit; resize: vertical; box-sizing: border-box; outline: none; transition: border-color 0.2s;" oninput="onMandatoryFeedbackInput()"></textarea>
+      <div id="mandatoryFeedbackError" style="color: #dc2626; font-size: 12px; font-weight: 700; margin-top: 4px; display: none;">
+        Please type your feedback before submitting.
+      </div>
+    </div>
+
+    <!-- Submit Action -->
+    <button type="button" id="submitMandatoryFeedbackBtn" class="action primary" style="width: 100%; padding: 12px; font-size: 14.5px; font-weight: 800; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="submitMandatoryLevelFeedback()">
+      <span id="submitMandatoryFeedbackBtnText">Submit Feedback &amp; Unlock Next Level</span>
+      <span style="font-size: 16px;">🔓</span>
+    </button>
+    <div style="font-size: 11.5px; color: var(--muted); margin-top: 10px; line-height: 1.4;">
+      Submitting your feedback permanently unlocks the next level on all devices.
+    </div>
+  </div>
+</div>
+
+<!-- Progression Lock Notice Modal -->
+<div id="progressionNoticeModal" class="modal-backdrop" hidden onclick="if(event.target===this)closeProgressionNoticeModal()">
+  <div class="modal-dialog" style="max-width: 440px; width: 100%; padding: 24px 20px; text-align: center; border-radius: 20px; box-sizing: border-box; box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);">
+    <div style="font-size: 42px; margin-bottom: 8px;">🔒</div>
+    <h2 style="margin: 0 0 8px; font-size: 19px; font-weight: 900; color: var(--ink);" id="progressionNoticeTitle">
+      Level Locked
+    </h2>
+    <p style="margin: 0 0 18px; font-size: 13.5px; color: var(--muted); line-height: 1.45;" id="progressionNoticeMessage">
+      Complete the previous level to unlock this level.
+    </p>
+    <div style="display: flex; gap: 8px;">
+      <button type="button" class="action secondary" style="flex: 1; padding: 10px; font-weight: 700;" onclick="closeProgressionNoticeModal()">
+        Got It
+      </button>
+      <button type="button" id="progressionNoticeActionBtn" class="action primary" style="flex: 1.5; padding: 10px; font-weight: 800;" onclick="handleProgressionNoticeAction()">
+        Continue Practice →
+      </button>
     </div>
   </div>
 </div>
@@ -4314,7 +4496,7 @@ body.landscape-layout .practice-container {
 
   <div id="extraDomainsWrapper" hidden style="margin-top:12px;">
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;">Additional Industry Domains</div>
-    <div class="grid">
+    <div class="grid" id="extraDomainsGrid">
       <div class="pick domain" onclick="selectDomain('Capital Markets',this)"><div class="icon">📈</div><div class="pick-title">Capital Markets</div><div class="pick-note">Investors & trades (60)</div></div>
       <div class="pick domain" onclick="selectDomain('Semiconductor',this)"><div class="icon">🔬</div><div class="pick-title">Semiconductor</div><div class="pick-note">Batches & chip tests (60)</div></div>
       <div class="pick domain" onclick="selectDomain('Education',this)"><div class="icon">🎓</div><div class="pick-title">Education</div><div class="pick-note">Students & assessments (60)</div></div>
@@ -4322,7 +4504,7 @@ body.landscape-layout .practice-container {
   </div>
 
   <div class="label">Choose Level</div>
-  <div class="levels">
+  <div class="levels" id="levelsPicker">
     <div class="level" onclick="selectLevel('Beginner',this)">Beginner</div>
     <div class="level" onclick="selectLevel('Intermediate',this)">Intermediate</div>
     <div class="level" onclick="selectLevel('Expert',this)">Expert</div>

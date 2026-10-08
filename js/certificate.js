@@ -103,6 +103,8 @@ export function checkLevelCompletion(domain, level, scenarios, state) {
   }
 
   const isCompleted = (totalCount > 0 && completedScenarios.length >= totalCount);
+  const questionsCompleted = isCompleted;
+  const feedbackSubmitted = isLevelFeedbackSubmitted(domain, level, state);
   const completionDate = isCompleted
     ? formatCompletionDate(latestTimestamp || Date.now())
     : null;
@@ -111,6 +113,8 @@ export function checkLevelCompletion(domain, level, scenarios, state) {
     domain,
     level,
     isCompleted,
+    questionsCompleted,
+    feedbackSubmitted,
     completedCount: completedScenarios.length,
     totalCount,
     completionDate,
@@ -508,3 +512,303 @@ export function printCertificate(data) {
 </html>`);
   printWindow.document.close();
 }
+
+/**
+ * Progression & Level Lock System
+ * 7 Domains in sequential order:
+ * Banking → Healthcare → Insurance → Retail → Capital Markets → Semiconductor → Education
+ * 3 Levels per domain: Beginner → Intermediate → Expert (20 questions each)
+ */
+export const ORDERED_DOMAINS = [
+  'Banking',
+  'Healthcare',
+  'Insurance',
+  'Retail',
+  'Capital Markets',
+  'Semiconductor',
+  'Education'
+];
+
+export const ORDERED_LEVELS = [
+  'Beginner',
+  'Intermediate',
+  'Expert'
+];
+
+export function isLevelQuestionsCompleted(domain, level, scenarios, state) {
+  if (!domain || !level || !Array.isArray(scenarios)) return false;
+  const pool = scenarios.filter(s => s.domain === domain && s.level === level);
+  if (!pool.length) return false;
+  let solved = 0;
+  for (const s of pool) {
+    const entry = state?.entries?.[s.id];
+    if (entry) {
+      const score = (typeof entry.assessment?.score === 'number') ? entry.assessment.score : null;
+      if (score !== null ? score >= 7 : !!entry.completed) {
+        solved++;
+      }
+    }
+  }
+  return solved >= pool.length;
+}
+
+export function isLevelFeedbackSubmitted(domain, level, state) {
+  if (!domain || !level) return false;
+  const key = `${domain}_${level}`;
+  if (state?.levelFeedback && state.levelFeedback[key]) {
+    return true;
+  }
+  if (typeof window !== 'undefined' && Array.isArray(window.userFeedbackList)) {
+    const found = window.userFeedbackList.some(f => f.domain === domain && f.level === level);
+    if (found) {
+      if (state) {
+        state.levelFeedback = state.levelFeedback || {};
+        state.levelFeedback[key] = { submittedAt: Date.now() };
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isLevelCompleted(domain, level, scenarios, state) {
+  return isLevelQuestionsCompleted(domain, level, scenarios, state) && isLevelFeedbackSubmitted(domain, level, state);
+}
+
+export function isDomainCompleted(domain, scenarios, state) {
+  return ORDERED_LEVELS.every(lvl => isLevelCompleted(domain, lvl, scenarios, state));
+}
+
+export function isDomainUnlocked(domain, scenarios, state) {
+  const idx = ORDERED_DOMAINS.indexOf(domain);
+  if (idx <= 0) return true; // Domain 1 (Banking) is always unlocked
+  const prevDomain = ORDERED_DOMAINS[idx - 1];
+  return isDomainCompleted(prevDomain, scenarios, state);
+}
+
+export function isLevelUnlocked(domain, level, scenarios, state) {
+  if (!isDomainUnlocked(domain, scenarios, state)) return false;
+  if (level === 'Beginner') return true;
+  if (level === 'Intermediate') {
+    return isLevelCompleted(domain, 'Beginner', scenarios, state);
+  }
+  if (level === 'Expert') {
+    return isLevelCompleted(domain, 'Intermediate', scenarios, state);
+  }
+  return false;
+}
+
+export function getFirstUnlockedLevel(domain, scenarios, state) {
+  for (const lvl of ORDERED_LEVELS) {
+    if (isLevelUnlocked(domain, lvl, scenarios, state) && !isLevelCompleted(domain, lvl, scenarios, state)) {
+      return lvl;
+    }
+  }
+  return 'Beginner';
+}
+
+export function getNextProgressionTarget(domain, level) {
+  if (level === 'Beginner') {
+    return { type: 'level', nextDomain: domain, nextLevel: 'Intermediate', label: 'Intermediate Level' };
+  }
+  if (level === 'Intermediate') {
+    return { type: 'level', nextDomain: domain, nextLevel: 'Expert', label: 'Expert Level' };
+  }
+  if (level === 'Expert') {
+    const idx = ORDERED_DOMAINS.indexOf(domain);
+    if (idx >= 0 && idx < ORDERED_DOMAINS.length - 1) {
+      const nextDomain = ORDERED_DOMAINS[idx + 1];
+      return { type: 'domain', nextDomain, nextLevel: 'Beginner', label: `${nextDomain} (Beginner)` };
+    }
+    return { type: 'complete', nextDomain: null, nextLevel: null, label: 'All Domains Completed!' };
+  }
+  return { type: 'level', nextDomain: domain, nextLevel: 'Intermediate', label: 'Intermediate Level' };
+}
+
+/**
+ * Generates an Instagram-ready square (1080x1080) share SVG based on certificate data.
+ */
+export function generateInstagramShareSvg({ userName, level, domain, completionDate }) {
+  const cleanName = String(userName || 'Learner').trim();
+  const levelDisplay = formatCertificateLevel(level);
+  const domainDisplay = formatCertificateDomain(domain);
+  const dateDisplay = formatCompletionDate(completionDate);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="100%" height="100%" style="background:#071b38;font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <defs>
+    <linearGradient id="igGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b88628"/>
+      <stop offset="50%" stop-color="#dfb758"/>
+      <stop offset="100%" stop-color="#a6771e"/>
+    </linearGradient>
+    <linearGradient id="igCardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1080" height="1080" fill="#071b38"/>
+  <circle cx="540" cy="540" r="480" fill="#0c2e63" opacity="0.4"/>
+
+  <!-- Outer Gold Decorative Border -->
+  <rect x="60" y="60" width="960" height="960" rx="32" fill="none" stroke="url(#igGold)" stroke-width="3"/>
+  <rect x="72" y="72" width="936" height="936" rx="24" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.15"/>
+
+  <!-- Central Card -->
+  <rect x="110" y="110" width="860" height="860" rx="20" fill="url(#igCardBg)" filter="drop-shadow(0 20px 40px rgba(0,0,0,0.3))"/>
+
+  <!-- Top Brand -->
+  <g transform="translate(540, 185)">
+    <text text-anchor="middle" font-size="38" font-weight="900">
+      <tspan fill="#0a192f">Crack </tspan>
+      <tspan fill="#0052cc">SQL</tspan>
+    </text>
+  </g>
+
+  <!-- Badge: 20 Questions Completed -->
+  <g transform="translate(540, 250)">
+    <rect x="-160" y="-18" width="320" height="36" rx="18" fill="#dbeafe"/>
+    <text text-anchor="middle" y="6" font-size="15" font-weight="800" fill="#0052cc" letter-spacing="0.5">
+      ✅ 20 / 20 QUESTIONS COMPLETED
+    </text>
+  </g>
+
+  <!-- Title -->
+  <g transform="translate(540, 330)">
+    <text text-anchor="middle" font-family="'Cinzel','Playfair Display','Georgia',serif" font-size="22" font-weight="700" fill="#b48324" letter-spacing="4">
+      CERTIFICATE OF ACHIEVEMENT
+    </text>
+  </g>
+
+  <!-- Presented to -->
+  <g transform="translate(540, 390)">
+    <text text-anchor="middle" font-size="16" font-weight="500" fill="#64748b">
+      Proudly presented to
+    </text>
+  </g>
+
+  <!-- User Name -->
+  <g transform="translate(540, 450)">
+    <text text-anchor="middle" font-family="'Cinzel','Playfair Display','Georgia',serif" font-size="36" font-weight="800" fill="#0a2246">
+      ${escapeXml(cleanName)}
+    </text>
+  </g>
+
+  <!-- Completed level & domain -->
+  <g transform="translate(540, 520)">
+    <text text-anchor="middle" font-size="16" font-weight="600" fill="#334155">
+      for successfully mastering
+    </text>
+  </g>
+
+  <g transform="translate(540, 570)">
+    <rect x="-240" y="-22" width="480" height="44" rx="22" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+    <text text-anchor="middle" y="7" font-size="18" font-weight="800" fill="#0052cc" letter-spacing="0.5">
+      ${escapeXml(domainDisplay)} — ${escapeXml(levelDisplay)}
+    </text>
+  </g>
+
+  <!-- Achievement message -->
+  <g transform="translate(540, 650)">
+    <text text-anchor="middle" font-size="15" font-weight="500" fill="#475569">
+      Demonstrated advanced SQL thinking and data engineering skills.
+    </text>
+  </g>
+
+  <!-- Date & Handle -->
+  <g transform="translate(540, 720)">
+    <text text-anchor="middle" font-size="14" font-weight="600" fill="#64748b">
+      Earned on ${escapeXml(dateDisplay)}
+    </text>
+  </g>
+
+  <!-- Footer Branding -->
+  <g transform="translate(540, 850)">
+    <text text-anchor="middle" font-size="16" font-weight="700" fill="#0a2246">
+      Built with <tspan fill="#0052cc">Data To Dashboard</tspan>
+    </text>
+  </g>
+  <g transform="translate(540, 885)">
+    <text text-anchor="middle" font-size="15" font-weight="800" fill="#2563eb" letter-spacing="1">
+      @data_to_dashboard_
+    </text>
+  </g>
+</svg>`;
+}
+
+export function getInstagramShareCaption({ userName, level, domain }) {
+  const levelDisplay = formatCertificateLevel(level).replace(/ LEVEL/i, '').trim();
+  const domainDisplay = formatCertificateDomain(domain);
+  return `🎓 I’ve successfully completed the ${domainDisplay} – ${levelDisplay} level on Crack SQL!
+
+✅ 20 Questions Completed
+🚀 Continuing my SQL & Data Engineering journey.
+
+Built with Data To Dashboard.
+
+@data_to_dashboard_
+
+#CrackSQL #DataToDashboard #SQL #DataEngineering #Learning #Certificate`;
+}
+
+export async function downloadInstagramShareImage(data) {
+  return new Promise((resolve, reject) => {
+    try {
+      const svgString = generateInstagramShareSvg(data);
+      const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const URL = window.URL || window.webkitURL || window;
+      const blobUrl = URL.createObjectURL(blob);
+
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const width = 1080;
+          const height = 1080;
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.fillStyle = '#071b38';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+
+          URL.revokeObjectURL(blobUrl);
+
+          canvas.toBlob((pngBlob) => {
+            if (!pngBlob) {
+              reject(new Error('Failed to generate Instagram PNG blob'));
+              return;
+            }
+            const link = document.createElement('a');
+            const safeDomain = String(data.domain || 'Domain').replace(/[^a-zA-Z0-9]/g, '_');
+            const safeLevel = String(data.level || 'Level').replace(/[^a-zA-Z0-9]/g, '_');
+            link.download = `Crack_SQL_Instagram_${safeDomain}_${safeLevel}.png`;
+            link.href = URL.createObjectURL(pngBlob);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(link.href), 1500);
+            resolve(true);
+          }, 'image/png');
+        } catch (canvasErr) {
+          URL.revokeObjectURL(blobUrl);
+          reject(canvasErr);
+        }
+      };
+
+      img.onerror = (e) => {
+        URL.revokeObjectURL(blobUrl);
+        reject(new Error('Failed to load Instagram share SVG for rasterization: ' + e));
+      };
+
+      img.src = blobUrl;
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+

@@ -753,6 +753,22 @@ begin
 
   current_state := jsonb_set(current_state, '{entries}', merged_entries);
 
+  if incoming ? 'levelFeedback' then
+    current_state := jsonb_set(
+      current_state,
+      '{levelFeedback}',
+      coalesce(current_state->'levelFeedback', '{}'::jsonb) || coalesce(incoming->'levelFeedback', '{}'::jsonb)
+    );
+  end if;
+
+  if incoming ? 'skills' then
+    current_state := jsonb_set(
+      current_state,
+      '{skills}',
+      coalesce(current_state->'skills', '{}'::jsonb) || coalesce(incoming->'skills', '{}'::jsonb)
+    );
+  end if;
+
   insert into public.learning_progress (user_id, state, updated_at)
   values (expected_user, current_state, now())
   on conflict (user_id) do update
