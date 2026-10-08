@@ -1781,15 +1781,12 @@ function openMotivationPopup(score) {
 
   // Feedback Checkpoint: Every 5 completed questions (5, 10, 15, 20...)
   const feedbackSection = $('motivationFeedbackSection');
-  const completedCount = getCompletedCount();
-  const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
-  const domainLevelCompleted = pool.filter(s => isCompleted(s, state.entries[s.id])).length;
+  const completedQuestions = getCompletedCount();
 
   window.currentSelectedFeedbackEmoji = null;
 
-  if (feedbackSection) {
-    const isCheckpoint = clampedScore >= 7 && ((completedCount > 0 && completedCount % 5 === 0) || (domainLevelCompleted > 0 && domainLevelCompleted % 5 === 0));
-    if (isCheckpoint) {
+  function openFeedbackTab() {
+    if (feedbackSection) {
       feedbackSection.hidden = false;
       feedbackSection.style.display = 'block';
       document.querySelectorAll('.feedback-emoji-btn').forEach(btn => {
@@ -1802,10 +1799,14 @@ function openMotivationPopup(score) {
       if (nextBtn && clampedScore >= 7) {
         nextBtn.disabled = true;
       }
-    } else {
-      feedbackSection.hidden = true;
-      feedbackSection.style.display = 'none';
     }
+  }
+
+  if (completedQuestions > 0 && completedQuestions % 5 === 0) {
+    openFeedbackTab();
+  } else if (feedbackSection) {
+    feedbackSection.hidden = true;
+    feedbackSection.style.display = 'none';
   }
 
   modal.hidden = false;

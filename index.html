@@ -85,33 +85,51 @@
   vertical-align: middle;
 }
 * { box-sizing:border-box; }
+html {
+  overflow-x: hidden;
+  width: 100%;
+  -webkit-text-size-adjust: 100%;
+}
 body {
   margin:0;
   background:var(--bg);
   color:var(--ink);
   font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  overflow-x: hidden;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 .app {
-  max-width:520px;
-  min-height:100vh;
+  width: 100%;
+  max-width: 540px;
+  min-height: 100vh;
+  min-height: 100dvh;
   margin:0 auto;
-  padding:18px 16px 28px;
+  padding:16px 14px max(84px, calc(72px + env(safe-area-inset-bottom, 12px)));
   transition:max-width .2s ease;
+  box-sizing: border-box;
+}
+@media (min-width: 580px) and (max-width: 859px) {
+  .app {
+    max-width: 780px;
+    padding: 18px 20px max(84px, calc(72px + env(safe-area-inset-bottom, 12px)));
+  }
 }
 body.landscape-layout .app {
   max-width:1360px;
-  padding:18px 24px 84px;
+  padding:18px 24px max(84px, calc(72px + env(safe-area-inset-bottom, 12px)));
 }
 @media (min-width: 860px) {
   .app {
     max-width:1360px;
-    padding:18px 24px 84px;
+    padding:18px 24px max(84px, calc(72px + env(safe-area-inset-bottom, 12px)));
   }
 }
 @media (orientation: landscape) and (min-width: 680px) {
   .app {
     max-width:1360px;
-    padding:14px 20px 84px;
+    padding:14px 20px max(84px, calc(72px + env(safe-area-inset-bottom, 12px)));
   }
 }
 .header {
@@ -464,9 +482,30 @@ pre {
   align-items:center;
   gap:6px;
 }
-@media (max-width:380px) {
-  .actions { grid-template-columns:1fr; }
-  .grid { grid-template-columns:1fr; }
+@media (max-width: 768px) {
+  input[type="text"], input[type="email"], input[type="number"], select, textarea {
+    font-size: 16px !important;
+  }
+}
+button, .pick, .level, .tab-btn, .sample-tab, .nav-item, .tool-btn, .ide-tool-btn, .action {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (max-width:360px) {
+  .app { padding-left: 10px; padding-right: 10px; }
+  .actions { grid-template-columns:1fr; gap: 8px; }
+  .grid { grid-template-columns:1fr; gap: 8px; }
+  .pick { padding: 12px 10px; border-radius: 16px; }
+  .pick-title { font-size: 13.5px; }
+  .pick-note { font-size: 11px; }
+  .icon { font-size: 22px; margin-bottom: 4px; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 18px; }
+}
+@media (min-width: 361px) and (max-width: 480px) {
+  .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .actions { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .pick { padding: 14px 10px; }
 }
 </style>
 <style>

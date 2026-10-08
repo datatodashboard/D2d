@@ -2680,9 +2680,40 @@ export async function loadAdminFeedback() {
   }
 }
 
+function getUserGroups() {
+  const userGroupsMap = new Map();
+
+  feedbackData.forEach(f => {
+    const key = (f.user_id || f.user_email || f.username || 'Guest Learner').toString().trim().toLowerCase();
+
+    if (!userGroupsMap.has(key)) {
+      userGroupsMap.set(key, {
+        userKey: key,
+        userId: f.user_id || '',
+        username: f.username || (f.user_email ? f.user_email.split('@')[0] : 'Learner'),
+        email: f.user_email || f.email || f.gmail_id || '—',
+        entries: []
+      });
+    }
+
+    const group = userGroupsMap.get(key);
+    if (f.username && (group.username === 'Learner' || !group.username)) {
+      group.username = f.username;
+    }
+    if (f.user_email && (group.email === '—' || !group.email.includes('@'))) {
+      group.email = f.user_email;
+    }
+
+    group.entries.push(f);
+  });
+
+  return Array.from(userGroupsMap.values());
+}
+
 function renderFeedbackStats() {
   const total = feedbackData.length;
-  const uniqueLearners = new Set(feedbackData.map(f => f.username || f.user_id || f.user_email || 'Guest')).size;
+  const groups = getUserGroups();
+  const uniqueLearners = groups.length;
 
   const counts = {};
   feedbackData.forEach(f => {
@@ -2720,101 +2751,91 @@ function renderFeedbackTable() {
   const tbody = $('feedbackTableBody') || $('feedbackLearnersTableBody');
   if (!tbody) return;
 
-  let list = [...feedbackData];
-  list.sort((a, b) => new Date(b.created_at || b.timestamp || 0) - new Date(a.created_at || a.timestamp || 0));
+  const groups = getUserGroups();
 
-  const emojiFilter = ($('feedbackEmojiFilter')?.value || '').toLowerCase().trim();
+  groups.forEach(g => {
+    g.latestDate = Math.max(...g.entries.map(e => new Date(e.created_at || e.timestamp || 0).getTime()));
+  });
+  groups.sort((a, b) => b.latestDate - a.latestDate);
+
+  let list = groups;
 
   if (feedbackSearchQuery) {
-    list = list.filter(f => {
-      const name = (f.username || f.user_email || f.user_id || '').toLowerCase();
-      const q = (f.question_title || f.question_id || '').toLowerCase();
-      const dom = (f.domain || '').toLowerCase();
-      const lev = String(f.level || '').toLowerCase();
-      const txt = (f.feedback_text || '').toLowerCase();
-      const em = (f.emoji || '').toLowerCase();
-      return name.includes(feedbackSearchQuery) ||
-        q.includes(feedbackSearchQuery) ||
-        dom.includes(feedbackSearchQuery) ||
-        lev.includes(feedbackSearchQuery) ||
-        txt.includes(feedbackSearchQuery) ||
-        em.includes(feedbackSearchQuery);
+    list = list.filter(g => {
+      const name = (g.username || '').toLowerCase();
+      const email = (g.email || '').toLowerCase();
+      return name.includes(feedbackSearchQuery) || email.includes(feedbackSearchQuery);
     });
   }
 
-  if (emojiFilter) {
-    list = list.filter(f => (f.emoji || '').toLowerCase().includes(emojiFilter));
-  }
-
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted);">No matching feedback records found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--muted);">No matching learner feedback records found.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = list.map((f, idx) => {
-    const learnerName = f.username || (f.user_email ? f.user_email.split('@')[0] : 'Learner');
-    const learnerSub = f.user_email ? f.user_email : (f.user_id ? `ID: ${f.user_id.slice(0, 8)}…` : '');
-    const qTitle = f.question_title || f.question_id || 'Scenario Question';
-    const domainLvl = `${f.domain || 'General'} • Level ${f.level || 1}`;
-    const emojiStr = f.emoji || '👍 Good Challenge';
-    const commentText = f.feedback_text ? escapeHtml(f.feedback_text) : '<span style="color:var(--muted);font-style:italic;">No comment written</span>';
-    const dateStr = formatDate(f.created_at || f.timestamp);
-
-    let badgeStyle = 'background:rgba(59, 130, 246, 0.15); color:#60a5fa; border:1px solid rgba(59, 130, 246, 0.3);';
-    if (emojiStr.includes('Too Easy')) {
-      badgeStyle = 'background:rgba(34, 197, 94, 0.15); color:#4ade80; border:1px solid rgba(34, 197, 94, 0.3);';
-    } else if (emojiStr.includes('Hard but Fair')) {
-      badgeStyle = 'background:rgba(168, 85, 247, 0.15); color:#c084fc; border:1px solid rgba(168, 85, 247, 0.3);';
-    } else if (emojiStr.includes('Too Hard')) {
-      badgeStyle = 'background:rgba(239, 68, 68, 0.15); color:#f87171; border:1px solid rgba(239, 68, 68, 0.3);';
-    } else if (emojiStr.includes('Confusing')) {
-      badgeStyle = 'background:rgba(245, 158, 11, 0.15); color:#fbbf24; border:1px solid rgba(245, 158, 11, 0.3);';
-    }
+  tbody.innerHTML = list.map((g, idx) => {
+    const encodedKey = encodeURIComponent(g.userKey);
+    const totalReviews = g.entries.length;
 
     return `
       <tr>
         <td class="num">${idx + 1}</td>
         <td>
-          <div style="font-weight:700;color:var(--ink);cursor:pointer;" onclick="window.openLearnerFeedbackHistory('${escapeHtml(learnerName)}')">
-            ${escapeHtml(learnerName)}
+          <div style="font-weight:700;color:var(--ink);cursor:pointer;" onclick="window.openLearnerFeedbackHistory('${encodedKey}')">
+            ${escapeHtml(g.username)}
           </div>
-          ${learnerSub ? `<div style="font-size:0.75rem;color:var(--muted);">${escapeHtml(learnerSub)}</div>` : ''}
         </td>
         <td>
-          <div style="font-weight:600;color:var(--ink);">${escapeHtml(qTitle)}</div>
+          <span style="font-size:0.88rem;color:var(--muted);">${escapeHtml(g.email)}</span>
         </td>
         <td>
-          <span style="font-size:0.78rem;font-weight:600;padding:3px 8px;border-radius:4px;background:rgba(255,255,255,0.06);color:var(--primary);border:1px solid rgba(255,255,255,0.1);">
-            ${escapeHtml(domainLvl)}
-          </span>
+          <span style="font-weight:700;color:var(--primary);font-size:0.95rem;">${totalReviews} ${totalReviews === 1 ? 'Review' : 'Reviews'}</span>
         </td>
-        <td>
-          <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:0.82rem;font-weight:700;${badgeStyle}">
-            ${escapeHtml(emojiStr)}
-          </span>
-        </td>
-        <td style="max-width:280px;font-size:0.85rem;color:var(--ink);word-break:break-word;">
-          ${commentText}
-        </td>
-        <td style="font-size:0.8rem;color:var(--muted);white-space:nowrap;">
-          ${dateStr}
+        <td style="text-align:right;">
+          <button class="action primary sm" style="padding:6px 14px;font-weight:600;font-size:0.82rem;" onclick="window.openLearnerFeedbackHistory('${encodedKey}')">
+            View Feedback →
+          </button>
         </td>
       </tr>
     `;
   }).join('');
 }
 
-export function openLearnerFeedbackHistory(usernameKey) {
-  const matchingEntries = feedbackData.filter(f => (f.username || 'Guest Learner').trim() === usernameKey.trim());
+export function openLearnerFeedbackHistory(rawUserKey) {
+  const targetKey = decodeURIComponent(rawUserKey || '').trim().toLowerCase();
+  const groups = getUserGroups();
+  const group = groups.find(g => g.userKey === targetKey);
+
+  let matchingEntries = [];
+  let learnerName = 'Learner';
+  let learnerEmail = '';
+
+  if (group) {
+    matchingEntries = group.entries;
+    learnerName = group.username;
+    learnerEmail = group.email;
+  } else {
+    matchingEntries = feedbackData.filter(f => {
+      const key = (f.user_id || f.user_email || f.username || 'Guest Learner').toString().trim().toLowerCase();
+      return key === targetKey || (f.username || '').trim().toLowerCase() === targetKey;
+    });
+    if (matchingEntries.length > 0) {
+      learnerName = matchingEntries[0].username || targetKey;
+      learnerEmail = matchingEntries[0].user_email || '';
+    }
+  }
+
   matchingEntries.sort((a, b) => new Date(b.created_at || b.timestamp || 0) - new Date(a.created_at || a.timestamp || 0));
 
   const titleEl = $('learnerFeedbackModalTitle');
-  if (titleEl) titleEl.textContent = `Feedback History — ${usernameKey} (${matchingEntries.length} Entries)`;
+  if (titleEl) {
+    titleEl.innerHTML = `Feedback History — <strong>${escapeHtml(learnerName)}</strong> ${learnerEmail && learnerEmail !== '—' ? `<span style="font-size:0.85rem;color:var(--muted);font-weight:normal;">(${escapeHtml(learnerEmail)})</span>` : ''} (${matchingEntries.length} ${matchingEntries.length === 1 ? 'Review' : 'Reviews'})`;
+  }
 
   const bodyEl = $('learnerFeedbackModalBody');
   if (bodyEl) {
     if (matchingEntries.length === 0) {
-      bodyEl.innerHTML = '<p style="color:var(--muted);">No feedback records found for this learner.</p>';
+      bodyEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:24px;">No feedback records found for this learner.</p>';
     } else {
       bodyEl.innerHTML = `
         <div class="tablewrap">
@@ -2822,24 +2843,35 @@ export function openLearnerFeedbackHistory(usernameKey) {
             <thead>
               <tr>
                 <th class="num">#</th>
-                <th>Question Title</th>
-                <th>Domain &amp; Level</th>
-                <th>Selected Emoji Rating</th>
-                <th>Feedback Comments</th>
-                <th>Date / Time</th>
+                <th>Question</th>
+                <th>Domain</th>
+                <th>Level</th>
+                <th>Selected Emoji</th>
+                <th>Feedback Text</th>
+                <th>Date/Time</th>
               </tr>
             </thead>
             <tbody>
-              ${matchingEntries.map((e, idx) => `
-                <tr>
-                  <td class="num">${idx + 1}</td>
-                  <td><strong>${escapeHtml(e.question_title || e.question_id || 'Scenario')}</strong></td>
-                  <td><span class="badge draft">${escapeHtml(e.domain || 'Domain')} (${escapeHtml(e.level || 'Level')})</span></td>
-                  <td><strong style="color:var(--primary);">${escapeHtml(e.emoji)}</strong></td>
-                  <td style="font-size:0.88rem;color:var(--ink);">${e.feedback_text ? escapeHtml(e.feedback_text) : '<span style="color:var(--muted);font-style:italic;">No written comment</span>'}</td>
-                  <td style="font-size:0.8rem;color:var(--muted);">${formatDate(e.created_at || e.timestamp)}</td>
-                </tr>
-              `).join('')}
+              ${matchingEntries.map((e, idx) => {
+                const qTitle = e.question_title || e.question_id || 'Question Scenario';
+                const domName = e.domain || 'General';
+                const levelNum = e.level ? `Level ${e.level}` : 'Level 1';
+                const emojiStr = e.emoji || '👍 Good Challenge';
+                const commentText = e.feedback_text ? escapeHtml(e.feedback_text) : '<span style="color:var(--muted);font-style:italic;">No comment provided</span>';
+                const dateStr = formatDate(e.created_at || e.timestamp);
+
+                return `
+                  <tr>
+                    <td class="num">${idx + 1}</td>
+                    <td><strong style="color:var(--ink);">${escapeHtml(qTitle)}</strong></td>
+                    <td><span style="font-size:0.82rem;font-weight:600;color:var(--primary);">${escapeHtml(domName)}</span></td>
+                    <td><span class="badge draft">${escapeHtml(levelNum)}</span></td>
+                    <td><span style="font-weight:700;">${escapeHtml(emojiStr)}</span></td>
+                    <td style="font-size:0.88rem;color:var(--ink);max-width:280px;word-break:break-word;">${commentText}</td>
+                    <td style="font-size:0.8rem;color:var(--muted);white-space:nowrap;">${dateStr}</td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
         </div>
