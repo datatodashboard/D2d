@@ -956,6 +956,7 @@ export function switchAdminTab(tab) {
   const isLearners = tab === 'learners';
   const isPremium = tab === 'premium';
   const isPayments = tab === 'payments';
+  const isTools = tab === 'tools';
   const isContests = tab === 'contests';
   const isNotifications = tab === 'notifications';
   const isFeedback = tab === 'feedback';
@@ -963,6 +964,7 @@ export function switchAdminTab(tab) {
   if ($('learnersTabContent')) $('learnersTabContent').hidden = !isLearners;
   if ($('premiumTabContent')) $('premiumTabContent').hidden = !isPremium;
   if ($('paymentsTabContent')) $('paymentsTabContent').hidden = !isPayments;
+  if ($('toolsOverviewTabContent')) $('toolsOverviewTabContent').hidden = !isTools;
   if ($('contestsTabContent')) $('contestsTabContent').hidden = !isContests;
   if ($('notificationsTabContent')) $('notificationsTabContent').hidden = !isNotifications;
   if ($('feedbackTabContent')) $('feedbackTabContent').hidden = !isFeedback;
@@ -970,9 +972,7 @@ export function switchAdminTab(tab) {
   if ($('tabLearnersBtn')) $('tabLearnersBtn').classList.toggle('active', isLearners);
   if ($('tabPremiumBtn')) $('tabPremiumBtn').classList.toggle('active', isPremium);
   if ($('tabPaymentsBtn')) $('tabPaymentsBtn').classList.toggle('active', isPayments);
-  if ($('tabContestsBtn')) $('tabContestsBtn').classList.toggle('active', isContests);
-  if ($('tabNotificationsBtn')) $('tabNotificationsBtn').classList.toggle('active', isNotifications);
-  if ($('tabFeedbackBtn')) $('tabFeedbackBtn').classList.toggle('active', isFeedback);
+  if ($('tabToolsBtn')) $('tabToolsBtn').classList.toggle('active', isTools || isContests || isNotifications || isFeedback);
 
   if (tab === 'contests') {
     void loadContests();
@@ -2970,6 +2970,11 @@ function renderFeedbackStats() {
   if (badge) {
     badge.textContent = String(total);
     badge.style.display = total > 0 ? 'inline-block' : 'none';
+  }
+  const toolsBadge = $('toolsFeedbackBadge');
+  if (toolsBadge) {
+    toolsBadge.textContent = String(total);
+    toolsBadge.style.display = total > 0 ? 'inline-block' : 'none';
   }
 }
 

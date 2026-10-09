@@ -152,7 +152,7 @@ h1{
   color:var(--muted);
   box-shadow: 0 4px 20px rgba(15,23,42,0.03);
 }
-#dashboard[hidden],#gate[hidden],#contestsTabContent[hidden],#paymentsTabContent[hidden],#learnersTabContent[hidden],#premiumTabContent[hidden],#notificationsTabContent[hidden],#feedbackTabContent[hidden]{display:none;}
+#dashboard[hidden],#gate[hidden],#toolsOverviewTabContent[hidden],#contestsTabContent[hidden],#paymentsTabContent[hidden],#learnersTabContent[hidden],#premiumTabContent[hidden],#notificationsTabContent[hidden],#feedbackTabContent[hidden]{display:none;}
 
 .stats{
   display:grid;
@@ -433,9 +433,7 @@ textarea.form-control{min-height:90px;}
       <button id="tabLearnersBtn" class="tab-btn active" onclick="window.switchAdminTab('learners')">📊 Learner Directory &amp; Progress</button>
       <button id="tabPremiumBtn" class="tab-btn" onclick="window.switchAdminTab('premium')">⭐ Premium Customers <span id="premiumReconcileBadge" class="badge warn" style="display:none;margin-left:4px;">0</span></button>
       <button id="tabPaymentsBtn" class="tab-btn" onclick="window.switchAdminTab('payments')">💳 Payment Verification <span id="pendingPaymentsCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
-      <button id="tabContestsBtn" class="tab-btn" onclick="window.switchAdminTab('contests')">🏆 Contest Management</button>
-      <button id="tabNotificationsBtn" class="tab-btn" onclick="window.switchAdminTab('notifications')">📢 Notifications &amp; Announcements</button>
-      <button id="tabFeedbackBtn" class="tab-btn" onclick="window.switchAdminTab('feedback')">💬 Learner Feedback <span id="feedbackCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
+      <button id="tabToolsBtn" class="tab-btn" onclick="window.switchAdminTab('tools')">🧰 Tools <span id="toolsBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
     </nav>
 
     <!-- Tab 1: Learner Directory & Progress -->
@@ -725,8 +723,65 @@ textarea.form-control{min-height:90px;}
       </div>
     </div>
 
+    <!-- Tools Overview Screen -->
+    <div id="toolsOverviewTabContent" hidden>
+      <div style="margin-bottom:20px;">
+        <h2 style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:800;margin:0 0 6px;">🧰 Administrative Tools</h2>
+        <div style="color:var(--muted);font-size:0.88rem;">Manage contests, broadcast notifications, and review learner feedback.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
+        <!-- Card 1: Contest Management -->
+        <div class="panel" style="cursor:pointer;transition:transform 0.15s ease,box-shadow 0.15s ease;" onclick="window.switchAdminTab('contests')" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 28px rgba(15,23,42,0.06)';" onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 20px rgba(15,23,42,0.03)';">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+            <div style="width:40px;height:40px;background:var(--soft);color:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:800;">🏆</div>
+            <div>
+              <h3 style="margin:0;font-size:1.05rem;font-weight:800;">Contest Management</h3>
+              <div style="font-size:0.82rem;color:var(--muted);">Create, publish, and evaluate SQL thinking contests</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;font-weight:700;color:var(--primary);border-top:1px solid var(--line);padding-top:12px;margin-top:12px;">
+            <span>Open Contest Manager</span>
+            <span>→</span>
+          </div>
+        </div>
+
+        <!-- Card 2: Notifications & Announcements -->
+        <div class="panel" style="cursor:pointer;transition:transform 0.15s ease,box-shadow 0.15s ease;" onclick="window.switchAdminTab('notifications')" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 28px rgba(15,23,42,0.06)';" onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 20px rgba(15,23,42,0.03)';">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+            <div style="width:40px;height:40px;background:var(--soft);color:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:800;">📢</div>
+            <div>
+              <h3 style="margin:0;font-size:1.05rem;font-weight:800;">Notifications &amp; Announcements</h3>
+              <div style="font-size:0.82rem;color:var(--muted);">Broadcast announcements to active learners</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;font-weight:700;color:var(--primary);border-top:1px solid var(--line);padding-top:12px;margin-top:12px;">
+            <span>Open Notifications</span>
+            <span>→</span>
+          </div>
+        </div>
+
+        <!-- Card 3: Learner Feedback -->
+        <div class="panel" style="cursor:pointer;transition:transform 0.15s ease,box-shadow 0.15s ease;" onclick="window.switchAdminTab('feedback')" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 28px rgba(15,23,42,0.06)';" onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 20px rgba(15,23,42,0.03)';">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+            <div style="width:40px;height:40px;background:var(--soft);color:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:800;">💬</div>
+            <div>
+              <h3 style="margin:0;font-size:1.05rem;font-weight:800;">Learner Feedback <span id="toolsFeedbackBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></h3>
+              <div style="font-size:0.82rem;color:var(--muted);">Review feedback and ratings from learners</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;font-weight:700;color:var(--primary);border-top:1px solid var(--line);padding-top:12px;margin-top:12px;">
+            <span>Open Learner Feedback</span>
+            <span>→</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Tab 2: Contest Management -->
     <div id="contestsTabContent" hidden>
+      <div style="margin-bottom:14px;">
+        <button class="action secondary sm" onclick="window.switchAdminTab('tools')">← Back to Tools</button>
+      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
         <div>
           <h2 style="margin:0;font-size:1.25rem;">🏆 Crack SQL Thinking Contests</h2>
@@ -798,6 +853,9 @@ textarea.form-control{min-height:90px;}
 
     <!-- Tab 5: 📢 Notifications & Announcements -->
     <div id="notificationsTabContent" hidden>
+      <div style="margin-bottom:14px;">
+        <button class="action secondary sm" onclick="window.switchAdminTab('tools')">← Back to Tools</button>
+      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
         <div>
           <h2 style="margin:0;font-size:1.25rem;">📢 Admin Notifications &amp; Announcements</h2>
@@ -841,6 +899,9 @@ textarea.form-control{min-height:90px;}
 
     <!-- Tab 6: 💬 Learner Feedback -->
     <div id="feedbackTabContent" hidden>
+      <div style="margin-bottom:14px;">
+        <button class="action secondary sm" onclick="window.switchAdminTab('tools')">← Back to Tools</button>
+      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
         <div>
           <h2 style="margin:0;font-size:1.25rem;">💬 Question Feedback &amp; Learner Insights</h2>
