@@ -40,6 +40,15 @@ async function loadScenarioBank() {
         data.scenarios.forEach(s => scenariosMap.set(s.id, s));
         const note = $('scenarioBankNote');
         if (note) note.textContent = `(of ${totalScenariosCount})`;
+
+        const scenarioSelect = $('filterSpecificScenario');
+        if (scenarioSelect) {
+          let opts = '<option value="ALL">All Scenarios</option>';
+          data.scenarios.forEach(s => {
+            opts += `<option value="${escapeHtml(s.id)}">${escapeHtml(s.id)}: ${escapeHtml(s.domain)} - ${escapeHtml(s.question.slice(0, 40))}...</option>`;
+          });
+          scenarioSelect.innerHTML = opts;
+        }
       }
     }
   } catch (err) {
@@ -484,6 +493,31 @@ async function loadDashboardData() {
       // Last active date from profiles.last_active, progressRow.updated_at, or profiles.created_at
       const lastActivity = p.last_active || (progressRow?.updated_at ? new Date(progressRow.updated_at).getTime() : null) || p.created_at || null;
 
+      const completedScenarioIds = new Set(uniqueCompletedScenarioIds);
+      const attemptedScenarioIds = new Set();
+      const solvedLevels = new Set();
+      const attemptedLevels = new Set();
+
+      for (const [scenarioId, entry] of Object.entries(entries)) {
+        if (!entry || typeof entry !== 'object') continue;
+        const scenario = scenariosMap.get(scenarioId);
+        if (!scenario) continue;
+        if (isAttempted(scenario, entry)) {
+          attemptedScenarioIds.add(scenarioId);
+          if (scenario.level) attemptedLevels.add(scenario.level);
+        }
+        if (isCompleted(scenario, entry)) {
+          if (scenario.level) solvedLevels.add(scenario.level);
+        }
+      }
+      directRows.forEach(row => {
+        if (row.scenario_id) {
+          completedScenarioIds.add(row.scenario_id);
+          const sc = scenariosMap.get(row.scenario_id);
+          if (sc?.level) solvedLevels.add(sc.level);
+        }
+      });
+
       return {
         id: userId,
         username,
@@ -495,6 +529,10 @@ async function loadDashboardData() {
         contestEligible: p.contest_eligible === true || userSolvedCount >= 18,
         solved: userSolvedCount,
         attempted: Math.max(userSolvedCount, userAttemptedCount),
+        completedScenarioIds,
+        attemptedScenarioIds,
+        solvedLevels,
+        attemptedLevels,
         domainSolved,
         domainAttempted,
         topDomains: topDomainsText,
@@ -524,22 +562,148 @@ async function loadDashboardData() {
   }
 }
 
+export let filteredLearners = [];
+
+export function toggleAdvancedFilters() {
+  const panel = $('advancedFiltersPanel');
+  const btn = $('toggleAdvancedFiltersBtn');
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (btn) btn.classList.toggle('primary', isHidden);
+}
+
+function renderFilterChips(filters) {
+  const container = $('activeFilterChips');
+  if (!container) return;
+  let chips = [];
+  if (filters.searchQuery) chips.push(`Search: "${filters.searchQuery}"`);
+  if (filters.accountStatus !== 'ALL') chips.push(`Status: ${filters.accountStatus}`);
+  if (filters.domainFilter !== 'ALL') chips.push(`Domain: ${filters.domainFilter}`);
+  if (filters.levelFilter !== 'ALL') chips.push(`Level: ${filters.levelFilter}`);
+  if (filters.lastActiveFilter !== 'ANY') chips.push(`Active: ${filters.lastActiveFilter}`);
+  if (filters.completionStatus !== 'ALL') chips.push(`Completion: ${filters.completionStatus}`);
+  if (!isNaN(filters.solvedMin) || !isNaN(filters.solvedMax)) chips.push(`Solved: ${filters.solvedMin ?? 0}-${filters.solvedMax ?? 'max'}`);
+  if (!isNaN(filters.attemptedMin) || !isNaN(filters.attemptedMax)) chips.push(`Attempted: ${filters.attemptedMin ?? 0}-${filters.attemptedMax ?? 'max'}`);
+  if (filters.specificScenario !== 'ALL') chips.push(`Scenario: ${filters.specificScenario}`);
+
+  if (chips.length === 0) {
+    container.innerHTML = '<span style="color:var(--muted); font-size:0.8rem;">No filters applied</span>';
+    return;
+  }
+
+  container.innerHTML = `<span style="font-weight:700; color:var(--muted); font-size:0.78rem;">Active Filters:</span> ` +
+    chips.map(c => `<span class="badge secondary" style="background:#eff6ff; color:var(--primary); border:1px solid #bfdbfe; font-size:0.75rem;">${escapeHtml(c)}</span>`).join('');
+}
+
 function renderLearnersTable() {
   const tbody = $('tbody');
   if (!tbody) return;
 
   const searchQuery = ($('search')?.value || '').trim().toLowerCase();
+  const accountStatus = $('filterAccountStatus')?.value || 'ALL';
+  const domainFilter = $('filterDomain')?.value || 'ALL';
+  const levelFilter = $('filterLevel')?.value || 'ALL';
+  const lastActiveFilter = $('filterLastActive')?.value || 'ANY';
+  const completionStatus = $('filterCompletionStatus')?.value || 'ALL';
+  const solvedMin = parseInt($('filterSolvedMin')?.value, 10);
+  const solvedMax = parseInt($('filterSolvedMax')?.value, 10);
+  const attemptedMin = parseInt($('filterAttemptedMin')?.value, 10);
+  const attemptedMax = parseInt($('filterAttemptedMax')?.value, 10);
+  const dateFrom = $('filterDateFrom')?.value ? new Date($('filterDateFrom')?.value).getTime() : null;
+  const dateTo = $('filterDateTo')?.value ? new Date($('filterDateTo')?.value + 'T23:59:59').getTime() : null;
+  const specificScenario = $('filterSpecificScenario')?.value || 'ALL';
 
   // Filter
-  const filtered = learnersData.filter(l => {
-    if (!searchQuery) return true;
-    return (
-      (l.username && l.username.toLowerCase().includes(searchQuery)) ||
-      l.displayName.toLowerCase().includes(searchQuery) ||
-      l.email.toLowerCase().includes(searchQuery) ||
-      l.id.toLowerCase().includes(searchQuery)
-    );
+  filteredLearners = learnersData.filter(l => {
+    if (searchQuery) {
+      const matchText = (
+        (l.username && l.username.toLowerCase().includes(searchQuery)) ||
+        l.displayName.toLowerCase().includes(searchQuery) ||
+        l.email.toLowerCase().includes(searchQuery) ||
+        l.id.toLowerCase().includes(searchQuery)
+      );
+      if (!matchText) return false;
+    }
+
+    if (accountStatus === 'admin' && !l.isAdmin) return false;
+    if (accountStatus === 'premium' && !l.paidUnlocked) return false;
+    if (accountStatus === 'free' && l.paidUnlocked) return false;
+    if (accountStatus === 'eligible' && !l.contestEligible) return false;
+    if (accountStatus === 'not_eligible' && l.contestEligible) return false;
+
+    if (domainFilter !== 'ALL') {
+      const hasDomain = (l.domainSolved[domainFilter] > 0) || (l.domainAttempted[domainFilter] > 0);
+      if (!hasDomain) return false;
+    }
+
+    if (levelFilter !== 'ALL') {
+      const hasLevel = l.solvedLevels.has(levelFilter) || l.attemptedLevels.has(levelFilter);
+      if (!hasLevel) return false;
+    }
+
+    if (lastActiveFilter === 'never') {
+      if (l.lastActivity) return false;
+    } else if (lastActiveFilter !== 'ANY') {
+      if (!l.lastActivity) return false;
+      const actTime = new Date(l.lastActivity).getTime();
+      const now = Date.now();
+      if (lastActiveFilter === 'today' && (now - actTime > 24 * 60 * 60 * 1000)) return false;
+      if (lastActiveFilter === '7days' && (now - actTime > 7 * 24 * 60 * 60 * 1000)) return false;
+      if (lastActiveFilter === '30days' && (now - actTime > 30 * 24 * 60 * 60 * 1000)) return false;
+      if (lastActiveFilter === 'custom') {
+        if (dateFrom && actTime < dateFrom) return false;
+        if (dateTo && actTime > dateTo) return false;
+      }
+    } else {
+      if (l.lastActivity) {
+        const actTime = new Date(l.lastActivity).getTime();
+        if (dateFrom && actTime < dateFrom) return false;
+        if (dateTo && actTime > dateTo) return false;
+      } else if (dateFrom || dateTo) {
+        return false;
+      }
+    }
+
+    if (completionStatus === 'not_started' && l.solved > 0) return false;
+    if (completionStatus === 'in_progress' && (l.solved === 0 || l.solved >= totalScenariosCount)) return false;
+    if (completionStatus === 'completed' && l.solved < totalScenariosCount) return false;
+
+    if (!isNaN(solvedMin) && l.solved < solvedMin) return false;
+    if (!isNaN(solvedMax) && l.solved > solvedMax) return false;
+
+    if (!isNaN(attemptedMin) && l.attempted < attemptedMin) return false;
+    if (!isNaN(attemptedMax) && l.attempted > attemptedMax) return false;
+
+    if (specificScenario !== 'ALL') {
+      if (!l.completedScenarioIds.has(specificScenario) && !l.attemptedScenarioIds.has(specificScenario)) return false;
+    }
+
+    return true;
   });
+
+  renderFilterChips({
+    accountStatus, domainFilter, levelFilter, lastActiveFilter, completionStatus,
+    solvedMin, solvedMax, attemptedMin, attemptedMax, dateFrom, dateTo, specificScenario, searchQuery
+  });
+
+  const totalFiltered = filteredLearners.length;
+  const filteredSolved = filteredLearners.reduce((acc, l) => acc + l.solved, 0);
+  const filteredAvg = totalFiltered > 0 ? (filteredSolved / totalFiltered).toFixed(1) : '0';
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const filteredActive = filteredLearners.filter(l => l.lastActivity && new Date(l.lastActivity).getTime() > weekAgo).length;
+
+  $('statLearners').textContent = String(totalFiltered);
+  $('statSolved').textContent = String(filteredSolved);
+  $('statAvg').textContent = String(filteredAvg);
+  $('statActive').textContent = String(filteredActive);
+
+  const matchCountEl = $('filterMatchCount');
+  if (matchCountEl) {
+    matchCountEl.textContent = `Showing ${totalFiltered} of ${learnersData.length} learners matching filters.`;
+  }
+
+  const filtered = filteredLearners;
 
   // Calculate reached threshold timestamp per learner based on currentThreshold
   filtered.forEach(l => {
@@ -665,6 +829,32 @@ function setupEventListeners() {
     renderLearnersTable();
   });
 
+  $('applyFiltersBtn')?.addEventListener('click', () => {
+    renderLearnersTable();
+  });
+  $('clearFiltersBtn')?.addEventListener('click', () => {
+    if ($('search')) $('search').value = '';
+    if ($('filterAccountStatus')) $('filterAccountStatus').value = 'ALL';
+    if ($('filterDomain')) $('filterDomain').value = 'ALL';
+    if ($('filterLevel')) $('filterLevel').value = 'ALL';
+    if ($('filterLastActive')) $('filterLastActive').value = 'ANY';
+    if ($('filterCompletionStatus')) $('filterCompletionStatus').value = 'ALL';
+    if ($('filterSolvedMin')) $('filterSolvedMin').value = '';
+    if ($('filterSolvedMax')) $('filterSolvedMax').value = '';
+    if ($('filterAttemptedMin')) $('filterAttemptedMin').value = '';
+    if ($('filterAttemptedMax')) $('filterAttemptedMax').value = '';
+    if ($('filterDateFrom')) $('filterDateFrom').value = '';
+    if ($('filterDateTo')) $('filterDateTo').value = '';
+    if ($('filterSpecificScenario')) $('filterSpecificScenario').value = 'ALL';
+    renderLearnersTable();
+  });
+
+  ['filterAccountStatus', 'filterDomain', 'filterLevel', 'filterLastActive', 'filterCompletionStatus', 'filterSolvedMin', 'filterSolvedMax', 'filterAttemptedMin', 'filterAttemptedMax', 'filterDateFrom', 'filterDateTo', 'filterSpecificScenario'].forEach(id => {
+    $(id)?.addEventListener('change', () => {
+      renderLearnersTable();
+    });
+  });
+
   // Refresh button
   $('refreshBtn')?.addEventListener('click', async () => {
     const btn = $('refreshBtn');
@@ -692,13 +882,14 @@ function setupEventListeners() {
 }
 
 function exportCSV() {
-  if (!learnersData || learnersData.length === 0) {
+  const targetData = (typeof filteredLearners !== 'undefined' && filteredLearners.length > 0) ? filteredLearners : learnersData;
+  if (!targetData || targetData.length === 0) {
     alert('No learner data available to export.');
     return;
   }
 
   let csv = 'Index,User ID,Username,Name,Email,Role,Solved,Attempted,Completion %,Top Domains,Reached Threshold,Last Active\n';
-  learnersData.forEach((l, idx) => {
+  targetData.forEach((l, idx) => {
     const pct = Math.min(100, Math.round((l.solved / totalScenariosCount) * 100));
     const role = l.isAdmin ? 'Admin' : 'Learner';
     const cleanUsername = (l.username || 'Username not set').replace(/"/g, '""');
@@ -2979,6 +3170,7 @@ Object.assign(window, {
   loadAdminFeedback,
   filterFeedbackTable,
   openLearnerFeedbackHistory,
-  closeLearnerFeedbackModal
+  closeLearnerFeedbackModal,
+  toggleAdvancedFilters
 });
 

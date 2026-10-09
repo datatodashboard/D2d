@@ -223,6 +223,27 @@ function updateProgress() {
   updateNotificationsUI();
 }
 
+let cachedAdminNotifications = [];
+
+async function fetchAdminNotifications() {
+  if (!client) return cachedAdminNotifications;
+  try {
+    const { data, error } = await client
+      .from('app_notifications')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn('app_notifications fetch error:', error);
+    } else if (Array.isArray(data)) {
+      cachedAdminNotifications = data;
+    }
+  } catch (err) {
+    console.warn('app_notifications fetch exception:', err);
+  }
+  return cachedAdminNotifications;
+}
+
 function updateNotificationsUI() {
   const contestState = typeof getContestState === 'function' ? getContestState() : null;
   renderNotificationsUI({
@@ -230,7 +251,8 @@ function updateNotificationsUI() {
     state,
     user,
     currentUsername,
-    activeContest: contestState?.contest || null
+    activeContest: contestState?.contest || null,
+    adminNotifications: cachedAdminNotifications
   });
 }
 function renderAssessment(result) {
@@ -883,11 +905,13 @@ async function checkUserAccessStatus(userId) {
     }
 
     void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
+    return { profile, isCurrentUserAdmin, isPaidUnlocked };
   } catch (err) {
     console.warn('checkUserAccessStatus warning:', err);
     if (!isCurrentUserAdmin && !currentUsername && !isPaidUnlocked) {
       showAccessCheckError('Could not verify account profile. Click Retry to check again.');
     }
+    return { profile: null, isCurrentUserAdmin, isPaidUnlocked };
   }
 }
 
@@ -1535,7 +1559,49 @@ function renderDomainAndLevelPickers() {
   }
 }
 
-function loadScenario() {
+let fullScenariosLoaded = false;
+let fullScenariosPromise = null;
+
+async function loadFullScenariosInBackground() {
+  if (fullScenariosLoaded) return scenarios;
+  if (fullScenariosPromise) return fullScenariosPromise;
+  fullScenariosPromise = (async () => {
+    try {
+      const resp = await fetch('./data/scenarios.json');
+      if (resp.ok) {
+        const fullData = await resp.json();
+        if (Array.isArray(fullData.scenarios)) {
+          const fullMap = new Map(fullData.scenarios.map(s => [s.id, s]));
+          for (let i = 0; i < scenarios.length; i++) {
+            const fullItem = fullMap.get(scenarios[i].id);
+            if (fullItem) {
+              scenarios[i] = Object.assign(scenarios[i], fullItem);
+            }
+          }
+          data = fullData;
+          fullScenariosLoaded = true;
+          if (current && (!current.tables || !current.variants)) {
+            const enriched = fullMap.get(current.id);
+            if (enriched) current = Object.assign(current, enriched);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Background full scenarios load notice:', e);
+    }
+    return scenarios;
+  })();
+  return fullScenariosPromise;
+}
+
+async function ensureFullScenario(targetScenario) {
+  if (!targetScenario) return null;
+  if (targetScenario.tables && targetScenario.variants) return targetScenario;
+  await loadFullScenariosInBackground();
+  return scenarios.find(s => s.id === targetScenario.id) || targetScenario;
+}
+
+async function loadScenario() {
   selectedDomain = selectedDomain || 'Banking';
   if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
     selectedDomain = 'Banking';
@@ -1553,13 +1619,13 @@ function loadScenario() {
     if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
       const completedCandidate = pool.find(s => isCompleted(s, state.entries[s.id])) || scenarios.find(s => isCompleted(s, state.entries[s.id]));
       if (completedCandidate) {
-        current = completedCandidate;
+        current = await ensureFullScenario(completedCandidate);
         renderScenario();
       }
       openPaywallModal();
       return;
     }
-    current = next;
+    current = await ensureFullScenario(next);
     renderScenario();
   }
 }
@@ -2241,10 +2307,15 @@ async function submitMandatoryLevelFeedback() {
 }
 
 // Supabase = Single Source of Truth for feedback
-async function fetchUserFeedbackFromSupabase(userId) {
-  if (!client) return [];
+async function fetchUserFeedbackFromSupabase(userId, force = false) {
+  if (!client) return window.userFeedbackList || [];
+  const targetUid = userId || user?.id;
+  if (!force && Array.isArray(window.userFeedbackList) && window.userFeedbackList.length > 0) {
+    if (!targetUid || window.userFeedbackList.every(f => !targetUid || f.user_id === targetUid)) {
+      return window.userFeedbackList;
+    }
+  }
   try {
-    const targetUid = userId || user?.id;
     let query = client.from('question_feedback').select('*').order('created_at', { ascending: false }).limit(200);
     if (targetUid) {
       query = query.eq('user_id', targetUid);
@@ -2261,7 +2332,7 @@ async function fetchUserFeedbackFromSupabase(userId) {
   } catch (err) {
     console.warn('fetchUserFeedbackFromSupabase notice:', err);
   }
-  return [];
+  return window.userFeedbackList || [];
 }
 
 function updateFeedbackUI() {
@@ -3165,8 +3236,8 @@ function showScreen(name) {
   }
 }
 function goHome() { showScreen('home'); }
-function openScenario(id) {
-  const target = scenarios.find(s => s.id === id);
+async function openScenario(id) {
+  let target = scenarios.find(s => s.id === id);
   if (!target) return;
 
   if (!isDomainUnlocked(target.domain, scenarios, state) || !isLevelUnlocked(target.domain, target.level, scenarios, state)) {
@@ -3181,6 +3252,7 @@ function openScenario(id) {
     return;
   }
 
+  target = await ensureFullScenario(target);
   current = target;
   selectedDomain = target.domain;
   selectedLevel = target.level;
@@ -3763,19 +3835,24 @@ function closeOnboarding() {
   const o = $('onboarding');
   if (o) o.style.display = 'none';
 }
+function dismissSplashScreen() {
+  const s = $('splashScreen');
+  if (s && !s.classList.contains('hide')) {
+    s.classList.add('hide');
+    setTimeout(() => { s.style.display = 'none'; }, 250);
+  }
+}
+
 function initAppChrome() {
-  setTimeout(() => {
-    const s = $('splashScreen');
-    if (s) {
-      s.classList.add('hide');
-      setTimeout(() => { s.style.display = 'none'; }, 600);
-    }
-  }, 900);
+  // Dismiss splash overlay as soon as DOM and shell are mounted
+  requestAnimationFrame(() => {
+    setTimeout(dismissSplashScreen, 50);
+  });
   setTimeout(() => {
     try {
       if (!storage.getItem('crack_sql_onboard_seen')) openOnboarding();
     } catch {}
-  }, 1200);
+  }, 400);
 }
 async function copy(text, label = 'Content') {
   try {
@@ -3924,7 +4001,7 @@ function renderAuth() {
   renderProfileAvatar();
 }
 
-async function loadAndRestoreUserProgress(userId) {
+async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetchedFeedback = null) {
   if (!userId) return;
 
   console.log('[D2D Progress] User authenticated:', userId);
@@ -3936,14 +4013,23 @@ async function loadAndRestoreUserProgress(userId) {
 
   console.log('[D2D Progress] Loading cloud progress');
 
-  // 2. Fetch that user's learning_progress record from Supabase
+  // 2. Fetch that user's learning_progress record from Supabase (or use prefetched)
   if (client) {
     try {
-      const { data: row, error } = await client
-        .from('learning_progress')
-        .select('state, updated_at')
-        .eq('user_id', userId)
-        .maybeSingle();
+      let row = null;
+      let error = null;
+      if (prefetchedLp !== null && prefetchedLp !== undefined) {
+        row = prefetchedLp.data;
+        error = prefetchedLp.error;
+      } else {
+        const lpRes = await client
+          .from('learning_progress')
+          .select('state, updated_at')
+          .eq('user_id', userId)
+          .maybeSingle();
+        row = lpRes?.data;
+        error = lpRes?.error;
+      }
 
       if (error) {
         console.error('[D2D Progress] Supabase load error:', error.message || error);
@@ -3956,12 +4042,20 @@ async function loadAndRestoreUserProgress(userId) {
         console.log('[D2D Progress] No existing cloud progress found for user');
       }
 
-      // Reconcile level feedback from question_feedback table in Supabase
+      // Reconcile level feedback from prefetched feedback or question_feedback table in Supabase
       try {
-        const { data: qfRows } = await client
-          .from('question_feedback')
-          .select('domain, level, created_at, feedback_text, emoji')
-          .eq('user_id', userId);
+        let qfRows = null;
+        if (Array.isArray(prefetchedFeedback)) {
+          qfRows = prefetchedFeedback;
+        } else if (Array.isArray(window.userFeedbackList) && window.userFeedbackList.length > 0) {
+          qfRows = window.userFeedbackList;
+        } else {
+          const qfRes = await client
+            .from('question_feedback')
+            .select('domain, level, created_at, feedback_text, emoji')
+            .eq('user_id', userId);
+          qfRows = qfRes?.data;
+        }
         if (qfRows && Array.isArray(qfRows)) {
           workingState.levelFeedback = workingState.levelFeedback || {};
           for (const item of qfRows) {
@@ -4049,6 +4143,8 @@ async function loadAndRestoreUserProgress(userId) {
 }
 
 let authSessionCounter = 0;
+let activeSessionInitPromise = null;
+let lastInitializedUserId = null;
 
 async function setSession(session) {
   const currentAuthToken = ++authSessionCounter;
@@ -4068,42 +4164,79 @@ async function setSession(session) {
       hideAccessError();
     }
 
+    // Deduplicate rapid consecutive setSession calls for the same authenticated user
+    if (user.id === lastInitializedUserId && activeSessionInitPromise) {
+      return activeSessionInitPromise;
+    }
+    if (user.id === lastInitializedUserId && !activeSessionInitPromise && previousUserId === user.id) {
+      return;
+    }
+    lastInitializedUserId = user.id;
+
     if ($('loginScreen')) $('loginScreen').hidden = true;
     if ($('appMain')) $('appMain').hidden = false;
     if ($('bottomNav')) $('bottomNav').hidden = false;
+
+    // Immediately activate dashboard shell so user never sees a blank screen
+    $('home').classList.add('active');
+    $('practice').classList.remove('active');
+    $('progressScreen').classList.remove('active');
+    if ($('navHome')) $('navHome').classList.add('active');
+    if ($('navPractice')) $('navPractice').classList.remove('active');
+    if ($('navProgress')) $('navProgress').classList.remove('active');
+    currentActiveScreen = 'home';
 
     clearTimeout(syncTimer);
     cloud.changeSession();
     renderAuth();
 
-    // 1. Load user's existing progress from Supabase
-    await loadAndRestoreUserProgress(user.id);
-    if (currentAuthToken !== authSessionCounter) return;
+    activeSessionInitPromise = (async () => {
+      try {
+        // Step 1: Execute independent queries in parallel (reducing 4 sequential round trips to 1)
+        const [adminResult, accessResult, feedbackResult, lpResult, notifResult] = await Promise.allSettled([
+          checkAdminStatus(),
+          checkUserAccessStatus(user.id),
+          fetchUserFeedbackFromSupabase(user.id),
+          client ? client.from('learning_progress').select('state, updated_at').eq('user_id', user.id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+          fetchAdminNotifications()
+        ]);
 
-    // Fetch user's feedback from Supabase (Single Source of Truth)
-    await fetchUserFeedbackFromSupabase(user.id);
-    if (currentAuthToken !== authSessionCounter) return;
+        if (currentAuthToken !== authSessionCounter) return;
 
-    initNotificationsState(user.id);
-    updateNotificationsUI();
+        initNotificationsState(user.id);
+        updateNotificationsUI();
 
-    // 2. Authoritative server admin check (awaited before rendering gated features)
-    const adminCheckResult = await checkAdminStatus();
-    if (currentAuthToken !== authSessionCounter) return;
+        // Step 2: Restore user progress using prefetched learning_progress and feedback data
+        const prefetchedLp = lpResult.status === 'fulfilled' ? lpResult.value : null;
+        const prefetchedFb = feedbackResult.status === 'fulfilled' ? feedbackResult.value : null;
+        await loadAndRestoreUserProgress(user.id, prefetchedLp, prefetchedFb);
+        if (currentAuthToken !== authSessionCounter) return;
 
-    // 3. User access status (payment & profile) (awaited)
-    await checkUserAccessStatus(user.id);
-    if (currentAuthToken !== authSessionCounter) return;
+        // Step 3: Username setup reusing already-resolved profile to eliminate duplicate queries
+        const profile = accessResult.status === 'fulfilled' ? accessResult.value?.profile : null;
+        await checkAndEnforceUsername(user.id, user.email, profile);
+        if (currentAuthToken !== authSessionCounter) return;
 
-    // 4. Username setup
-    await checkAndEnforceUsername(user.id, user.email);
-    if (currentAuthToken !== authSessionCounter) return;
+        // Step 4: Coordinated dashboard render with authoritative state
+        renderAuth();
+        updateProgress();
+        renderDomainAndLevelPickers();
+        renderScenarioCatalog();
 
-    // 5. Render home screen & initialize contest with authoritative admin status
-    showScreen('home');
-    void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
+        // Step 5: Initialize contest ONCE with authoritative completion count and admin status
+        void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
+      } finally {
+        if (currentAuthToken === authSessionCounter) {
+          activeSessionInitPromise = null;
+        }
+      }
+    })();
+
+    await activeSessionInitPromise;
   } else {
     // Signed out: reset in-memory active state and return to login gate
+    lastInitializedUserId = null;
+    activeSessionInitPromise = null;
     stopPaymentPolling();
     isCurrentUserAdmin = false;
     isPaidUnlocked = false;
@@ -4293,7 +4426,7 @@ function validateUsernameField() {
   if (errorEl) errorEl.style.display = 'none';
 }
 
-async function checkAndEnforceUsername(userId, userEmail) {
+async function checkAndEnforceUsername(userId, userEmail, prefetchedProfile = null) {
   if (!userId || !client) return;
 
   try {
@@ -4326,30 +4459,32 @@ async function checkAndEnforceUsername(userId, userEmail) {
       closeUsernameModal();
     }
 
-    // 4. Query the single source of truth: public.profiles table in Supabase
-    let profile = null;
-    try {
-      const { data, error } = await client
-        .from('profiles')
-        .select('id, email, username')
-        .eq('id', userId)
-        .maybeSingle();
+    // 4. Query the single source of truth: public.profiles table in Supabase (or reuse prefetched profile)
+    let profile = prefetchedProfile || null;
+    if (!profile) {
+      try {
+        const { data, error } = await client
+          .from('profiles')
+          .select('id, email, username')
+          .eq('id', userId)
+          .maybeSingle();
 
-      if (error) {
-        console.warn('[Username] Profile query notice:', error.message || error);
-        if (error.message && error.message.includes("Could not find the 'username' column")) {
-          const { data: fallbackData } = await client
-            .from('profiles')
-            .select('id, email')
-            .eq('id', userId)
-            .maybeSingle();
-          profile = fallbackData;
+        if (error) {
+          console.warn('[Username] Profile query notice:', error.message || error);
+          if (error.message && error.message.includes("Could not find the 'username' column")) {
+            const { data: fallbackData } = await client
+              .from('profiles')
+              .select('id, email')
+              .eq('id', userId)
+              .maybeSingle();
+            profile = fallbackData;
+          }
+        } else {
+          profile = data;
         }
-      } else {
-        profile = data;
+      } catch (queryErr) {
+        console.warn('[Username] Profile query exception:', queryErr);
       }
-    } catch (queryErr) {
-      console.warn('[Username] Profile query exception:', queryErr);
     }
 
     // If profile row doesn't exist yet, insert it
@@ -4804,7 +4939,7 @@ function openAdminPortal() {
   window.location.href = new URL('admin.html', loc.href).href;
 }
 
-function toggleNotificationsDropdown(event) {
+async function toggleNotificationsDropdown(event) {
   if (event) event.stopPropagation();
   closeProfileDropdown();
   const dropdown = $('notificationsDropdown');
@@ -4814,6 +4949,8 @@ function toggleNotificationsDropdown(event) {
   const btn = $('notificationsBtn');
   if (btn) btn.setAttribute('aria-expanded', String(isHidden));
   if (isHidden) {
+    updateNotificationsUI();
+    await fetchAdminNotifications();
     updateNotificationsUI();
   }
 }
@@ -4967,10 +5104,19 @@ try {
   initLandscapeMode();
   initNotificationsState(null);
   renderProfileAvatar();
-  const response=await fetch('./data/scenarios.json');
-  if(!response.ok)throw Error('Scenario download failed');
-  data=await response.json();scenarios=data.scenarios;ids=new Set(scenarios.map(s=>s.id));
-  state=readProgress(storage,null,ids);
+  let scenarioDataUrl = './data/scenarios-metadata.json';
+  let response = await fetch(scenarioDataUrl);
+  if (!response.ok) {
+    scenarioDataUrl = './data/scenarios.json';
+    response = await fetch(scenarioDataUrl);
+  }
+  if (!response.ok) throw Error('Scenario download failed');
+  data = await response.json();
+  scenarios = data.scenarios;
+  ids = new Set(scenarios.map(s => s.id));
+  state = readProgress(storage, null, ids);
+  // Preload full scenario execution data in background without blocking initial rendering
+  void loadFullScenariosInBackground();
   document.querySelectorAll('.domain,.level').forEach(el=>{
     el.setAttribute('role','button');el.tabIndex=0;
     el.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();el.click();}});
