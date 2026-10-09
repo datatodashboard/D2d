@@ -12,7 +12,7 @@ export function sanitize(value, ids) {
     // Keep earlier four-box answers readable after upgrading to the single-box UI.
     for(const k of ['goal','sources','steps','check'])thinking[k]=String(entry.thinking?.[k]||'').slice(0,4000);
     const score = (typeof entry.assessment?.score === 'number') ? entry.assessment.score : null;
-    const completed = score !== null ? score >= 7 : !!entry.completed;
+    const completed = entry.completed === true || (score !== null && score >= 7);
     const attempts = Number.isFinite(entry.attempts) ? Math.max(0, Math.floor(entry.attempts)) : (entry.assessment ? 1 : 0);
     const status = typeof entry.status === 'string' ? entry.status : (completed ? 'completed' : (attempts > 0 || score !== null) ? 'attempted' : 'in_progress');
     result.entries[id] = {thinking, sql:String(entry.sql || '').slice(0,20000),
@@ -40,11 +40,11 @@ export function sanitize(value, ids) {
 }
 export function isCompleted(scenario, entry) {
   if (!entry) return false;
-  if (entry.assessment && typeof entry.assessment.score === 'number') {
-    return entry.assessment.score >= 7;
-  }
   if (entry.completed === true) {
     return true;
+  }
+  if (entry.assessment && typeof entry.assessment.score === 'number') {
+    return entry.assessment.score >= 7;
   }
   return false;
 }
