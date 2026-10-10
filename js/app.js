@@ -223,27 +223,6 @@ function updateProgress() {
   updateNotificationsUI();
 }
 
-let cachedAdminNotifications = [];
-
-async function fetchAdminNotifications() {
-  if (!client) return cachedAdminNotifications;
-  try {
-    const { data, error } = await client
-      .from('app_notifications')
-      .select('*')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-    if (error) {
-      console.warn('app_notifications fetch error:', error);
-    } else if (Array.isArray(data)) {
-      cachedAdminNotifications = data;
-    }
-  } catch (err) {
-    console.warn('app_notifications fetch exception:', err);
-  }
-  return cachedAdminNotifications;
-}
-
 function updateNotificationsUI() {
   const contestState = typeof getContestState === 'function' ? getContestState() : null;
   renderNotificationsUI({
@@ -251,8 +230,7 @@ function updateNotificationsUI() {
     state,
     user,
     currentUsername,
-    activeContest: contestState?.contest || null,
-    adminNotifications: cachedAdminNotifications
+    activeContest: contestState?.contest || null
   });
 }
 function renderAssessment(result) {
@@ -905,13 +883,11 @@ async function checkUserAccessStatus(userId) {
     }
 
     void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
-    return { profile, isCurrentUserAdmin, isPaidUnlocked };
   } catch (err) {
     console.warn('checkUserAccessStatus warning:', err);
     if (!isCurrentUserAdmin && !currentUsername && !isPaidUnlocked) {
       showAccessCheckError('Could not verify account profile. Click Retry to check again.');
     }
-    return { profile: null, isCurrentUserAdmin, isPaidUnlocked };
   }
 }
 
@@ -1559,52 +1535,7 @@ function renderDomainAndLevelPickers() {
   }
 }
 
-let fullScenariosLoaded = false;
-let fullScenariosPromise = null;
-
-async function loadFullScenariosInBackground() {
-  if (fullScenariosLoaded) return scenarios;
-  if (fullScenariosPromise) return fullScenariosPromise;
-  fullScenariosPromise = (async () => {
-    try {
-      const resp = await fetch('./data/scenarios.json');
-      if (resp.ok) {
-        const fullData = await resp.json();
-        if (Array.isArray(fullData.scenarios)) {
-          const fullMap = new Map(fullData.scenarios.map(s => [s.id, s]));
-          for (let i = 0; i < scenarios.length; i++) {
-            const fullItem = fullMap.get(scenarios[i].id);
-            if (fullItem) {
-              scenarios[i] = Object.assign(scenarios[i], fullItem);
-            }
-          }
-          data = fullData;
-          fullScenariosLoaded = true;
-          if (current && (!current.tables || !current.variants)) {
-            const enriched = fullMap.get(current.id);
-            if (enriched) current = Object.assign(current, enriched);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Background full scenarios load notice:', e);
-    }
-    return scenarios;
-  })();
-  return fullScenariosPromise;
-}
-
-async function ensureFullScenario(targetScenario) {
-  if (!targetScenario) return null;
-  if (targetScenario.tables && targetScenario.variants) return targetScenario;
-  await loadFullScenariosInBackground();
-  return scenarios.find(s => s.id === targetScenario.id) || targetScenario;
-}
-
-async function loadScenario() {
-  if (activeSessionInitPromise) {
-    await activeSessionInitPromise;
-  }
+function loadScenario() {
   selectedDomain = selectedDomain || 'Banking';
   if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
     selectedDomain = 'Banking';
@@ -1615,27 +1546,21 @@ async function loadScenario() {
   }
 
   const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
-  const next = chooseNext(pool, state, null);
+  const next = chooseNext(pool, state, null) || pool[0];
   if (next) {
     const isTargetCompleted = isCompleted(next, state.entries[next.id]);
     const completedCount = getCompletedCount();
     if (!isTargetCompleted && completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
       const completedCandidate = pool.find(s => isCompleted(s, state.entries[s.id])) || scenarios.find(s => isCompleted(s, state.entries[s.id]));
       if (completedCandidate) {
-        current = await ensureFullScenario(completedCandidate);
+        current = completedCandidate;
         renderScenario();
       }
       openPaywallModal();
       return;
     }
-    current = await ensureFullScenario(next);
+    current = next;
     renderScenario();
-  } else {
-    // Case D: 20/20 completed. Do not reset to Question 1! Load last scenario in pool.
-    if (pool.length > 0) {
-      current = await ensureFullScenario(pool[pool.length - 1]);
-      renderScenario();
-    }
   }
 }
 
@@ -2316,15 +2241,10 @@ async function submitMandatoryLevelFeedback() {
 }
 
 // Supabase = Single Source of Truth for feedback
-async function fetchUserFeedbackFromSupabase(userId, force = false) {
-  if (!client) return window.userFeedbackList || [];
-  const targetUid = userId || user?.id;
-  if (!force && Array.isArray(window.userFeedbackList) && window.userFeedbackList.length > 0) {
-    if (!targetUid || window.userFeedbackList.every(f => !targetUid || f.user_id === targetUid)) {
-      return window.userFeedbackList;
-    }
-  }
+async function fetchUserFeedbackFromSupabase(userId) {
+  if (!client) return [];
   try {
+    const targetUid = userId || user?.id;
     let query = client.from('question_feedback').select('*').order('created_at', { ascending: false }).limit(200);
     if (targetUid) {
       query = query.eq('user_id', targetUid);
@@ -2341,7 +2261,7 @@ async function fetchUserFeedbackFromSupabase(userId, force = false) {
   } catch (err) {
     console.warn('fetchUserFeedbackFromSupabase notice:', err);
   }
-  return window.userFeedbackList || [];
+  return [];
 }
 
 function updateFeedbackUI() {
@@ -2699,20 +2619,12 @@ function handlePracticeAgain() {
 }
 
 function openCertificateModal(certData) {
-  const targetDomain = certData?.domain || selectedDomain || 'Banking';
-  const targetLevel = certData?.level || selectedLevel || 'Beginner';
-  const status = checkLevelCompletion(targetDomain, targetLevel, scenarios, state);
-
-  if (!status.isCompleted) {
-    console.warn(`Certificate is not eligible for ${targetDomain} (${targetLevel}): ${status.completedCount}/20 completed.`);
-    return;
-  }
-
   if (!certData) {
     const learnerName = getLearnerDisplayName(user, currentUsername);
+    const status = checkLevelCompletion(selectedDomain, selectedLevel, scenarios, state);
     certData = {
-      domain: targetDomain,
-      level: targetLevel,
+      domain: selectedDomain || 'Banking',
+      level: selectedLevel || 'Beginner',
       userName: learnerName,
       completionDate: status.completionDate || formatCompletionDate(Date.now())
     };
@@ -3190,7 +3102,7 @@ function handleOpenInstagramWeb() {
 let currentActiveScreen = 'home';
 const pageScrollPositions = { home: 0, practice: 0 };
 
-async function showScreen(name) {
+function showScreen(name) {
   if (name === 'profile') {
     openProfileModal();
     return;
@@ -3222,13 +3134,10 @@ async function showScreen(name) {
   if (isProgress) {
     renderProgressScreen();
   } else if (name === 'practice') {
-    if (activeSessionInitPromise) {
-      await activeSessionInitPromise;
-    }
     if (!current) {
       selectedDomain = selectedDomain || 'Banking';
       selectedLevel = selectedLevel || 'Beginner';
-      await loadScenario();
+      loadScenario();
     } else {
       renderScenario();
     }
@@ -3256,8 +3165,8 @@ async function showScreen(name) {
   }
 }
 function goHome() { showScreen('home'); }
-async function openScenario(id) {
-  let target = scenarios.find(s => s.id === id);
+function openScenario(id) {
+  const target = scenarios.find(s => s.id === id);
   if (!target) return;
 
   if (!isDomainUnlocked(target.domain, scenarios, state) || !isLevelUnlocked(target.domain, target.level, scenarios, state)) {
@@ -3272,7 +3181,6 @@ async function openScenario(id) {
     return;
   }
 
-  target = await ensureFullScenario(target);
   current = target;
   selectedDomain = target.domain;
   selectedLevel = target.level;
@@ -3714,86 +3622,10 @@ function filterAllCertificatesModal(filter) {
   renderCertificatesSection();
 }
 
-async function refreshAuthoritativeProgress() {
-  if (!user || !client) return;
-  try {
-    const userId = user.id;
-    const [lpRes, progRes, qfRes] = await Promise.all([
-      client.from('learning_progress').select('state, updated_at').eq('user_id', userId).maybeSingle(),
-      client.from('progress').select('scenario_id').eq('user_id', userId),
-      client.from('question_feedback').select('domain, level, created_at, feedback_text, emoji').eq('user_id', userId)
-    ]);
-
-    let workingState = state ? structuredClone(state) : EMPTY();
-
-    if (lpRes?.data?.state) {
-      const cloudState = sanitize(lpRes.data.state, ids);
-      workingState = mergeProgress(cloudState, workingState, ids);
-    }
-
-    if (qfRes?.data && Array.isArray(qfRes.data)) {
-      workingState.levelFeedback = workingState.levelFeedback || {};
-      for (const item of qfRes.data) {
-        if (item.domain && item.level) {
-          const key = `${item.domain}_${item.level}`;
-          if (!workingState.levelFeedback[key]) {
-            workingState.levelFeedback[key] = {
-              submittedAt: new Date(item.created_at).getTime() || Date.now(),
-              text: item.feedback_text || '',
-              emoji: item.emoji || ''
-            };
-          }
-        }
-      }
-    }
-
-    if (progRes?.data && Array.isArray(progRes.data)) {
-      const confirmedSet = new Set(progRes.data.map(r => r.scenario_id));
-      authoritativeCompletedCount = Math.max(authoritativeCompletedCount, confirmedSet.size);
-
-      for (const sId of confirmedSet) {
-        if (!workingState.entries[sId]) {
-          workingState.entries[sId] = {
-            thinking: { response: '' },
-            sql: '',
-            status: 'completed',
-            completed: true,
-            attempts: 1,
-            assessment: { score: 10, ready: true },
-            updatedAt: Date.now()
-          };
-        } else {
-          workingState.entries[sId].completed = true;
-          workingState.entries[sId].status = 'completed';
-          if (!workingState.entries[sId].assessment || typeof workingState.entries[sId].assessment.score !== 'number' || workingState.entries[sId].assessment.score < 7) {
-            workingState.entries[sId].assessment = {
-              ...(workingState.entries[sId].assessment || {}),
-              score: 10,
-              ready: true
-            };
-          }
-        }
-      }
-    }
-
-    saveProgress(storage, userId, workingState);
-    state = workingState;
-  } catch (err) {
-    console.warn('[D2D Progress] refreshAuthoritativeProgress notice:', err);
-  }
-}
-
-async function openAllCertificatesModal() {
+function openAllCertificatesModal() {
   renderCertificatesSection();
   const modal = $('allCertificatesModal');
   if (modal) modal.hidden = false;
-  if (activeSessionInitPromise) {
-    await activeSessionInitPromise;
-    renderCertificatesSection();
-  } else if (user && client) {
-    await refreshAuthoritativeProgress();
-    renderCertificatesSection();
-  }
 }
 
 function closeAllCertificatesModal() {
@@ -3811,9 +3643,6 @@ function renderCertificatesSection() {
   }
   if ($('allCertsModalEarnedBadge')) {
     $('allCertsModalEarnedBadge').textContent = badgeText;
-  }
-  if ($('modalProfileCertificates')) {
-    $('modalProfileCertificates').textContent = badgeText;
   }
 
   const grid = $('certificatesGrid');
@@ -3843,69 +3672,36 @@ function renderCertificatesSection() {
 
   grid.innerHTML = filtered.map(c => {
     const isEarned = c.isCompleted;
-    const isUnlocked = c.isUnlocked;
-    const isLocked = !isEarned && !isUnlocked;
-    const isInProgress = !isEarned && isUnlocked && c.completedCount > 0;
-    const isNotStarted = !isEarned && isUnlocked && c.completedCount === 0;
+    const cardClass = isEarned ? 'cert-card-item earned' : 'cert-card-item';
+    const icon = isEarned ? '🏆' : c.completedCount > 0 ? '⚡' : '🔒';
 
-    let cardClass = 'cert-card-item';
-    let icon = '🎯';
     let statusBadgeHtml = '';
-    let statusText = '';
-    let actions = '';
-
     if (isEarned) {
-      cardClass = 'cert-card-item earned';
-      icon = '🏆';
       statusBadgeHtml = `<span style="font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;">✓ Earned</span>`;
-      statusText = `Completed 20/20 • Awarded ${c.completionDate}`;
-      actions = `
-        <button class="action primary sm" style="padding:6px 12px;font-size:12px;font-weight:700;" onclick="closeAllCertificatesModal(); viewCertificate('${c.domain}','${c.level}','${c.completionDate}')">
-          View Certificate
-        </button>
-        <button class="action secondary sm" style="padding:6px 10px;font-size:12px;" onclick="downloadCertificateDirect('${c.domain}','${c.level}','${c.completionDate}')" title="Download High-Res PNG">
-          📥 Download
-        </button>
-      `;
-    } else if (isLocked) {
-      cardClass = 'cert-card-item locked';
-      icon = '🔒';
-      statusBadgeHtml = `<span style="font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;">🔒 Locked</span>`;
-      if (c.level === 'Intermediate') {
-        statusText = 'Complete Beginner (20/20) + Feedback to Unlock';
-      } else if (c.level === 'Expert') {
-        statusText = 'Complete Intermediate (20/20) + Feedback to Unlock';
-      } else {
-        statusText = 'Complete previous domain to unlock';
-      }
-      actions = `
-        <button class="ghost-btn-sm" style="padding:6px 12px;font-size:12px;color:#64748b;font-weight:700;border:1px solid #e2e8f0;background:#f8fafc;" onclick="closeAllCertificatesModal(); practiceDomainAndLevel('${c.domain}','${c.level}')">
-          🔒 Locked • View Requirement
-        </button>
-      `;
-    } else if (isInProgress) {
-      cardClass = 'cert-card-item in-progress';
-      icon = '⚡';
+    } else if (c.completedCount > 0) {
       statusBadgeHtml = `<span style="font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #92400e; border: 1px solid #fde68a;">In Progress (${c.completedCount}/20)</span>`;
-      statusText = `${c.completedCount} / 20 Scenarios Solved`;
-      actions = `
-        <button class="ghost-btn-sm" style="padding:6px 12px;font-size:12px;color:var(--primary);font-weight:700;" onclick="closeAllCertificatesModal(); practiceDomainAndLevel('${c.domain}','${c.level}')">
-          Continue Practice →
-        </button>
-      `;
     } else {
-      cardClass = 'cert-card-item';
-      icon = '🎯';
-      statusBadgeHtml = `<span style="font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">Not Started (0/20)</span>`;
-      statusText = `0 / 20 Scenarios Solved • Unlocked`;
-      actions = `
-        <button class="ghost-btn-sm" style="padding:6px 12px;font-size:12px;color:var(--primary);font-weight:700;" onclick="closeAllCertificatesModal(); practiceDomainAndLevel('${c.domain}','${c.level}')">
-          Start Practice →
-        </button>
-      `;
+      statusBadgeHtml = `<span style="font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;">Locked (0/20)</span>`;
     }
 
+    const statusText = isEarned
+      ? `Completed 20/20 • Awarded ${c.completionDate}`
+      : `${c.completedCount} / 20 Scenarios Solved`;
+
     const pct = Math.round((c.completedCount / 20) * 100);
+
+    const actions = isEarned ? `
+      <button class="action primary sm" style="padding:6px 12px;font-size:12px;font-weight:700;" onclick="closeAllCertificatesModal(); viewCertificate('${c.domain}','${c.level}','${c.completionDate}')">
+        View Certificate
+      </button>
+      <button class="action secondary sm" style="padding:6px 10px;font-size:12px;" onclick="downloadCertificateDirect('${c.domain}','${c.level}','${c.completionDate}')" title="Download High-Res PNG">
+        📥 Download
+      </button>
+    ` : `
+      <button class="ghost-btn-sm" style="padding:6px 12px;font-size:12px;color:var(--primary);font-weight:700;" onclick="closeAllCertificatesModal(); practiceDomainAndLevel('${c.domain}','${c.level}')">
+        Continue Practice →
+      </button>
+    `;
 
     return `
       <div class="${cardClass}">
@@ -3923,7 +3719,7 @@ function renderCertificatesSection() {
           </div>
         </div>
 
-        ${!isEarned && !isLocked ? `
+        ${!isEarned ? `
           <div style="margin-top: 6px; margin-bottom: 4px;">
             <div class="progress-track" style="height: 5px;">
               <div class="progress-fill" style="width: ${pct}%;"></div>
@@ -3967,24 +3763,19 @@ function closeOnboarding() {
   const o = $('onboarding');
   if (o) o.style.display = 'none';
 }
-function dismissSplashScreen() {
-  const s = $('splashScreen');
-  if (s && !s.classList.contains('hide')) {
-    s.classList.add('hide');
-    setTimeout(() => { s.style.display = 'none'; }, 250);
-  }
-}
-
 function initAppChrome() {
-  // Dismiss splash overlay as soon as DOM and shell are mounted
-  requestAnimationFrame(() => {
-    setTimeout(dismissSplashScreen, 50);
-  });
+  setTimeout(() => {
+    const s = $('splashScreen');
+    if (s) {
+      s.classList.add('hide');
+      setTimeout(() => { s.style.display = 'none'; }, 600);
+    }
+  }, 900);
   setTimeout(() => {
     try {
       if (!storage.getItem('crack_sql_onboard_seen')) openOnboarding();
     } catch {}
-  }, 400);
+  }, 1200);
 }
 async function copy(text, label = 'Content') {
   try {
@@ -4133,7 +3924,7 @@ function renderAuth() {
   renderProfileAvatar();
 }
 
-async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetchedFeedback = null) {
+async function loadAndRestoreUserProgress(userId) {
   if (!userId) return;
 
   console.log('[D2D Progress] User authenticated:', userId);
@@ -4145,23 +3936,14 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
 
   console.log('[D2D Progress] Loading cloud progress');
 
-  // 2. Fetch that user's learning_progress record from Supabase (or use prefetched)
+  // 2. Fetch that user's learning_progress record from Supabase
   if (client) {
     try {
-      let row = null;
-      let error = null;
-      if (prefetchedLp !== null && prefetchedLp !== undefined) {
-        row = prefetchedLp.data;
-        error = prefetchedLp.error;
-      } else {
-        const lpRes = await client
-          .from('learning_progress')
-          .select('state, updated_at')
-          .eq('user_id', userId)
-          .maybeSingle();
-        row = lpRes?.data;
-        error = lpRes?.error;
-      }
+      const { data: row, error } = await client
+        .from('learning_progress')
+        .select('state, updated_at')
+        .eq('user_id', userId)
+        .maybeSingle();
 
       if (error) {
         console.error('[D2D Progress] Supabase load error:', error.message || error);
@@ -4169,26 +3951,17 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
         console.log('[D2D Progress] Cloud progress found');
         // 3. Sanitize cloud state
         const cloudState = sanitize(row.state, ids);
-        // Supabase cloud progress is authoritative: prevent stale localStorage from overriding it
-        workingState = mergeProgress(cloudState, workingState, ids);
+        workingState = mergeProgress(workingState, cloudState, ids);
       } else {
         console.log('[D2D Progress] No existing cloud progress found for user');
       }
 
-      // Reconcile level feedback from prefetched feedback or question_feedback table in Supabase
+      // Reconcile level feedback from question_feedback table in Supabase
       try {
-        let qfRows = null;
-        if (Array.isArray(prefetchedFeedback)) {
-          qfRows = prefetchedFeedback;
-        } else if (Array.isArray(window.userFeedbackList) && window.userFeedbackList.length > 0) {
-          qfRows = window.userFeedbackList;
-        } else {
-          const qfRes = await client
-            .from('question_feedback')
-            .select('domain, level, created_at, feedback_text, emoji')
-            .eq('user_id', userId);
-          qfRows = qfRes?.data;
-        }
+        const { data: qfRows } = await client
+          .from('question_feedback')
+          .select('domain, level, created_at, feedback_text, emoji')
+          .eq('user_id', userId);
         if (qfRows && Array.isArray(qfRows)) {
           workingState.levelFeedback = workingState.levelFeedback || {};
           for (const item of qfRows) {
@@ -4240,19 +4013,11 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
               status: 'completed',
               completed: true,
               attempts: 1,
-              assessment: { score: 10, ready: true },
               updatedAt: Date.now()
             };
           } else {
             workingState.entries[sId].completed = true;
             workingState.entries[sId].status = 'completed';
-            if (!workingState.entries[sId].assessment || typeof workingState.entries[sId].assessment.score !== 'number' || workingState.entries[sId].assessment.score < 7) {
-              workingState.entries[sId].assessment = {
-                ...(workingState.entries[sId].assessment || {}),
-                score: 10,
-                ready: true
-              };
-            }
           }
         }
       }
@@ -4284,8 +4049,6 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
 }
 
 let authSessionCounter = 0;
-let activeSessionInitPromise = null;
-let lastInitializedUserId = null;
 
 async function setSession(session) {
   const currentAuthToken = ++authSessionCounter;
@@ -4305,79 +4068,42 @@ async function setSession(session) {
       hideAccessError();
     }
 
-    // Deduplicate rapid consecutive setSession calls for the same authenticated user
-    if (user.id === lastInitializedUserId && activeSessionInitPromise) {
-      return activeSessionInitPromise;
-    }
-    if (user.id === lastInitializedUserId && !activeSessionInitPromise && previousUserId === user.id) {
-      return;
-    }
-    lastInitializedUserId = user.id;
-
     if ($('loginScreen')) $('loginScreen').hidden = true;
     if ($('appMain')) $('appMain').hidden = false;
     if ($('bottomNav')) $('bottomNav').hidden = false;
-
-    // Immediately activate dashboard shell so user never sees a blank screen
-    $('home').classList.add('active');
-    $('practice').classList.remove('active');
-    $('progressScreen').classList.remove('active');
-    if ($('navHome')) $('navHome').classList.add('active');
-    if ($('navPractice')) $('navPractice').classList.remove('active');
-    if ($('navProgress')) $('navProgress').classList.remove('active');
-    currentActiveScreen = 'home';
 
     clearTimeout(syncTimer);
     cloud.changeSession();
     renderAuth();
 
-    activeSessionInitPromise = (async () => {
-      try {
-        // Step 1: Execute independent queries in parallel (reducing 4 sequential round trips to 1)
-        const [adminResult, accessResult, feedbackResult, lpResult, notifResult] = await Promise.allSettled([
-          checkAdminStatus(),
-          checkUserAccessStatus(user.id),
-          fetchUserFeedbackFromSupabase(user.id),
-          client ? client.from('learning_progress').select('state, updated_at').eq('user_id', user.id).maybeSingle() : Promise.resolve({ data: null, error: null }),
-          fetchAdminNotifications()
-        ]);
+    // 1. Load user's existing progress from Supabase
+    await loadAndRestoreUserProgress(user.id);
+    if (currentAuthToken !== authSessionCounter) return;
 
-        if (currentAuthToken !== authSessionCounter) return;
+    // Fetch user's feedback from Supabase (Single Source of Truth)
+    await fetchUserFeedbackFromSupabase(user.id);
+    if (currentAuthToken !== authSessionCounter) return;
 
-        initNotificationsState(user.id);
-        updateNotificationsUI();
+    initNotificationsState(user.id);
+    updateNotificationsUI();
 
-        // Step 2: Restore user progress using prefetched learning_progress and feedback data
-        const prefetchedLp = lpResult.status === 'fulfilled' ? lpResult.value : null;
-        const prefetchedFb = feedbackResult.status === 'fulfilled' ? feedbackResult.value : null;
-        await loadAndRestoreUserProgress(user.id, prefetchedLp, prefetchedFb);
-        if (currentAuthToken !== authSessionCounter) return;
+    // 2. Authoritative server admin check (awaited before rendering gated features)
+    const adminCheckResult = await checkAdminStatus();
+    if (currentAuthToken !== authSessionCounter) return;
 
-        // Step 3: Username setup reusing already-resolved profile to eliminate duplicate queries
-        const profile = accessResult.status === 'fulfilled' ? accessResult.value?.profile : null;
-        await checkAndEnforceUsername(user.id, user.email, profile);
-        if (currentAuthToken !== authSessionCounter) return;
+    // 3. User access status (payment & profile) (awaited)
+    await checkUserAccessStatus(user.id);
+    if (currentAuthToken !== authSessionCounter) return;
 
-        // Step 4: Coordinated dashboard render with authoritative state
-        renderAuth();
-        updateProgress();
-        renderDomainAndLevelPickers();
-        renderScenarioCatalog();
+    // 4. Username setup
+    await checkAndEnforceUsername(user.id, user.email);
+    if (currentAuthToken !== authSessionCounter) return;
 
-        // Step 5: Initialize contest ONCE with authoritative completion count and admin status
-        void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
-      } finally {
-        if (currentAuthToken === authSessionCounter) {
-          activeSessionInitPromise = null;
-        }
-      }
-    })();
-
-    await activeSessionInitPromise;
+    // 5. Render home screen & initialize contest with authoritative admin status
+    showScreen('home');
+    void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
   } else {
     // Signed out: reset in-memory active state and return to login gate
-    lastInitializedUserId = null;
-    activeSessionInitPromise = null;
     stopPaymentPolling();
     isCurrentUserAdmin = false;
     isPaidUnlocked = false;
@@ -4567,7 +4293,7 @@ function validateUsernameField() {
   if (errorEl) errorEl.style.display = 'none';
 }
 
-async function checkAndEnforceUsername(userId, userEmail, prefetchedProfile = null) {
+async function checkAndEnforceUsername(userId, userEmail) {
   if (!userId || !client) return;
 
   try {
@@ -4600,32 +4326,30 @@ async function checkAndEnforceUsername(userId, userEmail, prefetchedProfile = nu
       closeUsernameModal();
     }
 
-    // 4. Query the single source of truth: public.profiles table in Supabase (or reuse prefetched profile)
-    let profile = prefetchedProfile || null;
-    if (!profile) {
-      try {
-        const { data, error } = await client
-          .from('profiles')
-          .select('id, email, username')
-          .eq('id', userId)
-          .maybeSingle();
+    // 4. Query the single source of truth: public.profiles table in Supabase
+    let profile = null;
+    try {
+      const { data, error } = await client
+        .from('profiles')
+        .select('id, email, username')
+        .eq('id', userId)
+        .maybeSingle();
 
-        if (error) {
-          console.warn('[Username] Profile query notice:', error.message || error);
-          if (error.message && error.message.includes("Could not find the 'username' column")) {
-            const { data: fallbackData } = await client
-              .from('profiles')
-              .select('id, email')
-              .eq('id', userId)
-              .maybeSingle();
-            profile = fallbackData;
-          }
-        } else {
-          profile = data;
+      if (error) {
+        console.warn('[Username] Profile query notice:', error.message || error);
+        if (error.message && error.message.includes("Could not find the 'username' column")) {
+          const { data: fallbackData } = await client
+            .from('profiles')
+            .select('id, email')
+            .eq('id', userId)
+            .maybeSingle();
+          profile = fallbackData;
         }
-      } catch (queryErr) {
-        console.warn('[Username] Profile query exception:', queryErr);
+      } else {
+        profile = data;
       }
+    } catch (queryErr) {
+      console.warn('[Username] Profile query exception:', queryErr);
     }
 
     // If profile row doesn't exist yet, insert it
@@ -5080,7 +4804,7 @@ function openAdminPortal() {
   window.location.href = new URL('admin.html', loc.href).href;
 }
 
-async function toggleNotificationsDropdown(event) {
+function toggleNotificationsDropdown(event) {
   if (event) event.stopPropagation();
   closeProfileDropdown();
   const dropdown = $('notificationsDropdown');
@@ -5090,8 +4814,6 @@ async function toggleNotificationsDropdown(event) {
   const btn = $('notificationsBtn');
   if (btn) btn.setAttribute('aria-expanded', String(isHidden));
   if (isHidden) {
-    updateNotificationsUI();
-    await fetchAdminNotifications();
     updateNotificationsUI();
   }
 }
@@ -5172,51 +4894,30 @@ document.addEventListener('keydown', event => {
 
 // Global helpers for certificate interactions
 window.viewCertificate = (domain, level, completionDate) => {
-  const status = checkLevelCompletion(domain, level, scenarios, state);
-  if (!status.isCompleted) {
-    console.warn(`Certificate not eligible for ${domain} (${level}): ${status.completedCount}/20 completed.`);
-    return;
-  }
   const learnerName = getLearnerDisplayName(user, currentUsername);
   openCertificateModal({
     domain,
     level,
     userName: learnerName,
-    completionDate: completionDate || status.completionDate || formatCompletionDate(Date.now())
+    completionDate: completionDate || formatCompletionDate(Date.now())
   });
 };
 
 window.downloadCertificateDirect = (domain, level, completionDate) => {
-  const status = checkLevelCompletion(domain, level, scenarios, state);
-  if (!status.isCompleted) {
-    console.warn(`Certificate download not eligible for ${domain} (${level}): ${status.completedCount}/20 completed.`);
-    return;
-  }
   const learnerName = getLearnerDisplayName(user, currentUsername);
   currentCertificateTarget = {
     domain,
     level,
     userName: learnerName,
-    completionDate: completionDate || status.completionDate || formatCompletionDate(Date.now())
+    completionDate: completionDate || formatCompletionDate(Date.now())
   };
   void downloadCertificateImage(currentCertificateTarget);
 };
 
-window.practiceDomainAndLevel = async (domain, level) => {
-  if (!isDomainUnlocked(domain, scenarios, state)) {
-    onLockedDomainClick(domain);
-    return;
-  }
-  if (!isLevelUnlocked(domain, level, scenarios, state)) {
-    onLockedLevelClick(domain, level);
-    return;
-  }
-  selectedDomain = domain;
-  selectedLevel = level;
-  renderDomainAndLevelPickers();
-  renderScenarioCatalog();
-  await loadScenario();
-  showScreen('practice');
+window.practiceDomainAndLevel = (domain, level) => {
+  practiceDomain(domain);
+  const lvlIndex = level === 'Beginner' ? 1 : level === 'Intermediate' ? 2 : 3;
+  selectLevel(level, document.querySelector(`.level:nth-child(${lvlIndex})`));
 };
 
 Object.assign(window,{
@@ -5266,19 +4967,10 @@ try {
   initLandscapeMode();
   initNotificationsState(null);
   renderProfileAvatar();
-  let scenarioDataUrl = './data/scenarios-metadata.json';
-  let response = await fetch(scenarioDataUrl);
-  if (!response.ok) {
-    scenarioDataUrl = './data/scenarios.json';
-    response = await fetch(scenarioDataUrl);
-  }
-  if (!response.ok) throw Error('Scenario download failed');
-  data = await response.json();
-  scenarios = data.scenarios;
-  ids = new Set(scenarios.map(s => s.id));
-  state = readProgress(storage, null, ids);
-  // Preload full scenario execution data in background without blocking initial rendering
-  void loadFullScenariosInBackground();
+  const response=await fetch('./data/scenarios.json');
+  if(!response.ok)throw Error('Scenario download failed');
+  data=await response.json();scenarios=data.scenarios;ids=new Set(scenarios.map(s=>s.id));
+  state=readProgress(storage,null,ids);
   document.querySelectorAll('.domain,.level').forEach(el=>{
     el.setAttribute('role','button');el.tabIndex=0;
     el.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();el.click();}});
