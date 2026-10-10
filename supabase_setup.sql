@@ -713,6 +713,8 @@ declare
   key text;
   inc_entry jsonb;
   cur_entry jsonb;
+  cur_is_comp boolean;
+  inc_is_comp boolean;
 begin
   if auth.uid() is null or (auth.uid() <> expected_user and not public.is_admin()) then
     raise exception 'Unauthorized user progress merge';
@@ -746,7 +748,17 @@ begin
       continue;
     end if;
 
-    if cur_entry is null or coalesce((inc_entry->>'updatedAt')::bigint, 0) >= coalesce((cur_entry->>'updatedAt')::bigint, 0) then
+    cur_is_comp := coalesce((cur_entry->>'completed')::boolean, false) OR coalesce((cur_entry->'assessment'->>'score')::numeric, 0) >= 7;
+    inc_is_comp := coalesce((inc_entry->>'completed')::boolean, false) OR coalesce((inc_entry->'assessment'->>'score')::numeric, 0) >= 7;
+
+    if cur_entry is null then
+      merged_entries := jsonb_set(merged_entries, array[key], inc_entry);
+    elsif cur_is_comp and not inc_is_comp then
+      -- Retain existing completed entry over incomplete draft
+      null;
+    elsif inc_is_comp and not cur_is_comp then
+      merged_entries := jsonb_set(merged_entries, array[key], inc_entry);
+    elsif coalesce((inc_entry->>'updatedAt')::bigint, 0) >= coalesce((cur_entry->>'updatedAt')::bigint, 0) then
       merged_entries := jsonb_set(merged_entries, array[key], inc_entry);
     end if;
   end loop;

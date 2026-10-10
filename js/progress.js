@@ -19,6 +19,7 @@ export function sanitize(value, ids) {
       variantIndex: Number.isFinite(entry.variantIndex) ? entry.variantIndex : null,
       skill: typeof entry.skill === 'string' ? entry.skill : null,
       assessment: entry.assessment && typeof entry.assessment === 'object' ? entry.assessment : null,
+      assessmentVersion: typeof entry.assessmentVersion === 'string' ? entry.assessmentVersion : (entry.assessment?.version ? `thinking_v${entry.assessment.version}` : 'thinking_v2'),
       completed,
       status,
       fiddleFingerprint: typeof entry.fiddleFingerprint === 'string' ? entry.fiddleFingerprint : null,

@@ -1,3 +1,5 @@
+import { mergeProgress } from './progress.js';
+
 // A single serialized queue plus a session generation guard prevents cross-account writes.
 export function createCloudSync({client,getContext,onMerged,onStatus}) {
   let generation=0, running=false, requested=false;
@@ -13,9 +15,11 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
 
         const localEntries = (context.state && typeof context.state.entries === 'object' && context.state.entries) ? context.state.entries : {};
         const localCount = Object.keys(localEntries).length;
+        const localResetAt = Number(context.state?.resetAt) || 0;
 
-        // RULE 9: NEVER replace existing saved cloud progress with an empty progress state
-        if (localCount === 0) {
+        // RULE 9: Protect against empty guest state overwriting non-empty saved cloud state upon initial sign in,
+        // BUT allow clean reset states (localResetAt > 0) to sync to cloud.
+        if (localCount === 0 && localResetAt === 0) {
           try {
             if (typeof activeClient.from === 'function') {
               const { data: row, error: fetchErr } = await activeClient
@@ -25,10 +29,10 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
                 .maybeSingle();
 
               if (!fetchErr && row?.state) {
-                const remoteEntries = (typeof row.state.entries === 'object' && row.state.entries) ? row.state.entries : {};
-                if (Object.keys(remoteEntries).length > 0) {
+                const sanitizedRemote = mergeProgress(row.state, { version: 2, resetAt: 0, entries: {} });
+                if (Object.keys(sanitizedRemote.entries).length > 0) {
                   if (token === generation && context.userId === getContext().userId) {
-                    onMerged(row.state, context.userId);
+                    onMerged(sanitizedRemote, context.userId);
                     onStatus('Progress synced');
                   }
                 }
@@ -72,15 +76,9 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
               .maybeSingle();
 
             if (!fetchErr) {
-              const remoteEntries = (row?.state && typeof row.state.entries === 'object') ? row.state.entries : {};
-              const mergedEntries = { ...remoteEntries, ...localEntries };
-              const mergedState = {
-                version: 2,
-                resetAt: Math.max(context.state?.resetAt || 0, row?.state?.resetAt || 0),
-                entries: mergedEntries,
-                skills: { ...(row?.state?.skills || {}), ...(context.state?.skills || {}) },
-                levelFeedback: { ...(row?.state?.levelFeedback || {}), ...(context.state?.levelFeedback || {}) }
-              };
+              const remoteState = (row?.state && typeof row.state === 'object') ? row.state : { entries: {} };
+              const localState = (context.state && typeof context.state === 'object') ? context.state : { entries: {} };
+              const mergedState = mergeProgress(remoteState, localState);
 
               const { error: upsertErr } = await activeClient
                 .from('learning_progress')

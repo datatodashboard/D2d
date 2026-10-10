@@ -3718,16 +3718,49 @@ async function refreshAuthoritativeProgress() {
   if (!user || !client) return;
   try {
     const userId = user.id;
+
+    let serverResetAt = 0;
+    try {
+      const { data: ssRow } = await client
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'global_progress_reset')
+        .maybeSingle();
+      if (ssRow?.value) {
+        const val = typeof ssRow.value === 'object' ? ssRow.value : (typeof ssRow.value === 'string' && ssRow.value.startsWith('{') ? JSON.parse(ssRow.value) : { resetAt: Number(ssRow.value) });
+        serverResetAt = Number(val.resetAt || val.timestamp || val.value || val) || 0;
+      }
+    } catch (ssEx) {
+      console.warn('[D2D Progress] system_settings check notice:', ssEx);
+    }
+
     const [lpRes, progRes, qfRes] = await Promise.all([
       client.from('learning_progress').select('state, updated_at').eq('user_id', userId).maybeSingle(),
-      client.from('progress').select('scenario_id').eq('user_id', userId),
+      client.from('progress').select('scenario_id, completed_at').eq('user_id', userId),
       client.from('question_feedback').select('domain, level, created_at, feedback_text, emoji').eq('user_id', userId)
     ]);
 
     let workingState = state ? structuredClone(state) : EMPTY();
 
+    if (serverResetAt > 0) {
+      workingState.resetAt = Math.max(workingState.resetAt || 0, serverResetAt);
+      for (const [sId, entry] of Object.entries(workingState.entries)) {
+        if (entry.updatedAt <= serverResetAt) {
+          delete workingState.entries[sId];
+        }
+      }
+    }
+
     if (lpRes?.data?.state) {
       const cloudState = sanitize(lpRes.data.state, ids);
+      if (serverResetAt > 0) {
+        cloudState.resetAt = Math.max(cloudState.resetAt || 0, serverResetAt);
+        for (const [sId, entry] of Object.entries(cloudState.entries)) {
+          if (entry.updatedAt <= serverResetAt) {
+            delete cloudState.entries[sId];
+          }
+        }
+      }
       workingState = mergeProgress(cloudState, workingState, ids);
     }
 
@@ -3748,7 +3781,14 @@ async function refreshAuthoritativeProgress() {
     }
 
     if (progRes?.data && Array.isArray(progRes.data)) {
-      const confirmedSet = new Set(progRes.data.map(r => r.scenario_id));
+      const confirmedSet = new Set();
+      for (const r of progRes.data) {
+        if (serverResetAt > 0) {
+          const completedTime = r.completed_at ? new Date(r.completed_at).getTime() : 0;
+          if (!completedTime || completedTime <= serverResetAt) continue;
+        }
+        confirmedSet.add(r.scenario_id);
+      }
       authoritativeCompletedCount = Math.max(authoritativeCompletedCount, confirmedSet.size);
 
       for (const sId of confirmedSet) {
@@ -4105,10 +4145,18 @@ async function importCloudHistory() {
   if(!user||!client||!confirm('Import your earlier account completions as answer-viewed history? This will not award thinking or SQL completion.'))return;
   const owner=user.id;
   try {
-    const {data:rows,error}=await client.from('progress').select('scenario_id').eq('user_id',owner);
+    const {data:rows,error}=await client.from('progress').select('scenario_id, completed_at').eq('user_id',owner);
     if(owner!==user?.id)return;
     if(error)throw error;
-    state=importLegacy(rows.map(row=>row.scenario_id),state,data.aliases,ids);
+    const resetAt = Number(state?.resetAt) || 0;
+    const validRows = (rows || []).filter(r => {
+      if (resetAt > 0) {
+        const completedTime = r.completed_at ? new Date(r.completed_at).getTime() : 0;
+        return completedTime > resetAt;
+      }
+      return true;
+    });
+    state=importLegacy(validRows.map(row=>row.scenario_id),state,data.aliases,ids);
     persist();updateProgress();if(current)renderScenario();
   } catch {if(owner===user?.id)alert('Earlier account history could not be fetched. Your current progress is unchanged.');}
 }
@@ -4145,6 +4193,33 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
 
   console.log('[D2D Progress] Loading cloud progress');
 
+  // Check server reset epoch setting from system_settings
+  let serverResetAt = 0;
+  if (client) {
+    try {
+      const { data: ssRow, error: ssErr } = await client
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'global_progress_reset')
+        .maybeSingle();
+      if (!ssErr && ssRow?.value) {
+        const val = typeof ssRow.value === 'object' ? ssRow.value : (typeof ssRow.value === 'string' && ssRow.value.startsWith('{') ? JSON.parse(ssRow.value) : { resetAt: Number(ssRow.value) });
+        serverResetAt = Number(val.resetAt || val.timestamp || val) || 0;
+      }
+    } catch (ssEx) {
+      console.warn('[D2D Progress] system_settings check notice:', ssEx);
+    }
+  }
+
+  if (serverResetAt > 0) {
+    workingState.resetAt = Math.max(workingState.resetAt || 0, serverResetAt);
+    for (const [sId, entry] of Object.entries(workingState.entries)) {
+      if (entry.updatedAt <= serverResetAt) {
+        delete workingState.entries[sId];
+      }
+    }
+  }
+
   // 2. Fetch that user's learning_progress record from Supabase (or use prefetched)
   if (client) {
     try {
@@ -4169,6 +4244,14 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
         console.log('[D2D Progress] Cloud progress found');
         // 3. Sanitize cloud state
         const cloudState = sanitize(row.state, ids);
+        if (serverResetAt > 0 && cloudState.resetAt < serverResetAt) {
+          cloudState.resetAt = serverResetAt;
+          for (const [sId, entry] of Object.entries(cloudState.entries)) {
+            if (entry.updatedAt <= serverResetAt) {
+              delete cloudState.entries[sId];
+            }
+          }
+        }
         // Supabase cloud progress is authoritative: prevent stale localStorage from overriding it
         workingState = mergeProgress(cloudState, workingState, ids);
       } else {
@@ -4224,11 +4307,18 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
       // Fetch confirmed distinct scenario completions from public.progress
       const { data: progRows, error: progErr } = await client
         .from('progress')
-        .select('scenario_id')
+        .select('scenario_id, completed_at')
         .eq('user_id', userId);
 
       if (!progErr && progRows && Array.isArray(progRows)) {
-        const confirmedSet = new Set(progRows.map(r => r.scenario_id));
+        const confirmedSet = new Set();
+        for (const r of progRows) {
+          if (serverResetAt > 0) {
+            const completedTime = r.completed_at ? new Date(r.completed_at).getTime() : 0;
+            if (!completedTime || completedTime <= serverResetAt) continue;
+          }
+          confirmedSet.add(r.scenario_id);
+        }
         authoritativeCompletedCount = Math.max(authoritativeCompletedCount, confirmedSet.size);
 
         // Mark confirmed scenarios as completed in working state
@@ -4265,6 +4355,10 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
           .eq('user_id', userId);
         if (!certErr && certRows && Array.isArray(certRows) && certRows.length > 0) {
           for (const cert of certRows) {
+            if (serverResetAt > 0) {
+              const certTime = cert.completed_at ? new Date(cert.completed_at).getTime() : 0;
+              if (!certTime || certTime <= serverResetAt) continue;
+            }
             const domScenarios = scenarios.filter(s => s.domain === cert.domain && s.level === cert.level);
             if (domScenarios.length === 20) {
               for (const s of domScenarios) {
