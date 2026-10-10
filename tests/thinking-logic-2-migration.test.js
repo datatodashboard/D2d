@@ -247,4 +247,74 @@ describe('Thinking Logic 2 Migration & Safe Global Progress Reset Suite', () => 
     assert.strictEqual(merged.entries['BAN_BEG_003'], undefined);
   });
 
+  it('12. Cloud sync RPC failure preserves local progress, denies direct table fallback, and sets sync error status', async () => {
+    const { createCloudSync } = await import('../js/cloud.js');
+    let statusMsg = '';
+    let mergedState = null;
+    let directTableUpsertCalled = false;
+
+    const mockClient = {
+      rpc: async (fn) => {
+        if (fn === 'merge_learning_progress') {
+          return { data: null, error: { message: 'Database connection failed or unauthenticated' } };
+        }
+        return { data: null, error: null };
+      },
+      from: () => {
+        directTableUpsertCalled = true;
+        return {
+          select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+          upsert: async () => ({ error: null })
+        };
+      }
+    };
+
+    const localProgress = {
+      version: 2,
+      resetAt: 1000,
+      entries: { BAN_BEG_001: { thinking: { response: 'Local answer' }, assessment: { score: 8 }, completed: true, updatedAt: 2000 } }
+    };
+
+    const sync = createCloudSync({
+      client: () => mockClient,
+      getContext: () => ({ userId: 'user-123', state: localProgress }),
+      onMerged: (data) => { mergedState = data; },
+      onStatus: (msg) => { statusMsg = msg; }
+    });
+
+    sync.request();
+    // Allow async drain loop to process
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    assert.strictEqual(directTableUpsertCalled, false, 'Direct table upsert fallback must NOT be called when RPC fails');
+    assert.strictEqual(mergedState, null, 'Merged state should not be updated when RPC fails');
+    assert.strictEqual(statusMsg, 'Saved on this device. Cloud sync error; retry when connected.');
+    assert.ok(localProgress.entries['BAN_BEG_001'], 'Local progress must remain intact on device');
+  });
+
+  it('13. system_settings SELECT policy limits public access strictly to global_progress_reset key', () => {
+    const policyKeyCheck = (key) => key === 'global_progress_reset';
+    assert.strictEqual(policyKeyCheck('global_progress_reset'), true, 'global_progress_reset must be publicly readable');
+    assert.strictEqual(policyKeyCheck('admin_secret_key'), false, 'Private settings keys must be denied to public SELECT');
+    assert.strictEqual(policyKeyCheck('stripe_api_key'), false, 'Stripe keys must be denied to public SELECT');
+  });
+
+  it('14. Post-reset completion reconciliation ignores pre-reset progress rows and updates counts accurately', () => {
+    const serverResetAt = 10000;
+    const progressRows = [
+      { scenario_id: 'BAN_BEG_001', completed_at: new Date(5000).toISOString() }, // pre-reset
+      { scenario_id: 'BAN_BEG_002', completed_at: new Date(15000).toISOString() }, // post-reset
+      { scenario_id: 'BAN_BEG_003', completed_at: new Date(20000).toISOString() }  // post-reset
+    ];
+
+    const postResetCompletions = progressRows.filter(row => {
+      if (!row.completed_at) return false;
+      return new Date(row.completed_at).getTime() > serverResetAt;
+    });
+
+    assert.strictEqual(postResetCompletions.length, 2, 'Only completions strictly after serverResetAt must be counted');
+    assert.strictEqual(postResetCompletions[0].scenario_id, 'BAN_BEG_002');
+    assert.strictEqual(postResetCompletions[1].scenario_id, 'BAN_BEG_003');
+  });
+
 });

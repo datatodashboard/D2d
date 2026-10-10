@@ -12,16 +12,23 @@ alter table public.system_settings enable row level security;
 
 -- RLS Policies
 drop policy if exists "Anyone can read system_settings" on public.system_settings;
-create policy "Anyone can read system_settings"
+drop policy if exists "Anyone can read global_progress_reset setting" on public.system_settings;
+create policy "Anyone can read global_progress_reset setting"
   on public.system_settings
   for select
-  using (true);
+  using (key = 'global_progress_reset');
 
 drop policy if exists "Admins can manage system_settings" on public.system_settings;
 create policy "Admins can manage system_settings"
   on public.system_settings
   for all
   using (
+    exists (
+      select 1 from public.profiles
+      where profiles.id = auth.uid() and profiles.is_admin = true
+    )
+  )
+  with check (
     exists (
       select 1 from public.profiles
       where profiles.id = auth.uid() and profiles.is_admin = true

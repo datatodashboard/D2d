@@ -61,45 +61,11 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
             } else if (error) {
               console.warn('[D2D Progress] merge_learning_progress RPC notice:', error.message || error);
             }
+          } else {
+            console.warn('[D2D Progress] merge_learning_progress RPC not available on client');
           }
         } catch (rpcErr) {
           console.warn('[D2D Progress] merge_learning_progress RPC exception:', rpcErr);
-        }
-
-        // 2. Direct table fallback if RPC did not return data
-        if (!mergedData && typeof activeClient.from === 'function') {
-          try {
-            const { data: row, error: fetchErr } = await activeClient
-              .from('learning_progress')
-              .select('state')
-              .eq('user_id', context.userId)
-              .maybeSingle();
-
-            if (!fetchErr) {
-              const remoteState = (row?.state && typeof row.state === 'object') ? row.state : { entries: {} };
-              const localState = (context.state && typeof context.state === 'object') ? context.state : { entries: {} };
-              const mergedState = mergeProgress(remoteState, localState);
-
-              const { error: upsertErr } = await activeClient
-                .from('learning_progress')
-                .upsert({
-                  user_id: context.userId,
-                  state: mergedState,
-                  updated_at: new Date().toISOString()
-                }, { onConflict: 'user_id' });
-
-              if (!upsertErr) {
-                mergedData = mergedState;
-                console.log('[D2D Progress] Cloud save successful');
-              } else {
-                console.error('[D2D Progress] Direct learning_progress upsert error:', upsertErr.message || upsertErr);
-              }
-            } else {
-              console.error('[D2D Progress] Error fetching current cloud progress before upsert:', fetchErr.message || fetchErr);
-            }
-          } catch (tableErr) {
-            console.error('[D2D Progress] learning_progress table fallback exception:', tableErr);
-          }
         }
 
         if(token!==generation || context.userId!==getContext().userId) continue;
@@ -107,7 +73,8 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
           onMerged(mergedData, context.userId);
           onStatus('Progress synced');
         } else {
-          onStatus('Saved on this device. Cloud sync unavailable; retry when connected.');
+          // On RPC failure or unavailability, preserve local progress and indicate sync error to allow retry
+          onStatus('Saved on this device. Cloud sync error; retry when connected.');
         }
       }
     } finally {running=false;}
