@@ -25,19 +25,13 @@ describe('Admin Dashboard Progress Evaluation', () => {
 
     assert.strictEqual(stage(s1, verifiedEntry), 'verified', 'Should identify verified entry as verified');
 
-    // Thinking in progress entry (unready thinking -> stage: 'thinking')
+    // Thinking in progress entry
     const thinkingEntry = {
-      thinking: { response: 'Tomorrow I will bake a chocolate cake.' },
+      thinking: { response: 'Looking at data' },
+      assessment: { score: 3, ready: false },
       updatedAt: 1700000001000
     };
-    assert.strictEqual(stage(s1, thinkingEntry), 'thinking', 'Should identify thinking stage for unready thinking');
-
-    // Thinking ready entry (ready thinking -> stage: 'thinking_ready')
-    const thinkingReadyEntry = {
-      thinking: { response: 'Use appointments and filter status Active.' },
-      updatedAt: 1700000002000
-    };
-    assert.strictEqual(stage(s1, thinkingReadyEntry), 'thinking_ready', 'Should identify thinking_ready stage when thinking passes rubric');
+    assert.strictEqual(stage(s1, thinkingEntry), 'thinking', 'Should identify thinking stage');
 
     // Unattempted scenario
     assert.strictEqual(stage(s1, null), 'not_started', 'Should identify unattempted as not_started');
