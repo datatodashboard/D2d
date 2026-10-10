@@ -354,10 +354,11 @@ async function loadDashboardData() {
 
   try {
     // Fetch directly from the source-of-truth tables used by the application
-    const [profilesRes, progressRes, directProgressRes] = await Promise.all([
+    const [profilesRes, progressRes, directProgressRes, systemSettingsRes] = await Promise.all([
       client.from('profiles').select('*').order('created_at', { ascending: false }).limit(2000),
       client.from('learning_progress').select('user_id, state, updated_at').limit(2000),
-      client.from('progress').select('user_id, scenario_id, completed_at').limit(10000)
+      client.from('progress').select('user_id, scenario_id, completed_at').limit(10000),
+      client.from('system_settings').select('value').eq('key', 'global_progress_reset').maybeSingle()
     ]);
 
     if (profilesRes.error) {
@@ -368,6 +369,16 @@ async function loadDashboardData() {
     }
     if (directProgressRes?.error) {
       console.warn('Direct progress query notice:', directProgressRes.error);
+    }
+
+    let globalResetAt = 0;
+    if (systemSettingsRes?.data?.value) {
+      const val = typeof systemSettingsRes.data.value === 'object'
+        ? systemSettingsRes.data.value
+        : (typeof systemSettingsRes.data.value === 'string' && systemSettingsRes.data.value.startsWith('{')
+          ? JSON.parse(systemSettingsRes.data.value)
+          : { resetAt: Number(systemSettingsRes.data.value) });
+      globalResetAt = Number(val.resetAt || val.timestamp || val.value || val) || 0;
     }
 
     const profiles = profilesRes.data || [];
@@ -408,6 +419,9 @@ async function loadDashboardData() {
       const progressRow = learningProgressMap.get(userId);
 
       const stateObj = progressRow?.state;
+      const userResetAt = Number(stateObj?.resetAt) || 0;
+      const effectiveResetAt = Math.max(globalResetAt, userResetAt);
+
       const entries = (stateObj && typeof stateObj.entries === 'object' && !Array.isArray(stateObj.entries))
         ? stateObj.entries
         : {};
@@ -422,6 +436,11 @@ async function loadDashboardData() {
 
       for (const [scenarioId, entry] of Object.entries(entries)) {
         if (!entry || typeof entry !== 'object') continue;
+
+        const entryTime = Number(entry.updatedAt || entry.evaluationAt || 0);
+        if (effectiveResetAt > 0 && entryTime <= effectiveResetAt) {
+          continue;
+        }
 
         const scenario = scenariosMap.get(scenarioId);
         const domain = scenario?.domain || 'General SQL';
@@ -450,9 +469,14 @@ async function loadDashboardData() {
       const directRows = userDirectProgressMap.get(userId) || [];
       for (const row of directRows) {
         if (row.scenario_id) {
+          const completedAtMs = row.completed_at ? new Date(row.completed_at).getTime() : 0;
+          if (effectiveResetAt > 0 && completedAtMs > 0 && completedAtMs <= effectiveResetAt) {
+            continue;
+          }
+
           uniqueCompletedScenarioIds.add(row.scenario_id);
-          if (row.completed_at) {
-            solvedTimestamps.push(new Date(row.completed_at).getTime());
+          if (completedAtMs > 0) {
+            solvedTimestamps.push(completedAtMs);
           }
         }
       }
@@ -500,6 +524,9 @@ async function loadDashboardData() {
 
       for (const [scenarioId, entry] of Object.entries(entries)) {
         if (!entry || typeof entry !== 'object') continue;
+        const entryTime = Number(entry.updatedAt || entry.evaluationAt || 0);
+        if (effectiveResetAt > 0 && entryTime <= effectiveResetAt) continue;
+
         const scenario = scenariosMap.get(scenarioId);
         if (!scenario) continue;
         if (isAttempted(scenario, entry)) {
@@ -512,6 +539,9 @@ async function loadDashboardData() {
       }
       directRows.forEach(row => {
         if (row.scenario_id) {
+          const completedAtMs = row.completed_at ? new Date(row.completed_at).getTime() : 0;
+          if (effectiveResetAt > 0 && completedAtMs > 0 && completedAtMs <= effectiveResetAt) return;
+
           completedScenarioIds.add(row.scenario_id);
           const sc = scenariosMap.get(row.scenario_id);
           if (sc?.level) solvedLevels.add(sc.level);

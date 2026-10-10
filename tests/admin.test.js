@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
-import { stage, isCompleted, workFingerprint } from '../js/progress.js';
+import { stage, isCompleted, isAttempted, workFingerprint } from '../js/progress.js';
 
 const data = JSON.parse(fs.readFileSync('./data/scenarios.json', 'utf8'));
 const scenariosMap = new Map(data.scenarios.map(s => [s.id, s]));
@@ -158,6 +158,57 @@ describe('Admin Dashboard Progress Evaluation', () => {
 
     assert.strictEqual(solvedCount, 0);
     assert.strictEqual(attemptedCount, 0);
+  });
+
+  it('excludes pre-reset learner progress entries and direct progress rows when global_progress_reset epoch is set', () => {
+    const resetEpoch = 1710000000000; // Reset timestamp
+
+    const mockLearningState = {
+      version: 2,
+      resetAt: 0,
+      entries: {
+        'HEA_BEG_001': {
+          thinking: { response: 'appointments Active' },
+          assessment: { score: 10, ready: true },
+          updatedAt: 1700000000000 // PRE-RESET (1700... <= 1710...)
+        },
+        'BAN_BEG_001': {
+          thinking: { response: 'accounts Active' },
+          assessment: { score: 10, ready: true },
+          updatedAt: 1720000000000 // POST-RESET (1720... > 1710...)
+        }
+      }
+    };
+
+    const mockDirectProgressRows = [
+      { scenario_id: 'HEA_BEG_001', completed_at: new Date(1700000000000).toISOString() }, // PRE-RESET
+      { scenario_id: 'INS_BEG_001', completed_at: new Date(1725000000000).toISOString() }  // POST-RESET
+    ];
+
+    const uniqueCompletedScenarioIds = new Set();
+    let attemptedCount = 0;
+
+    for (const [id, entry] of Object.entries(mockLearningState.entries)) {
+      const entryTime = Number(entry.updatedAt || entry.evaluationAt || 0);
+      if (resetEpoch > 0 && entryTime <= resetEpoch) continue; // Exclude pre-reset
+
+      const scenario = scenariosMap.get(id);
+      if (isAttempted(scenario, entry)) attemptedCount++;
+      if (isCompleted(scenario, entry)) uniqueCompletedScenarioIds.add(id);
+    }
+
+    for (const row of mockDirectProgressRows) {
+      if (row.scenario_id) {
+        const completedAtMs = row.completed_at ? new Date(row.completed_at).getTime() : 0;
+        if (resetEpoch > 0 && completedAtMs > 0 && completedAtMs <= resetEpoch) continue; // Exclude pre-reset
+        uniqueCompletedScenarioIds.add(row.scenario_id);
+      }
+    }
+
+    assert.strictEqual(uniqueCompletedScenarioIds.has('HEA_BEG_001'), false, 'Pre-reset scenario HEA_BEG_001 must be excluded');
+    assert.strictEqual(uniqueCompletedScenarioIds.has('BAN_BEG_001'), true, 'Post-reset scenario BAN_BEG_001 must be included');
+    assert.strictEqual(uniqueCompletedScenarioIds.has('INS_BEG_001'), true, 'Post-reset direct progress row INS_BEG_001 must be included');
+    assert.strictEqual(uniqueCompletedScenarioIds.size, 2, 'Total completed count post-reset must be exactly 2');
   });
 
   it('accurately evaluates admin status using profiles.is_admin', () => {
