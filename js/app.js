@@ -4256,6 +4256,39 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
           }
         }
       }
+
+      // 4. Authoritative Certificate Reconciliation: if a certificate exists in public.certificates for a domain and level, ensure all 20 scenarios are marked completed (fixing 19/20 vs certificate discrepancies)
+      try {
+        const { data: certRows, error: certErr } = await client
+          .from('certificates')
+          .select('domain, level, credential_id, completed_at')
+          .eq('user_id', userId);
+        if (!certErr && certRows && Array.isArray(certRows) && certRows.length > 0) {
+          for (const cert of certRows) {
+            const domScenarios = scenarios.filter(s => s.domain === cert.domain && s.level === cert.level);
+            if (domScenarios.length === 20) {
+              for (const s of domScenarios) {
+                if (!workingState.entries[s.id]) {
+                  workingState.entries[s.id] = {
+                    thinking: { response: 'Certificate verified historical completion' },
+                    sql: '',
+                    status: 'completed',
+                    completed: true,
+                    attempts: 1,
+                    assessment: { score: 10, ready: true },
+                    updatedAt: cert.completed_at ? new Date(cert.completed_at).getTime() : Date.now()
+                  };
+                } else {
+                  workingState.entries[s.id].completed = true;
+                  workingState.entries[s.id].status = 'completed';
+                }
+              }
+            }
+          }
+        }
+      } catch (certRecErr) {
+        console.warn('[D2D Progress] certificates reconcile notice:', certRecErr);
+      }
     } catch (err) {
       console.error('[D2D Progress] Exception loading cloud progress from Supabase:', err);
     }
