@@ -1602,6 +1602,9 @@ async function ensureFullScenario(targetScenario) {
 }
 
 async function loadScenario() {
+  if (activeSessionInitPromise) {
+    await activeSessionInitPromise;
+  }
   selectedDomain = selectedDomain || 'Banking';
   if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
     selectedDomain = 'Banking';
@@ -1612,7 +1615,7 @@ async function loadScenario() {
   }
 
   const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
-  const next = chooseNext(pool, state, null) || pool[0];
+  const next = chooseNext(pool, state, null);
   if (next) {
     const isTargetCompleted = isCompleted(next, state.entries[next.id]);
     const completedCount = getCompletedCount();
@@ -1627,6 +1630,12 @@ async function loadScenario() {
     }
     current = await ensureFullScenario(next);
     renderScenario();
+  } else {
+    // Case D: 20/20 completed. Do not reset to Question 1! Load last scenario in pool.
+    if (pool.length > 0) {
+      current = await ensureFullScenario(pool[pool.length - 1]);
+      renderScenario();
+    }
   }
 }
 
@@ -3181,7 +3190,7 @@ function handleOpenInstagramWeb() {
 let currentActiveScreen = 'home';
 const pageScrollPositions = { home: 0, practice: 0 };
 
-function showScreen(name) {
+async function showScreen(name) {
   if (name === 'profile') {
     openProfileModal();
     return;
@@ -3213,10 +3222,13 @@ function showScreen(name) {
   if (isProgress) {
     renderProgressScreen();
   } else if (name === 'practice') {
+    if (activeSessionInitPromise) {
+      await activeSessionInitPromise;
+    }
     if (!current) {
       selectedDomain = selectedDomain || 'Banking';
       selectedLevel = selectedLevel || 'Beginner';
-      loadScenario();
+      await loadScenario();
     } else {
       renderScenario();
     }
