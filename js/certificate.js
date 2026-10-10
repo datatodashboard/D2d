@@ -92,7 +92,7 @@ export function checkLevelCompletion(domain, level, scenarios, state) {
     const entry = state?.entries?.[scenario.id];
     if (entry) {
       const score = (typeof entry.assessment?.score === 'number') ? entry.assessment.score : null;
-      const isSolved = (score !== null ? score >= 7 : !!entry.completed);
+      const isSolved = (entry.completed === true || (score !== null && score >= 7));
       if (isSolved) {
         completedScenarios.push(scenario);
         if (entry.updatedAt && entry.updatedAt > latestTimestamp) {
@@ -160,11 +160,13 @@ export function getAllCertificatesStatus(scenarios, state, user, currentUsername
   for (const domain of CERTIFICATE_DOMAINS) {
     for (const level of CERTIFICATE_LEVELS) {
       const status = checkLevelCompletion(domain, level, scenarios, state);
+      const isUnlocked = isLevelUnlocked(domain, level, scenarios, state);
       list.push({
         domain,
         level,
         learnerName,
         isCompleted: status.isCompleted,
+        isUnlocked,
         completedCount: status.completedCount,
         totalCount: status.totalCount,
         completionDate: status.completionDate,
@@ -544,7 +546,7 @@ export function isLevelQuestionsCompleted(domain, level, scenarios, state) {
     const entry = state?.entries?.[s.id];
     if (entry) {
       const score = (typeof entry.assessment?.score === 'number') ? entry.assessment.score : null;
-      if (score !== null ? score >= 7 : !!entry.completed) {
+      if (entry.completed === true || (score !== null && score >= 7)) {
         solved++;
       }
     }

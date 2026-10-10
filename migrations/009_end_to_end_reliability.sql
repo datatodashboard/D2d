@@ -450,8 +450,8 @@ begin
         entry_score := coalesce((entry_data->'assessment'->>'score')::numeric, 0);
         entry_resp := coalesce(entry_data->'thinking'->>'response', '');
 
-        -- Require passing score >= 7 and non-empty thinking to count as completed
-        if entry_score >= 7 and length(trim(entry_resp)) >= 5 then
+        -- Count as completed if explicitly flagged completed or score >= 7
+        if coalesce((entry_data->>'completed')::boolean, false) or entry_score >= 7 then
           -- Count current distinct completions before inserting
           select count(distinct scenario_id) into v_count
           from public.progress
