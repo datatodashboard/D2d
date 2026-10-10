@@ -1,6 +1,6 @@
-// Thinking Engine 2.0 – Human-Like Business Reasoning Evaluation
-export const RUBRIC_VERSION = 6;
-export const PASS_THRESHOLD = 7;
+// Transparent, deterministic human thinking evaluation with dynamic schema validation.
+export const RUBRIC_VERSION = 5;
+export const PASS_THRESHOLD = 8;
 const legacyFields = ['goal', 'sources', 'steps', 'check'];
 
 // All known domain table names across the curriculum (Healthcare, Banking, Insurance, Capital Markets, Semiconductor, Education, Retail)
@@ -22,8 +22,8 @@ const STOP_WORDS = new Set([
   'my', 'our', 'what', 'which', 'to', 'for', 'with', 'by', 'as', 'and', 'or', 'in', 'on',
   'filter', 'select', 'need', 'want', 'should', 'have', 'from', 'into', 'join', 'like', 'keep', 'using',
   'one', 'two', 'three', 'four', 'five', 'multiple', 'several', 'different', 'related', 'these', 'those', 'given', 'either', 'such', 'other', 'another', 'same',
-  'having', 'group', 'order', 'limit', 'distinct', 'count', 'sum', 'avg', 'min', 'max',
-  'case', 'when', 'then', 'else', 'end', 'cte', 'partition', 'over', 'lag', 'rank',
+  'having', 'where', 'group', 'order', 'limit', 'distinct', 'count', 'sum', 'avg', 'min', 'max',
+  'case', 'when', 'then', 'else', 'end', 'cte', 'with', 'partition', 'over', 'lag', 'rank',
   'dense_rank', 'row_number', 'coalesce', 'nullif', 'round', 'date_trunc', 'exists', 'between',
   'null', 'not', 'desc', 'asc', 'any', 'window', 'windowed', 'descending', 'ascending',
   'required', 'target', 'appropriate', 'matching', 'main', 'source', 'primary', 'base', 'specific',
@@ -32,11 +32,7 @@ const STOP_WORDS = new Set([
 
 export function normalize(text) {
   return String(text || '').normalize('NFKC').toLowerCase()
-    .replace(/(\d),(?=\d{3}\b)/g, '$1')
-    .replaceAll('_', ' ')
-    .replace(/[’‘]/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/(\d),(?=\d{3}\b)/g, '$1').replaceAll('_', ' ').replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim();
 }
 
 export function thinkingText(input) {
@@ -89,8 +85,11 @@ export function parseScenarioSchema(schemaText) {
 function extractMentionedTables(normText, schemaTableNames, allSchemaColumns = new Set()) {
   const found = new Set();
   const allCandidateTables = new Set([...ALL_CURRICULUM_TABLES, ...schemaTableNames]);
+
+  // Sort candidate tables by length descending so compound table names like 'account_products' are matched before 'products'
   const sortedCandidates = [...allCandidateTables].sort((a, b) => b.length - a.length);
 
+  // Mask out schema column names (e.g. 'account id', 'customer name', 'order total') so column references are not mistaken for tables
   let workingText = normText;
   allSchemaColumns.forEach(col => {
     const colSpace = col.toLowerCase().replaceAll('_', ' ');
@@ -100,6 +99,7 @@ function extractMentionedTables(normText, schemaTableNames, allSchemaColumns = n
     }
   });
 
+  // Also mask any general `<word> id` pattern
   workingText = workingText.replace(/\b[a-z_]+\s+id\b/gi, ' ');
 
   for (const t of sortedCandidates) {
@@ -124,14 +124,44 @@ function extractMentionedTables(normText, schemaTableNames, allSchemaColumns = n
     }
 
     const forms = new Set([tNorm, tSingular, t.toLowerCase()]);
-    if (t === 'policies') { forms.add('policy'); forms.add('policyholder'); forms.add('policyholders'); }
-    if (t === 'securities') { forms.add('security'); }
-    if (t === 'production_batches') { forms.add('production batch'); forms.add('production batches'); forms.add('wafer batches'); forms.add('wafer batch'); forms.add('batches'); forms.add('batch'); }
-    if (t === 'chip_products') { forms.add('chip product'); forms.add('chip products'); forms.add('chips'); forms.add('chip'); }
-    if (t === 'account_products') { forms.add('account product'); forms.add('account products'); }
-    if (t === 'insurance_products') { forms.add('insurance product'); forms.add('insurance products'); }
-    if (t === 'order_items') { forms.add('order item'); forms.add('order items'); }
-    if (t === 'test_results') { forms.add('test result'); forms.add('test results'); }
+    if (t === 'policies') {
+      forms.add('policy');
+      forms.add('policyholder');
+      forms.add('policyholders');
+    }
+    if (t === 'securities') {
+      forms.add('security');
+    }
+    if (t === 'production_batches') {
+      forms.add('production batch');
+      forms.add('production batches');
+      forms.add('wafer batches');
+      forms.add('wafer batch');
+      forms.add('batches');
+      forms.add('batch');
+    }
+    if (t === 'chip_products') {
+      forms.add('chip product');
+      forms.add('chip products');
+      forms.add('chips');
+      forms.add('chip');
+    }
+    if (t === 'account_products') {
+      forms.add('account product');
+      forms.add('account products');
+    }
+    if (t === 'insurance_products') {
+      forms.add('insurance product');
+      forms.add('insurance products');
+    }
+    if (t === 'order_items') {
+      forms.add('order item');
+      forms.add('order items');
+    }
+    if (t === 'test_results') {
+      forms.add('test result');
+      forms.add('test results');
+    }
 
     for (const f of forms) {
       const re = new RegExp('\\b' + f + '(?:s)?\\b', 'i');
@@ -143,6 +173,7 @@ function extractMentionedTables(normText, schemaTableNames, allSchemaColumns = n
     }
   }
 
+  // Syntactic pattern: 'X table', 'X dataset', 'X entity'
   const p2 = /\b([a-z_][a-z0-9_]*)\s+(?:table|tables|dataset|datasets|entity|entities)\b/gi;
   let m;
   while ((m = p2.exec(workingText)) !== null) {
@@ -191,23 +222,27 @@ function extractMentionedColumns(normText, allSchemaColumns) {
     }
   }
 
+  // Pattern 1: [where|filter by] [the] <col> [is|=|equals|equal|like|in|between|>|<]
   const p1 = /\b(?:where|filter(?:ed)?\s+by|condition|having|with)\s+(?:the\s+)?([a-z_]+(?:\s+[a-z_]+)?)\s+(?:is|=|equals|equal|like|in|between|>|<)\b/gi;
   let m;
   while ((m = p1.exec(normText)) !== null) {
     checkCol(m[1]);
   }
 
+  // Pattern 2: <col> [column|field]
   const p2 = /\b([a-z_]+(?:\s+[a-z_]+)?)\s+(?:column|field)\b/gi;
   while ((m = p2.exec(normText)) !== null) {
     checkCol(m[1]);
   }
 
+  // Pattern 3: Specific cross-domain / invalid column patterns like 'account status'
   if (/\baccount\s+status\b|\baccount_status\b/i.test(normText)) {
     if (!allSchemaColumns.has('account status') && !allSchemaColumns.has('account_status')) {
       wrong.add('account status');
     }
   }
 
+  // Pattern 4: Direct schema column presence
   allSchemaColumns.forEach(c => {
     const re = new RegExp('\\b' + c + '(?:s)?\\b', 'i');
     if (re.test(normText)) {
@@ -218,27 +253,6 @@ function extractMentionedColumns(normText, allSchemaColumns) {
   });
 
   return { mentioned: [...mentioned], wrong: [...wrong] };
-}
-
-// Thinking Engine 2.0 Critical Condition & Contradiction Detection
-function detectCriticalContradictions(normText, scenarioSql) {
-  if (!scenarioSql) return false;
-  const sql = scenarioSql.toLowerCase();
-
-  const isScenarioGreater = />/.test(sql) || /\b(?:greater|more|above|exceeds|higher)\b/i.test(sql);
-  const isScenarioLess = /</.test(sql) || /\b(?:less|below|under|fewer|smaller)\b/i.test(sql);
-
-  const isLearnerGreater = /\b(?:greater|more|above|exceeds|higher|top|over|after)\b/i.test(normText) && !/\bnot\s+greater\b/i.test(normText);
-  const isLearnerLess = /\b(?:less|below|under|fewer|smaller|lower|before)\b/i.test(normText) && !/\bnot\s+less\b/i.test(normText);
-
-  if (isScenarioGreater && isLearnerLess && !isLearnerGreater) {
-    return true;
-  }
-  if (isScenarioLess && isLearnerGreater && !isLearnerLess) {
-    return true;
-  }
-
-  return false;
 }
 
 export function evaluateThinking(scenario, input) {
@@ -264,6 +278,7 @@ export function evaluateThinking(scenario, input) {
     });
   });
 
+  // Extract columns and values from scenario SQL and metadata
   const sqlColumns = new Set();
   const sqlValues = new Set();
   if (Array.isArray(scenario?.relevantColumns)) {
@@ -292,13 +307,13 @@ export function evaluateThinking(scenario, input) {
       ready: false,
       fingerprint: fingerprint(input),
       items: [
-        { category: 'data', name: 'Source Table', label: `Identify data source (e.g. ${requiredTables.join(', ') || 'table'})`, passed: false, weight: 0, max: 2 },
-        { category: 'understanding', name: 'Business Understanding', label: 'Describe the business objective', passed: false, weight: 0, max: 2 },
-        { category: 'conditions', name: 'Business Conditions', label: 'State relevant conditions or filters', passed: false, weight: 0, max: 3 },
-        { category: 'approach', name: 'Solution Approach', label: 'State core actions (join, filter, or aggregate)', passed: false, weight: 0, max: 2 },
-        { category: 'result', name: 'Expected Result', label: 'Describe what information to return', passed: false, weight: 0, max: 1 }
+        { category: 'data', name: 'Source Table', label: `Identify data source (e.g. ${requiredTables.join(', ') || 'table'})`, passed: false, weight: 0, max: 3 },
+        { category: 'columns', name: 'Target Columns', label: 'Identify relevant column(s)', passed: false, weight: 0, max: 2 },
+        { category: 'approach', name: 'Logic & Action', label: 'State the core action (e.g. filter, join, group, or calculate)', passed: false, weight: 0, max: 2 },
+        { category: 'result', name: 'Scenario Objective', label: 'Describe the details or result to return', passed: false, weight: 0, max: 2 },
+        { category: 'clarity', name: 'Logical Explanation', label: 'Explain your plan in simple English', passed: false, weight: 0, max: 1 }
       ],
-      message: 'Explain your business plan in simple English: which data to use, what conditions to apply, and what result to return.'
+      message: 'Explain your plan in simple English: which table to use, how to filter or combine the data, and what to display.'
     };
   }
 
@@ -319,139 +334,207 @@ export function evaluateThinking(scenario, input) {
   });
 
   const hasWrongTable = explicitWrongSchemaTables.length > 0 || explicitWrongScenarioTables.length > 0;
-  const hasCriticalContradiction = detectCriticalContradictions(normText, scenario?.sql);
-
-  // Check off-topic / unrelated reasoning (only if no known curriculum/schema tables mentioned and no intent)
-  const intentKeywords = ['get', 'find', 'show', 'display', 'return', 'list', 'select', 'extract', 'fetch', 'need', 'want', 'identify', 'calculate'];
-  const hasIntent = intentKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText));
-  const isOffTopic = candidateTables.length === 0 && !hasIntent && !/\b(?:data|records|rows|table|columns|filter|join|group)\b/i.test(normText);
-
-  if (isOffTopic) {
-    return {
-      version: RUBRIC_VERSION,
-      score: 1,
-      ready: false,
-      fingerprint: fingerprint(input),
-      items: [
-        { category: 'data', name: 'Source Table', label: 'Identify correct data source and tables', passed: false, weight: 0, max: 2 },
-        { category: 'understanding', name: 'Business Understanding', label: 'Understand business objective', passed: false, weight: 0, max: 2 },
-        { category: 'conditions', name: 'Business Conditions', label: 'State relevant conditions and filters', passed: false, weight: 0, max: 3 },
-        { category: 'approach', name: 'Solution Approach', label: 'Explain solution approach', passed: false, weight: 0, max: 2 },
-        { category: 'result', name: 'Expected Result', label: 'Describe expected result', passed: false, weight: 0, max: 1 }
-      ],
-      message: 'Your reasoning does not appear related to the business scenario. Please describe which table to use and what conditions to apply.'
-    };
-  }
 
   // 3. Extract Mentioned Columns and Classify
   const { mentioned: mentionedCols, wrong: explicitWrongColumns } = extractMentionedColumns(normText, allSchemaColumns);
   const hasWrongColumn = explicitWrongColumns.length > 0;
 
-  // 4. Thinking Engine 2.0 Rubric Scoring Breakdown (10 Marks Total)
+  // 4. Calculate Points (10 Points Model)
   const isMultiTable = requiredTables.length > 1 || /JOIN\b/i.test(scenario?.sql || '');
 
-  // (A) Data Identification (2 Marks)
-  let dataPts = 0;
+  // (A) 3 Points – Correct table/source identification
+  let tablePts = 0;
   if (hasWrongTable) {
-    dataPts = 0;
+    tablePts = 0;
   } else if (correctTables.length >= requiredTables.length && requiredTables.length > 0) {
-    dataPts = 2;
+    tablePts = 3;
   } else if (correctTables.length > 0) {
-    dataPts = 2;
-  } else {
-    const mentionsDataOrRecords = /\b(?:records?|data|rows?|appointments?|details?|items?)\b/i.test(normText) ||
+    tablePts = 2;
+  } else if (candidateTables.length === 0) {
+    // Table not explicitly named, but no wrong table mentioned (implicit reference)
+    const mentionsDataOrRecords = /\b(?:records?|data|rows?|appointments?|details?)\b/i.test(normText) ||
                                   (scenario?.rubric?.sources && matches(scenario.rubric.sources, rawText));
-    dataPts = (!isMultiTable && mentionsDataOrRecords) ? 2 : 1;
+    tablePts = (!isMultiTable && mentionsDataOrRecords) ? 2 : (!isMultiTable ? 1 : 0);
   }
 
-  // (B) Business Understanding (2 Marks)
+  // (B) 2 Points – Correct column(s)
+  let colPts = 0;
+  if (hasWrongColumn) {
+    colPts = 0;
+  } else {
+    let colMatchesExpected = false;
+    for (const c of mentionedCols) {
+      if (sqlColumns.has(c) || requiredColumns.has(c)) {
+        colMatchesExpected = true;
+        break;
+      }
+    }
+
+    let valueMentioned = false;
+    for (const val of sqlValues) {
+      if (new RegExp('\\b' + val + '\\b', 'i').test(normText)) {
+        valueMentioned = true;
+        break;
+      }
+    }
+
+    if (colMatchesExpected || valueMentioned) {
+      colPts = 2;
+    } else if (sqlColumns.size === 0) {
+      colPts = 2;
+    } else {
+      colPts = 1;
+    }
+  }
+
+  // (C) 2 Points – Correct condition/filter/join/aggregation logic
+  const isFiltered = /WHERE\b/i.test(scenario?.sql || '');
+  const isAggregated = /GROUP BY|COUNT\(|SUM\(|AVG\(|MAX\(|MIN\(/i.test(scenario?.sql || '');
+  const isSorted = /ORDER BY/i.test(scenario?.sql || '');
+
+  const filterKeywords = ['filter', 'where', 'condition', 'keep', 'matching', 'only', 'specific', 'with', 'equals?', 'greater', 'less', 'between', 'active', 'inactive', 'status'];
+  const joinKeywords = ['join', 'link', 'connect', 'combine', 'merge', 'match', 'both', 'two tables', 'together', 'on'];
+  const aggKeywords = ['group', 'count', 'sum', 'total', 'average', 'avg', 'max', 'min', 'aggregate', 'calculate', 'summarize', 'number of'];
+  const sortKeywords = ['sort', 'order', 'rank', 'top', 'highest', 'lowest', 'descending', 'ascending', 'first', 'limit'];
+
+  let logicMatches = 0;
+  let logicNeeded = 0;
+
+  if (isMultiTable) {
+    logicNeeded++;
+    if (joinKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText))) logicMatches++;
+  }
+  if (isFiltered) {
+    logicNeeded++;
+    if (filterKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText))) logicMatches++;
+  }
+  if (isAggregated) {
+    logicNeeded++;
+    if (aggKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText))) logicMatches++;
+  }
+  if (isSorted) {
+    logicNeeded++;
+    if (sortKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText))) logicMatches++;
+  }
+  if (logicNeeded === 0) logicNeeded = 1;
+
+  if (scenario?.rubric?.steps) {
+    const rubricStepsPassed = scenario.rubric.steps.filter(step => matches(step, rawText)).length;
+    if (rubricStepsPassed > 0) logicMatches = Math.max(logicMatches, rubricStepsPassed);
+  }
+
+  let logicPts = 0;
+  if (logicMatches >= logicNeeded) logicPts = 2;
+  else if (logicMatches > 0) logicPts = 1;
+
+  // (D) 2 Points – Scenario Objective / Understanding
+  const intentKeywords = ['get', 'find', 'show', 'display', 'return', 'list', 'select', 'extract', 'fetch', 'need', 'want', 'identify', 'calculate'];
+  const hasIntent = intentKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText));
+
   const questionWords = normalize(scenario?.question || '').split(' ')
     .filter(w => !STOP_WORDS.has(w) && w.length > 3);
   const topicMatch = questionWords.some(w => normText.includes(w)) ||
                      (scenario?.rubric?.goal && matches(scenario.rubric.goal, rawText));
-  let understandingPts = (hasIntent && topicMatch) ? 2 : (hasIntent || topicMatch ? 1 : 1);
 
-  // (C) Business Conditions (3 Marks)
-  const isFiltered = /WHERE|HAVING\b/i.test(scenario?.sql || '');
-  const filterKeywords = ['filter', 'where', 'having', 'condition', 'keep', 'matching', 'only', 'specific', 'with', 'equals', 'greater', 'less', 'between', 'active', 'inactive', 'status', 'above', 'below', 'more', 'over', 'under'];
-  let filterMatches = filterKeywords.filter(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText)).length;
-  
-  let conditionsPts = 3;
-  if (hasWrongColumn || hasCriticalContradiction) {
-    conditionsPts = 1;
-  } else if (isFiltered && filterMatches === 0 && scenario?.sql && !scenario.sql.includes('WHERE') && !scenario.sql.includes('HAVING')) {
-    conditionsPts = 1;
-  } else if (filterMatches >= 1 || !isFiltered) {
-    conditionsPts = 3;
-  } else {
-    conditionsPts = 2;
-  }
+  let objPts = 0;
+  if (hasIntent && topicMatch) objPts = 2;
+  else if (hasIntent || topicMatch) objPts = 1;
 
-  // (D) Solution Approach (2 Marks)
-  const isAggregated = /GROUP BY|COUNT\(|SUM\(|AVG\(|MAX\(|MIN\(/i.test(scenario?.sql || '');
-  const isSorted = /ORDER BY/i.test(scenario?.sql || '');
-  const joinKeywords = ['join', 'link', 'connect', 'combine', 'merge', 'match', 'both', 'together', 'on'];
-  const aggKeywords = ['group', 'count', 'sum', 'total', 'average', 'avg', 'max', 'min', 'aggregate', 'calculate', 'summarize'];
-  const sortKeywords = ['sort', 'order', 'rank', 'top', 'highest', 'lowest', 'descending', 'ascending', 'limit'];
-
-  let approachMatches = 0;
-  let approachNeeded = 0;
-  if (isMultiTable) { approachNeeded++; if (joinKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText))) approachMatches++; }
-  if (isAggregated) { approachNeeded++; if (aggKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText))) approachMatches++; }
-  if (isSorted) { approachNeeded++; if (sortKeywords.some(kw => new RegExp('\\b' + kw + '\\b', 'i').test(normText))) approachMatches++; }
-  if (!isMultiTable && !isAggregated && !isSorted) { approachNeeded = 1; approachMatches = 1; }
-  if (approachNeeded === 0) approachNeeded = 1;
-
-  let approachPts = (approachMatches >= approachNeeded || approachNeeded === 1) ? 2 : 1;
-
-  // (E) Expected Result (1 Mark)
+  // (E) 1 Point – Clear Logical Explanation
   const wordCount = normText.split(/\s+/).filter(Boolean).length;
-  const resultPts = (wordCount >= 3 && !rawSql) ? 1 : 0;
+  const isOffTopic = !hasIntent && !topicMatch && logicMatches === 0 && correctTables.length === 0;
+  const clarityPts = (wordCount >= 3 && !rawSql && !isOffTopic) ? 1 : 0;
 
-  // 5. Total Raw Score & Contradiction / Schema Capping
-  let rawScore = dataPts + understandingPts + conditionsPts + approachPts + resultPts;
+  // 5. Total Raw Score and Enforce Schema Capping Rules
+  const namesNoRequiredTables = requiredTables.length > 0 && correctTables.length === 0;
+  let rawScore = tablePts + colPts + logicPts + objPts + clarityPts;
 
-  if (hasCriticalContradiction) {
+  if (hasWrongTable && hasWrongColumn) {
     rawScore = Math.min(rawScore, 4);
-  } else if (hasWrongTable && hasWrongColumn) {
-    rawScore = Math.min(rawScore, 4);
-  } else if (hasWrongTable || explicitWrongSchemaTables.length > 0) {
+  } else if (hasWrongTable || (namesNoRequiredTables && (candidateTables.length > 0 || isMultiTable))) {
     rawScore = Math.min(rawScore, 5);
   } else if (hasWrongColumn) {
     rawScore = Math.min(rawScore, 6);
   }
 
   const finalScore = Math.min(10, Math.max(0, rawScore));
-  const ready = !rawSql && finalScore >= PASS_THRESHOLD && !hasCriticalContradiction;
+  const ready = !rawSql && finalScore >= PASS_THRESHOLD;
 
-  // 6. Human-Like Trainer Feedback Generation
+  // 6. Dynamic, Constructive Feedback Messages
   let feedback = '';
-  if (hasCriticalContradiction) {
-    feedback = 'You have identified the relevant data, but your comparison does not match the business requirement. Review whether the requested values should be higher or lower.';
-  } else if (explicitWrongSchemaTables.length > 0) {
-    feedback = `Your reasoning is on the right track, but \`${explicitWrongSchemaTables[0]}\` is not part of this scenario. Review the schema and identify the table containing the required data.`;
+  if (explicitWrongSchemaTables.length > 0) {
+    const wrong = explicitWrongSchemaTables[0];
+    feedback = `Your filtering idea is on the right track, but \`${wrong}\` is not part of this scenario. Review the schema and identify the table containing the required data.`;
   } else if (explicitWrongScenarioTables.length > 0) {
-    feedback = `Your reasoning mentions \`${explicitWrongScenarioTables[0]}\`, but this question requires data from the \`${requiredTables.join(', ')}\` table. Review which table holds the target records.`;
+    const wrong = explicitWrongScenarioTables[0];
+    feedback = `Your reasoning mentions \`${wrong}\`, but this question requires data from the \`${requiredTables.join(', ')}\` table. Review which table holds the target records.`;
   } else if (explicitWrongColumns.length > 0) {
     feedback = `Check your column references: \`${explicitWrongColumns[0]}\` does not exist in the target schema.`;
   } else if (rawSql) {
     feedback = 'Explain your plan in simple English: Table → What to do → Expected result.';
   } else if (ready) {
-    if (finalScore === 10) {
-      feedback = 'Excellent! You identified the correct data and business condition. Your approach will return the required results. Ready to write SQL!';
-    } else {
-      feedback = `✓ Great thinking! You scored ${finalScore}/10. Your business reasoning is solid and ready to write SQL.`;
-    }
+    feedback = `✓ Great thinking! You scored ${finalScore}/10. You can now proceed to the next scenario or try writing SQL below.`;
   } else {
-    feedback = `Good start! You identified the correct data source. Think about which condition must be applied to get the required records. (Score: ${finalScore}/10)`;
+    feedback = `Thinking score: ${finalScore}/10. Score ${PASS_THRESHOLD}/10 or higher to unlock the next scenario. Check the table, the action to take, and the expected result.`;
   }
 
   const items = [
-    { category: 'data', name: 'Data Identification', label: 'Identify correct data source and tables', passed: dataPts >= 2, weight: dataPts, max: 2 },
-    { category: 'understanding', name: 'Business Understanding', label: 'Understand business objective', passed: understandingPts >= 1, weight: understandingPts, max: 2 },
-    { category: 'conditions', name: 'Business Conditions', label: 'State relevant conditions and filters', passed: conditionsPts >= 2, weight: conditionsPts, max: 3 },
-    { category: 'approach', name: 'Solution Approach', label: 'Explain solution approach', passed: approachPts >= 1, weight: approachPts, max: 2 },
-    { category: 'result', name: 'Expected Result', label: 'Describe expected result', passed: resultPts >= 1, weight: resultPts, max: 1 }
+    {
+      category: 'data',
+      name: 'Source Table',
+      label: explicitWrongSchemaTables.length > 0
+        ? `Table \`${explicitWrongSchemaTables[0]}\` is not part of this schema. Required: ${requiredTables.join(', ')}`
+        : explicitWrongScenarioTables.length > 0
+        ? `Table \`${explicitWrongScenarioTables[0]}\` is not the target table for this question. Required: ${requiredTables.join(', ')}`
+        : tablePts >= 2
+        ? `Identified data source: ${correctTables.join(', ') || requiredTables.join(', ')}`
+        : `Specify which table to use (e.g. ${requiredTables.join(', ')})`,
+      passed: tablePts >= 2,
+      weight: tablePts,
+      max: 3
+    },
+    {
+      category: 'columns',
+      name: 'Target Columns',
+      label: explicitWrongColumns.length > 0
+        ? `Column \`${explicitWrongColumns[0]}\` does not exist in the referenced schema.`
+        : colPts >= 2
+        ? `Identified relevant columns / criteria: ${[...mentionedCols].join(', ') || 'status / target columns'}`
+        : `Identify the relevant column(s) (e.g. ${[...sqlColumns].slice(0, 3).join(', ') || 'target attributes'})`,
+      passed: colPts >= 2,
+      weight: colPts,
+      max: 2
+    },
+    {
+      category: 'approach',
+      name: 'Logic & Action',
+      label: logicPts >= 2
+        ? 'Identified required condition/filter/join/aggregation logic'
+        : 'Describe the logic or action (e.g. filter, join, or aggregation)',
+      passed: logicPts >= 2,
+      weight: logicPts,
+      max: 2
+    },
+    {
+      category: 'result',
+      name: 'Scenario Objective',
+      label: objPts >= 2
+        ? 'Clear understanding of the business objective'
+        : 'State what data or details to retrieve for the business goal',
+      passed: objPts >= 2,
+      weight: objPts,
+      max: 2
+    },
+    {
+      category: 'clarity',
+      name: 'Logical Explanation',
+      label: clarityPts >= 1
+        ? 'Clear and coherent logical explanation'
+        : 'Provide a coherent explanation in simple English without raw SQL',
+      passed: clarityPts >= 1,
+      weight: clarityPts,
+      max: 1
+    }
   ];
 
   return {

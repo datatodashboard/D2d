@@ -1,5 +1,3 @@
-import { mergeProgress } from './progress.js';
-
 // A single serialized queue plus a session generation guard prevents cross-account writes.
 export function createCloudSync({client,getContext,onMerged,onStatus}) {
   let generation=0, running=false, requested=false;
@@ -15,11 +13,9 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
 
         const localEntries = (context.state && typeof context.state.entries === 'object' && context.state.entries) ? context.state.entries : {};
         const localCount = Object.keys(localEntries).length;
-        const localResetAt = Number(context.state?.resetAt) || 0;
 
-        // RULE 9: Protect against empty guest state overwriting non-empty saved cloud state upon initial sign in,
-        // BUT allow clean reset states (localResetAt > 0) to sync to cloud.
-        if (localCount === 0 && localResetAt === 0) {
+        // RULE 9: NEVER replace existing saved cloud progress with an empty progress state
+        if (localCount === 0) {
           try {
             if (typeof activeClient.from === 'function') {
               const { data: row, error: fetchErr } = await activeClient
@@ -29,10 +25,10 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
                 .maybeSingle();
 
               if (!fetchErr && row?.state) {
-                const sanitizedRemote = mergeProgress(row.state, { version: 2, resetAt: 0, entries: {} });
-                if (Object.keys(sanitizedRemote.entries).length > 0) {
+                const remoteEntries = (typeof row.state.entries === 'object' && row.state.entries) ? row.state.entries : {};
+                if (Object.keys(remoteEntries).length > 0) {
                   if (token === generation && context.userId === getContext().userId) {
-                    onMerged(sanitizedRemote, context.userId);
+                    onMerged(row.state, context.userId);
                     onStatus('Progress synced');
                   }
                 }
@@ -61,11 +57,51 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
             } else if (error) {
               console.warn('[D2D Progress] merge_learning_progress RPC notice:', error.message || error);
             }
-          } else {
-            console.warn('[D2D Progress] merge_learning_progress RPC not available on client');
           }
         } catch (rpcErr) {
           console.warn('[D2D Progress] merge_learning_progress RPC exception:', rpcErr);
+        }
+
+        // 2. Direct table fallback if RPC did not return data
+        if (!mergedData && typeof activeClient.from === 'function') {
+          try {
+            const { data: row, error: fetchErr } = await activeClient
+              .from('learning_progress')
+              .select('state')
+              .eq('user_id', context.userId)
+              .maybeSingle();
+
+            if (!fetchErr) {
+              const remoteEntries = (row?.state && typeof row.state.entries === 'object') ? row.state.entries : {};
+              const mergedEntries = { ...remoteEntries, ...localEntries };
+              const mergedState = {
+                version: 2,
+                resetAt: Math.max(context.state?.resetAt || 0, row?.state?.resetAt || 0),
+                entries: mergedEntries,
+                skills: { ...(row?.state?.skills || {}), ...(context.state?.skills || {}) },
+                levelFeedback: { ...(row?.state?.levelFeedback || {}), ...(context.state?.levelFeedback || {}) }
+              };
+
+              const { error: upsertErr } = await activeClient
+                .from('learning_progress')
+                .upsert({
+                  user_id: context.userId,
+                  state: mergedState,
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'user_id' });
+
+              if (!upsertErr) {
+                mergedData = mergedState;
+                console.log('[D2D Progress] Cloud save successful');
+              } else {
+                console.error('[D2D Progress] Direct learning_progress upsert error:', upsertErr.message || upsertErr);
+              }
+            } else {
+              console.error('[D2D Progress] Error fetching current cloud progress before upsert:', fetchErr.message || fetchErr);
+            }
+          } catch (tableErr) {
+            console.error('[D2D Progress] learning_progress table fallback exception:', tableErr);
+          }
         }
 
         if(token!==generation || context.userId!==getContext().userId) continue;
@@ -73,8 +109,7 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
           onMerged(mergedData, context.userId);
           onStatus('Progress synced');
         } else {
-          // On RPC failure or unavailability, preserve local progress and indicate sync error to allow retry
-          onStatus('Saved on this device. Cloud sync error; retry when connected.');
+          onStatus('Saved on this device. Cloud sync unavailable; retry when connected.');
         }
       }
     } finally {running=false;}

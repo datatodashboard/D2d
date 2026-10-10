@@ -152,7 +152,7 @@ h1{
   color:var(--muted);
   box-shadow: 0 4px 20px rgba(15,23,42,0.03);
 }
-#dashboard[hidden],#gate[hidden],#toolsOverviewTabContent[hidden],#contestsTabContent[hidden],#paymentsTabContent[hidden],#learnersTabContent[hidden],#premiumTabContent[hidden],#notificationsTabContent[hidden],#feedbackTabContent[hidden]{display:none;}
+#dashboard[hidden],#gate[hidden],#contestsTabContent[hidden],#paymentsTabContent[hidden],#learnersTabContent[hidden],#premiumTabContent[hidden],#notificationsTabContent[hidden],#feedbackTabContent[hidden]{display:none;}
 
 .stats{
   display:grid;
@@ -433,7 +433,9 @@ textarea.form-control{min-height:90px;}
       <button id="tabLearnersBtn" class="tab-btn active" onclick="window.switchAdminTab('learners')">📊 Learner Directory &amp; Progress</button>
       <button id="tabPremiumBtn" class="tab-btn" onclick="window.switchAdminTab('premium')">⭐ Premium Customers <span id="premiumReconcileBadge" class="badge warn" style="display:none;margin-left:4px;">0</span></button>
       <button id="tabPaymentsBtn" class="tab-btn" onclick="window.switchAdminTab('payments')">💳 Payment Verification <span id="pendingPaymentsCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
-      <button id="tabToolsBtn" class="tab-btn" onclick="window.switchAdminTab('tools')">🧰 Tools <span id="toolsBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
+      <button id="tabContestsBtn" class="tab-btn" onclick="window.switchAdminTab('contests')">🏆 Contest Management</button>
+      <button id="tabNotificationsBtn" class="tab-btn" onclick="window.switchAdminTab('notifications')">📢 Notifications &amp; Announcements</button>
+      <button id="tabFeedbackBtn" class="tab-btn" onclick="window.switchAdminTab('feedback')">💬 Learner Feedback <span id="feedbackCountBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></button>
     </nav>
 
     <!-- Tab 1: Learner Directory & Progress -->
@@ -454,107 +456,7 @@ textarea.form-control{min-height:90px;}
           </label>
           <button class="action primary" id="refreshBtn">Refresh</button>
           <button class="action" id="exportBtn" style="background:var(--soft);color:var(--primary);">Export CSV</button>
-          <button class="action secondary" id="toggleAdvancedFiltersBtn" onclick="window.toggleAdvancedFilters()">⚙️ Advanced Filters</button>
         </div>
-
-        <!-- Collapsible Advanced Filters Panel -->
-        <div id="advancedFiltersPanel" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid var(--line);">
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px;">
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Account Status</label>
-              <select id="filterAccountStatus" class="form-control" style="width:100%; padding:8px;">
-                <option value="ALL">All Learners</option>
-                <option value="admin">Admin Users</option>
-                <option value="premium">Premium / Paid</option>
-                <option value="free">Free / Unpaid</option>
-                <option value="eligible">Contest Eligible</option>
-                <option value="not_eligible">Not Eligible</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Domain</label>
-              <select id="filterDomain" class="form-control" style="width:100%; padding:8px;">
-                <option value="ALL">All Domains</option>
-                <option value="Banking">Banking</option>
-                <option value="Healthcare">Healthcare</option>
-                <option value="Insurance">Insurance</option>
-                <option value="Retail">Retail</option>
-                <option value="Capital Markets">Capital Markets</option>
-                <option value="Semiconductor">Semiconductor</option>
-                <option value="Education">Education</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Level</label>
-              <select id="filterLevel" class="form-control" style="width:100%; padding:8px;">
-                <option value="ALL">All Levels</option>
-                <option value="Beginner">Beginner</option>
-                <option value="Intermediate">Intermediate</option>
-                <option value="Expert">Expert</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Last Active / Login</label>
-              <select id="filterLastActive" class="form-control" style="width:100%; padding:8px;">
-                <option value="ANY">Any Time</option>
-                <option value="today">Today (Last 24h)</option>
-                <option value="7days">Last 7 Days</option>
-                <option value="30days">Last 30 Days</option>
-                <option value="never">Never Logged In / No Activity</option>
-                <option value="custom">Custom Date Range</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Completion Status</label>
-              <select id="filterCompletionStatus" class="form-control" style="width:100%; padding:8px;">
-                <option value="ALL">All Statuses</option>
-                <option value="not_started">Not Started (0)</option>
-                <option value="in_progress">In Progress</option>
-                <option value="completed">Completed (All)</option>
-              </select>
-            </div>
-          </div>
-
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px;">
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Solved Scenarios (Min – Max)</label>
-              <div style="display:flex; gap:6px;">
-                <input type="number" id="filterSolvedMin" placeholder="Min" class="form-control" style="width:50%; padding:8px;" min="0" />
-                <input type="number" id="filterSolvedMax" placeholder="Max" class="form-control" style="width:50%; padding:8px;" min="0" />
-              </div>
-            </div>
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Attempted Scenarios (Min – Max)</label>
-              <div style="display:flex; gap:6px;">
-                <input type="number" id="filterAttemptedMin" placeholder="Min" class="form-control" style="width:50%; padding:8px;" min="0" />
-                <input type="number" id="filterAttemptedMax" placeholder="Max" class="form-control" style="width:50%; padding:8px;" min="0" />
-              </div>
-            </div>
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Custom Date From / To</label>
-              <div style="display:flex; gap:6px;">
-                <input type="date" id="filterDateFrom" class="form-control" style="width:50%; padding:6px; font-size:0.8rem;" />
-                <input type="date" id="filterDateTo" class="form-control" style="width:50%; padding:6px; font-size:0.8rem;" />
-              </div>
-            </div>
-            <div>
-              <label style="font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Specific Scenario</label>
-              <select id="filterSpecificScenario" class="form-control" style="width:100%; padding:8px;">
-                <option value="ALL">All Scenarios</option>
-              </select>
-            </div>
-          </div>
-
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-top:1px solid var(--line); padding-top:12px;">
-            <div id="activeFilterChips" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; font-size:0.82rem;"></div>
-            <div style="display:flex; gap:8px;">
-              <button class="action primary sm" id="applyFiltersBtn">Apply Filters</button>
-              <button class="action secondary sm" id="clearFiltersBtn">Clear All Filters</button>
-            </div>
-          </div>
-        </div>
-
-        <div id="filterMatchCount" style="font-size:0.85rem; font-weight:700; color:var(--primary); margin-top:8px;"></div>
         <div id="threshLabel" style="font-size:0.85rem;color:var(--muted);margin-top:8px;">Threshold for contest eligibility is 18 completed challenges.</div>
         <div id="status" style="font-size:0.8rem;color:var(--muted);margin-top:8px;"></div>
       </div>
@@ -723,65 +625,8 @@ textarea.form-control{min-height:90px;}
       </div>
     </div>
 
-    <!-- Tools Overview Screen -->
-    <div id="toolsOverviewTabContent" hidden>
-      <div style="margin-bottom:20px;">
-        <h2 style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:800;margin:0 0 6px;">🧰 Administrative Tools</h2>
-        <div style="color:var(--muted);font-size:0.88rem;">Manage contests, broadcast notifications, and review learner feedback.</div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
-        <!-- Card 1: Contest Management -->
-        <div class="panel" style="cursor:pointer;transition:transform 0.15s ease,box-shadow 0.15s ease;" onclick="window.switchAdminTab('contests')" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 28px rgba(15,23,42,0.06)';" onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 20px rgba(15,23,42,0.03)';">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-            <div style="width:40px;height:40px;background:var(--soft);color:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:800;">🏆</div>
-            <div>
-              <h3 style="margin:0;font-size:1.05rem;font-weight:800;">Contest Management</h3>
-              <div style="font-size:0.82rem;color:var(--muted);">Create, publish, and evaluate SQL thinking contests</div>
-            </div>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;font-weight:700;color:var(--primary);border-top:1px solid var(--line);padding-top:12px;margin-top:12px;">
-            <span>Open Contest Manager</span>
-            <span>→</span>
-          </div>
-        </div>
-
-        <!-- Card 2: Notifications & Announcements -->
-        <div class="panel" style="cursor:pointer;transition:transform 0.15s ease,box-shadow 0.15s ease;" onclick="window.switchAdminTab('notifications')" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 28px rgba(15,23,42,0.06)';" onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 20px rgba(15,23,42,0.03)';">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-            <div style="width:40px;height:40px;background:var(--soft);color:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:800;">📢</div>
-            <div>
-              <h3 style="margin:0;font-size:1.05rem;font-weight:800;">Notifications &amp; Announcements</h3>
-              <div style="font-size:0.82rem;color:var(--muted);">Broadcast announcements to active learners</div>
-            </div>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;font-weight:700;color:var(--primary);border-top:1px solid var(--line);padding-top:12px;margin-top:12px;">
-            <span>Open Notifications</span>
-            <span>→</span>
-          </div>
-        </div>
-
-        <!-- Card 3: Learner Feedback -->
-        <div class="panel" style="cursor:pointer;transition:transform 0.15s ease,box-shadow 0.15s ease;" onclick="window.switchAdminTab('feedback')" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 28px rgba(15,23,42,0.06)';" onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 20px rgba(15,23,42,0.03)';">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-            <div style="width:40px;height:40px;background:var(--soft);color:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:800;">💬</div>
-            <div>
-              <h3 style="margin:0;font-size:1.05rem;font-weight:800;">Learner Feedback <span id="toolsFeedbackBadge" class="badge pending" style="display:none;margin-left:4px;">0</span></h3>
-              <div style="font-size:0.82rem;color:var(--muted);">Review feedback and ratings from learners</div>
-            </div>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;font-weight:700;color:var(--primary);border-top:1px solid var(--line);padding-top:12px;margin-top:12px;">
-            <span>Open Learner Feedback</span>
-            <span>→</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Tab 2: Contest Management -->
     <div id="contestsTabContent" hidden>
-      <div style="margin-bottom:14px;">
-        <button class="action secondary sm" onclick="window.switchAdminTab('tools')">← Back to Tools</button>
-      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
         <div>
           <h2 style="margin:0;font-size:1.25rem;">🏆 Crack SQL Thinking Contests</h2>
@@ -853,9 +698,6 @@ textarea.form-control{min-height:90px;}
 
     <!-- Tab 5: 📢 Notifications & Announcements -->
     <div id="notificationsTabContent" hidden>
-      <div style="margin-bottom:14px;">
-        <button class="action secondary sm" onclick="window.switchAdminTab('tools')">← Back to Tools</button>
-      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
         <div>
           <h2 style="margin:0;font-size:1.25rem;">📢 Admin Notifications &amp; Announcements</h2>
@@ -899,9 +741,6 @@ textarea.form-control{min-height:90px;}
 
     <!-- Tab 6: 💬 Learner Feedback -->
     <div id="feedbackTabContent" hidden>
-      <div style="margin-bottom:14px;">
-        <button class="action secondary sm" onclick="window.switchAdminTab('tools')">← Back to Tools</button>
-      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
         <div>
           <h2 style="margin:0;font-size:1.25rem;">💬 Question Feedback &amp; Learner Insights</h2>

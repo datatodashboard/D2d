@@ -17,8 +17,6 @@ let timerInterval = null;
 let autoSaveInterval = null;
 let isSubmitting = false;
 let serverClockOffset = 0;
-let lastInitContestKey = '';
-let activeInitContestPromise = null;
 
 const $ = id => document.getElementById(id);
 
@@ -72,32 +70,21 @@ export async function initContest(client, user, completedCount = 0, isAdmin = fa
   activeIsAdmin = Boolean(isAdmin);
   currentCompletedCount = Number(completedCount) || 0;
 
-  if (!client || !user) {
-    currentContest = null;
-    lastInitContestKey = '';
-    activeInitContestPromise = null;
-    hideContestCard();
-    closeContestModal();
-    return;
-  }
-
-  const contestInitKey = `${user.id}_${currentCompletedCount}_${activeIsAdmin}`;
-  if (contestInitKey === lastInitContestKey && activeInitContestPromise) {
-    return activeInitContestPromise;
-  }
-  lastInitContestKey = contestInitKey;
-
   hideContestCard();
   closeContestModal();
 
-  activeInitContestPromise = (async () => {
-    // 1. Enforce Qualification: Learners must have completed >= 18 questions.
-    // Admins are exempt from the 18-completion requirement for testing.
-    if (currentCompletedCount < 18 && !activeIsAdmin) {
-      currentContest = null;
-      hideContestCard();
-      return;
-    }
+  if (!client || !user) {
+    currentContest = null;
+    return;
+  }
+
+  // 1. Enforce Qualification: Learners must have completed >= 18 questions.
+  // Admins are exempt from the 18-completion requirement for testing.
+  if (currentCompletedCount < 18 && !activeIsAdmin) {
+    currentContest = null;
+    hideContestCard();
+    return;
+  }
 
   // Authoritative server-side sync (no direct learner update of privileged profile fields)
   if (currentCompletedCount >= 18 && typeof client.rpc === 'function') {
@@ -218,8 +205,6 @@ export async function initContest(client, user, completedCount = 0, isAdmin = fa
       renderContestWaitingCard();
     }
   }
-  })();
-  return activeInitContestPromise;
 }
 
 export async function refreshUserContestRecords() {

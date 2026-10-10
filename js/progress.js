@@ -12,14 +12,13 @@ export function sanitize(value, ids) {
     // Keep earlier four-box answers readable after upgrading to the single-box UI.
     for(const k of ['goal','sources','steps','check'])thinking[k]=String(entry.thinking?.[k]||'').slice(0,4000);
     const score = (typeof entry.assessment?.score === 'number') ? entry.assessment.score : null;
-    const completed = !!entry.completed || (score !== null ? score >= 7 : false);
+    const completed = score !== null ? score >= 7 : !!entry.completed;
     const attempts = Number.isFinite(entry.attempts) ? Math.max(0, Math.floor(entry.attempts)) : (entry.assessment ? 1 : 0);
     const status = typeof entry.status === 'string' ? entry.status : (completed ? 'completed' : (attempts > 0 || score !== null) ? 'attempted' : 'in_progress');
     result.entries[id] = {thinking, sql:String(entry.sql || '').slice(0,20000),
       variantIndex: Number.isFinite(entry.variantIndex) ? entry.variantIndex : null,
       skill: typeof entry.skill === 'string' ? entry.skill : null,
       assessment: entry.assessment && typeof entry.assessment === 'object' ? entry.assessment : null,
-      assessmentVersion: typeof entry.assessmentVersion === 'string' ? entry.assessmentVersion : (entry.assessment?.version ? `thinking_v${entry.assessment.version}` : 'thinking_v2'),
       completed,
       status,
       fiddleFingerprint: typeof entry.fiddleFingerprint === 'string' ? entry.fiddleFingerprint : null,
@@ -41,11 +40,11 @@ export function sanitize(value, ids) {
 }
 export function isCompleted(scenario, entry) {
   if (!entry) return false;
-  if (entry.completed === true) {
-    return true;
-  }
   if (entry.assessment && typeof entry.assessment.score === 'number') {
     return entry.assessment.score >= 7;
+  }
+  if (entry.completed === true) {
+    return true;
   }
   return false;
 }
