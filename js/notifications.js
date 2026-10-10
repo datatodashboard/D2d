@@ -173,8 +173,8 @@ export function markAllNotificationsAsRead(notifications) {
 /**
  * Renders the notification badge and dropdown UI
  */
-export function renderNotificationsUI({ scenarios, state, user, currentUsername, activeContest }) {
-  const notifications = getNotifications({ scenarios, state, user, currentUsername, activeContest });
+export function renderNotificationsUI({ scenarios, state, user, currentUsername, activeContest, adminNotifications = [] }) {
+  const notifications = getNotifications({ scenarios, state, user, currentUsername, activeContest, adminNotifications });
   const unreadCount = notifications.filter(n => !n.isRead && !n.isClaimed).length;
 
   // Update badge counters
