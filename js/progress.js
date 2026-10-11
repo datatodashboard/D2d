@@ -11,15 +11,43 @@ export function sanitize(value, ids) {
     const thinking = {response:String(entry.thinking?.response||'').slice(0,8000)};
     // Keep earlier four-box answers readable after upgrading to the single-box UI.
     for(const k of ['goal','sources','steps','check'])thinking[k]=String(entry.thinking?.[k]||'').slice(0,4000);
-    const score = (typeof entry.assessment?.score === 'number') ? entry.assessment.score : null;
-    const completed = !!entry.completed || (score !== null ? score >= 7 : false);
-    const attempts = Number.isFinite(entry.attempts) ? Math.max(0, Math.floor(entry.attempts)) : (entry.assessment ? 1 : 0);
-    const status = typeof entry.status === 'string' ? entry.status : (completed ? 'completed' : (attempts > 0 || score !== null) ? 'attempted' : 'in_progress');
+    const score = (typeof entry.score === 'number')
+      ? entry.score
+      : (typeof entry.thinkingScore === 'number')
+        ? entry.thinkingScore
+        : (typeof entry.assessment?.score === 'number')
+          ? entry.assessment.score
+          : (typeof entry.evaluation?.score === 'number')
+            ? entry.evaluation.score
+            : null;
+    const thinkingScore = score;
+    const feedback = typeof entry.feedback === 'string'
+      ? entry.feedback
+      : (typeof entry.assessment?.message === 'string'
+        ? entry.assessment.message
+        : (typeof entry.evaluation?.message === 'string'
+          ? entry.evaluation.message
+          : ''));
+    const evaluation = (entry.evaluation && typeof entry.evaluation === 'object')
+      ? entry.evaluation
+      : (entry.assessment && typeof entry.assessment === 'object' ? entry.assessment : null);
+    const assessment = (entry.assessment && typeof entry.assessment === 'object')
+      ? entry.assessment
+      : (evaluation ? evaluation : (score !== null ? { version: 6, score, ready: score >= 7, message: feedback } : null));
+    const completed = !!entry.completed || entry.status === 'completed' || (score !== null ? score >= 7 : false);
+    const attempts = Number.isFinite(entry.attempts) ? Math.max(0, Math.floor(entry.attempts)) : (assessment || score !== null ? 1 : 0);
+    const status = typeof entry.status === 'string' && entry.status
+      ? (completed ? 'completed' : entry.status)
+      : (completed ? 'completed' : (attempts > 0 || score !== null) ? 'attempted' : 'in_progress');
     result.entries[id] = {thinking, sql:String(entry.sql || '').slice(0,20000),
       variantIndex: Number.isFinite(entry.variantIndex) ? entry.variantIndex : null,
       skill: typeof entry.skill === 'string' ? entry.skill : null,
-      assessment: entry.assessment && typeof entry.assessment === 'object' ? entry.assessment : null,
-      assessmentVersion: typeof entry.assessmentVersion === 'string' ? entry.assessmentVersion : (entry.assessment?.version ? `thinking_v${entry.assessment.version}` : 'thinking_v2'),
+      score,
+      thinkingScore,
+      feedback,
+      evaluation,
+      assessment,
+      assessmentVersion: typeof entry.assessmentVersion === 'string' ? entry.assessmentVersion : (assessment?.version ? `thinking_v${assessment.version}` : 'thinking_v2'),
       completed,
       status,
       fiddleFingerprint: typeof entry.fiddleFingerprint === 'string' ? entry.fiddleFingerprint : null,
@@ -44,8 +72,20 @@ export function isCompleted(scenario, entry) {
   if (entry.completed === true) {
     return true;
   }
+  if (entry.status === 'completed') {
+    return true;
+  }
+  if (typeof entry.score === 'number' && entry.score >= 7) {
+    return true;
+  }
+  if (typeof entry.thinkingScore === 'number' && entry.thinkingScore >= 7) {
+    return true;
+  }
   if (entry.assessment && typeof entry.assessment.score === 'number') {
     return entry.assessment.score >= 7;
+  }
+  if (entry.evaluation && typeof entry.evaluation.score === 'number') {
+    return entry.evaluation.score >= 7;
   }
   return false;
 }
@@ -54,7 +94,10 @@ export function isAttempted(scenario, entry) {
   if (isCompleted(scenario, entry)) return true;
   if (entry.status === 'attempted' || entry.status === 'in_progress') return true;
   if (Number.isFinite(entry.attempts) && entry.attempts > 0) return true;
+  if (typeof entry.score === 'number') return true;
+  if (typeof entry.thinkingScore === 'number') return true;
   if (entry.assessment && typeof entry.assessment.score === 'number') return true;
+  if (entry.evaluation && typeof entry.evaluation.score === 'number') return true;
   if (entry.thinking && (Boolean(entry.thinking.response && String(entry.thinking.response).trim()) || Boolean(entry.thinking.steps))) return true;
   if (entry.sql && String(entry.sql).trim().length > 0) return true;
   if (Number.isFinite(entry.updatedAt) && entry.updatedAt > 0) return true;
@@ -94,7 +137,7 @@ export function mergeProgress(a,b,ids) {
         e = x.updatedAt > y.updatedAt ? x : y;
       }
     }
-    if(e && e.updatedAt>result.resetAt) result.entries[id]=e;
+    if(e && e.updatedAt>=result.resetAt) result.entries[id]=e;
   }
   return result;
 }

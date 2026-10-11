@@ -1008,11 +1008,40 @@ async function checkPaymentStatusSilently(isUserAction = false) {
   }
 }
 
-async function handleScenarioCompleted(scenarioId, thinkingResponse = '', score = 0) {
+async function handleScenarioCompleted(scenarioId, thinkingResponse = '', score = 0, assessment = null) {
   if (!scenarioId || !ids.has(scenarioId)) {
     console.warn('Unrecognized or invalid scenario ID:', scenarioId);
     return;
   }
+
+  // Authoritatively update state.entries[scenarioId] directly to avoid racing with current.id switching
+  const targetEntry = state.entries[scenarioId] || {};
+  const effectiveScore = typeof score === 'number' && score > 0
+    ? score
+    : (typeof targetEntry.score === 'number'
+      ? targetEntry.score
+      : (typeof targetEntry.thinkingScore === 'number'
+        ? targetEntry.thinkingScore
+        : (targetEntry.assessment?.score || 10)));
+  const effectiveFeedback = (assessment?.message) || targetEntry.feedback || (targetEntry.assessment?.message) || '';
+  const effectiveAssessment = assessment || targetEntry.assessment || targetEntry.evaluation || { version: 6, score: effectiveScore, ready: effectiveScore >= 7, message: effectiveFeedback };
+
+  state.entries[scenarioId] = {
+    ...targetEntry,
+    completed: true,
+    status: 'completed',
+    score: effectiveScore,
+    thinkingScore: effectiveScore,
+    feedback: effectiveFeedback,
+    evaluation: effectiveAssessment,
+    assessment: effectiveAssessment,
+    thinking: {
+      ...(targetEntry.thinking || {}),
+      response: thinkingResponse || targetEntry.thinking?.response || ''
+    },
+    updatedAt: nextTimestamp(state)
+  };
+  persist(true, true);
 
   if (user && client) {
     try {
@@ -1020,7 +1049,7 @@ async function handleScenarioCompleted(scenarioId, thinkingResponse = '', score 
       const { data: recRes, error: rpcErr } = await client.rpc('record_scenario_completion', {
         p_scenario_id: scenarioId,
         p_thinking_response: thinkingResponse || 'Reasoning validated',
-        p_score: score >= 7 ? score : 7
+        p_score: effectiveScore >= 7 ? effectiveScore : 7
       });
 
       if (!rpcErr && recRes) {
@@ -1030,12 +1059,13 @@ async function handleScenarioCompleted(scenarioId, thinkingResponse = '', score 
         if (typeof recRes.paid_unlocked === 'boolean') {
           isPaidUnlocked = recRes.paid_unlocked;
         }
-        changeEntry({
-          completed: true,
-          status: 'completed',
-          syncPending: false,
-          syncStatus: 'synced'
-        }, false);
+        if (state.entries[scenarioId]) {
+          Object.assign(state.entries[scenarioId], {
+            syncPending: false,
+            syncStatus: 'synced'
+          });
+        }
+        persist(true, false);
         if ($('syncStatus')) $('syncStatus').textContent = 'Progress synced';
 
         const completedCount = getCompletedCount();
@@ -1052,32 +1082,38 @@ async function handleScenarioCompleted(scenarioId, thinkingResponse = '', score 
       if (rpcErr) {
         console.warn('record_scenario_completion RPC notice:', rpcErr.message || rpcErr);
         if (String(rpcErr.message || '').includes('Free limit reached')) {
-          changeEntry({
-            completed: false,
-            status: 'attempted',
-            syncPending: false,
-            syncStatus: 'limit_reached'
-          }, false);
+          if (state.entries[scenarioId]) {
+            Object.assign(state.entries[scenarioId], {
+              completed: false,
+              status: 'attempted',
+              syncPending: false,
+              syncStatus: 'limit_reached'
+            });
+          }
           openPaywallModal();
           updateProgress();
           renderScenarioCatalog();
           return;
         }
         // Connection or temporary failure: preserve local draft
-        changeEntry({
-          syncPending: true,
-          syncStatus: 'pending'
-        }, false);
+        if (state.entries[scenarioId]) {
+          Object.assign(state.entries[scenarioId], {
+            syncPending: true,
+            syncStatus: 'pending'
+          });
+        }
         if ($('syncStatus')) {
           $('syncStatus').textContent = 'Saved on this device. Pending cloud sync...';
         }
       }
     } catch (err) {
       console.warn('handleScenarioCompleted persistence notice:', err);
-      changeEntry({
-        syncPending: true,
-        syncStatus: 'pending'
-      }, false);
+      if (state.entries[scenarioId]) {
+        Object.assign(state.entries[scenarioId], {
+          syncPending: true,
+          syncStatus: 'pending'
+        });
+      }
       if ($('syncStatus')) {
         $('syncStatus').textContent = 'Saved on this device. Pending cloud sync...';
       }
@@ -1672,8 +1708,15 @@ function evaluatePlan() {
   const completed = score >= 7;
   const curAttempts = (entry().attempts || 0) + 1;
   const status = completed ? 'completed' : 'attempted';
+  const feedback = assessment?.message || '';
+  const evaluation = assessment;
+
   changeEntry({
     thinking,
+    score,
+    thinkingScore: score,
+    feedback,
+    evaluation,
     assessment,
     completed,
     status,
@@ -1686,7 +1729,7 @@ function evaluatePlan() {
 
   // Handle completion tracking and paywall/eligibility gates
   if (completed) {
-    void handleScenarioCompleted(current.id, thinking.response, score);
+    void handleScenarioCompleted(current.id, thinking.response, score, assessment);
   }
 
   openMotivationPopup(score);
@@ -3225,7 +3268,7 @@ async function showScreen(name) {
     if (activeSessionInitPromise) {
       await activeSessionInitPromise;
     }
-    if (!current) {
+    if (!current || isCompleted(current, state.entries[current?.id])) {
       selectedDomain = selectedDomain || 'Banking';
       selectedLevel = selectedLevel || 'Beginner';
       await loadScenario();
@@ -4323,29 +4366,46 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
 
         // Mark confirmed scenarios as completed in working state
         for (const sId of confirmedSet) {
-          if (!workingState.entries[sId]) {
-            workingState.entries[sId] = {
-              thinking: { response: '' },
-              sql: '',
-              status: 'completed',
-              completed: true,
-              attempts: 1,
-              assessment: { score: 10, ready: true },
-              updatedAt: Date.now()
-            };
-          } else {
-            workingState.entries[sId].completed = true;
-            workingState.entries[sId].status = 'completed';
-            if (!workingState.entries[sId].assessment || typeof workingState.entries[sId].assessment.score !== 'number' || workingState.entries[sId].assessment.score < 7) {
-              workingState.entries[sId].assessment = {
-                ...(workingState.entries[sId].assessment || {}),
-                score: 10,
-                ready: true
-              };
-            }
-          }
+          const prevEntry = workingState.entries[sId] || {};
+          const prevScore = typeof prevEntry.score === 'number'
+            ? prevEntry.score
+            : (typeof prevEntry.thinkingScore === 'number'
+              ? prevEntry.thinkingScore
+              : (prevEntry.assessment?.score || 10));
+          const prevFeedback = prevEntry.feedback || prevEntry.assessment?.message || 'Reasoning validated';
+          const prevAssessment = prevEntry.assessment || prevEntry.evaluation || { version: 6, score: prevScore, ready: true, message: prevFeedback };
+
+          workingState.entries[sId] = {
+            ...prevEntry,
+            thinking: prevEntry.thinking || { response: '' },
+            sql: prevEntry.sql || '',
+            status: 'completed',
+            completed: true,
+            score: prevScore,
+            thinkingScore: prevScore,
+            feedback: prevFeedback,
+            evaluation: prevAssessment,
+            assessment: prevAssessment,
+            attempts: prevEntry.attempts || 1,
+            updatedAt: prevEntry.updatedAt || Date.now()
+          };
         }
       }
+
+      // Ensure any entries in workingState that have completed status or score >= 7 are properly initialized
+      for (const [sId, entry] of Object.entries(workingState.entries)) {
+        if (entry && (entry.completed === true || entry.status === 'completed' || (typeof entry.score === 'number' && entry.score >= 7) || (typeof entry.thinkingScore === 'number' && entry.thinkingScore >= 7))) {
+          entry.completed = true;
+          entry.status = 'completed';
+          const sScore = typeof entry.score === 'number' ? entry.score : (typeof entry.thinkingScore === 'number' ? entry.thinkingScore : (entry.assessment?.score || 10));
+          entry.score = sScore;
+          entry.thinkingScore = sScore;
+          entry.feedback = entry.feedback || entry.assessment?.message || 'Reasoning validated';
+          entry.evaluation = entry.evaluation || entry.assessment || { version: 6, score: sScore, ready: true, message: entry.feedback };
+          entry.assessment = entry.assessment || entry.evaluation;
+        }
+      }
+      authoritativeCompletedCount = Math.max(authoritativeCompletedCount, scenarios.filter(s => isCompleted(s, workingState.entries[s.id])).length);
 
       // 4. Authoritative Certificate Reconciliation: if a certificate exists in public.certificates for a domain and level, ensure all 20 scenarios are marked completed (fixing 19/20 vs certificate discrepancies)
       try {
@@ -4490,6 +4550,23 @@ async function setSession(session) {
         updateProgress();
         renderDomainAndLevelPickers();
         renderScenarioCatalog();
+
+        // Step 4b: Hydration complete - select the next unsolved scenario so practice screen resumes properly
+        selectedDomain = selectedDomain || 'Banking';
+        if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
+          selectedDomain = 'Banking';
+        }
+        selectedLevel = selectedLevel || 'Beginner';
+        if (!isLevelUnlocked(selectedDomain, selectedLevel, scenarios, state)) {
+          selectedLevel = getFirstUnlockedLevel(selectedDomain, scenarios, state);
+        }
+        const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
+        const nextUnsolved = chooseNext(pool, state, null);
+        if (nextUnsolved) {
+          current = await ensureFullScenario(nextUnsolved);
+        } else if (pool.length > 0) {
+          current = await ensureFullScenario(pool[pool.length - 1]);
+        }
 
         // Step 5: Initialize contest ONCE with authoritative completion count and admin status
         void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);

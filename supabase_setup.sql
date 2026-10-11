@@ -420,11 +420,19 @@ begin
       entry_data := lp_entries->k;
       -- Validate scenario ID exists in trusted catalog
       if exists (select 1 from public.scenario_catalog where id = k) then
-        entry_score := coalesce((entry_data->'assessment'->>'score')::numeric, 0);
+        entry_score := coalesce(
+          (entry_data->>'score')::numeric,
+          (entry_data->>'thinkingScore')::numeric,
+          (entry_data->'assessment'->>'score')::numeric,
+          (entry_data->'evaluation'->>'score')::numeric,
+          0
+        );
         entry_resp := coalesce(entry_data->'thinking'->>'response', '');
 
-        -- Count as completed if explicitly flagged completed or score >= 7
-        if coalesce((entry_data->>'completed')::boolean, false) or entry_score >= 7 then
+        -- Count as completed if explicitly flagged completed, status = 'completed', or score >= 7
+        if coalesce((entry_data->>'completed')::boolean, false)
+           or coalesce(entry_data->>'status', '') = 'completed'
+           or entry_score >= 7 then
           -- Count current distinct completions before inserting
           select count(distinct scenario_id) into v_count
           from public.progress
@@ -715,10 +723,20 @@ declare
   cur_entry jsonb;
   cur_is_comp boolean;
   inc_is_comp boolean;
+  cur_score numeric;
+  inc_score numeric;
+  v_is_paid boolean := false;
+  v_is_admin boolean := false;
+  v_prog_count integer;
 begin
   if auth.uid() is null or (auth.uid() <> expected_user and not public.is_admin()) then
     raise exception 'Unauthorized user progress merge';
   end if;
+
+  select coalesce(paid_unlocked, false), coalesce(is_admin, false)
+  into v_is_paid, v_is_admin
+  from public.profiles
+  where id = expected_user;
 
   select state into current_state
   from public.learning_progress
@@ -748,8 +766,29 @@ begin
       continue;
     end if;
 
-    cur_is_comp := coalesce((cur_entry->>'completed')::boolean, false) OR coalesce((cur_entry->'assessment'->>'score')::numeric, 0) >= 7;
-    inc_is_comp := coalesce((inc_entry->>'completed')::boolean, false) OR coalesce((inc_entry->'assessment'->>'score')::numeric, 0) >= 7;
+    cur_score := coalesce(
+      (cur_entry->>'score')::numeric,
+      (cur_entry->>'thinkingScore')::numeric,
+      (cur_entry->'assessment'->>'score')::numeric,
+      (cur_entry->'evaluation'->>'score')::numeric,
+      0
+    );
+
+    inc_score := coalesce(
+      (inc_entry->>'score')::numeric,
+      (inc_entry->>'thinkingScore')::numeric,
+      (inc_entry->'assessment'->>'score')::numeric,
+      (inc_entry->'evaluation'->>'score')::numeric,
+      0
+    );
+
+    cur_is_comp := coalesce((cur_entry->>'completed')::boolean, false)
+                   or coalesce(cur_entry->>'status', '') = 'completed'
+                   or cur_score >= 7;
+
+    inc_is_comp := coalesce((inc_entry->>'completed')::boolean, false)
+                   or coalesce(inc_entry->>'status', '') = 'completed'
+                   or inc_score >= 7;
 
     if cur_entry is null then
       merged_entries := jsonb_set(merged_entries, array[key], inc_entry);
@@ -760,6 +799,19 @@ begin
       merged_entries := jsonb_set(merged_entries, array[key], inc_entry);
     elsif coalesce((inc_entry->>'updatedAt')::bigint, 0) >= coalesce((cur_entry->>'updatedAt')::bigint, 0) then
       merged_entries := jsonb_set(merged_entries, array[key], inc_entry);
+    end if;
+
+    -- Ensure completed entry is mirrored to public.progress
+    if inc_is_comp and exists (select 1 from public.scenario_catalog where id = key) then
+      select count(distinct scenario_id) into v_prog_count
+      from public.progress
+      where user_id = expected_user;
+
+      if v_prog_count < 5 or v_is_paid or v_is_admin then
+        insert into public.progress (user_id, scenario_id, completed_at)
+        values (expected_user, key, now())
+        on conflict (user_id, scenario_id) do nothing;
+      end if;
     end if;
   end loop;
 

@@ -17,9 +17,8 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
         const localCount = Object.keys(localEntries).length;
         const localResetAt = Number(context.state?.resetAt) || 0;
 
-        // RULE 9: Protect against empty guest state overwriting non-empty saved cloud state upon initial sign in,
-        // BUT allow clean reset states (localResetAt > 0) to sync to cloud.
-        if (localCount === 0 && localResetAt === 0) {
+        // RULE 6 & 9: Protect against empty local state overwriting non-empty saved cloud state
+        if (localCount === 0) {
           try {
             if (typeof activeClient.from === 'function') {
               const { data: row, error: fetchErr } = await activeClient
@@ -35,13 +34,16 @@ export function createCloudSync({client,getContext,onMerged,onStatus}) {
                     onMerged(sanitizedRemote, context.userId);
                     onStatus('Progress synced');
                   }
+                  continue;
                 }
               }
             }
           } catch (fetchErr) {
             console.warn('Fetch remote check warning:', fetchErr);
           }
-          continue;
+          if (localResetAt === 0) {
+            continue;
+          }
         }
 
         console.log('[D2D Progress] Saving progress to cloud');
