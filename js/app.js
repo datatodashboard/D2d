@@ -4296,6 +4296,12 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
 
   console.log('[D2D Progress] User authenticated:', userId);
 
+  if (client) {
+    try {
+      await client.auth.getSession();
+    } catch (e) {}
+  }
+
   // 1. Isolate in-memory state for this authenticated user (never reuse guest or previous user data)
   const localCached = readProgress(storage, userId, ids);
   const localHasEntries = localCached && Object.keys(localCached.entries).length > 0;
