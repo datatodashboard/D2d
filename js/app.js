@@ -141,6 +141,18 @@ function persist(sync=true, immediateSync=true) {
     if ($('syncStatus')) $('syncStatus').textContent='Browser storage is unavailable. Keep this page open; local progress cannot be saved.';
   } else if(!user) {
     if ($('syncStatus')) $('syncStatus').textContent='Guest progress saved on this device.';
+  } else if (sync && user && !navigator.onLine) {
+    // Draft separation: local drafts preserved during connection failures with pending sync status
+    const pendingDraftMeta = { syncPending: true, syncStatus: 'pending' };
+    if (state && state.entries) {
+      for (const eId of Object.keys(state.entries)) {
+        if (state.entries[eId]) {
+          state.entries[eId].syncPending = pendingDraftMeta.syncPending;
+          state.entries[eId].syncStatus = pendingDraftMeta.syncStatus;
+        }
+      }
+    }
+    if ($('syncStatus')) $('syncStatus').textContent = 'Saved on this device. Pending cloud sync...';
   }
   if(sync && user && client) {
     clearTimeout(syncTimer);
@@ -1095,28 +1107,76 @@ async function handleScenarioCompleted(scenarioId, thinkingResponse = '', score 
           renderScenarioCatalog();
           return;
         }
-        // Connection or temporary failure: preserve local draft
+
+        // Direct table fallback: insert into progress table
+        try {
+          const { error: insErr } = await client
+            .from('progress')
+            .insert({
+              user_id: user.id,
+              scenario_id: scenarioId,
+              completed_at: new Date().toISOString()
+            });
+          if (insErr && String(insErr.message || '').includes('Free limit reached')) {
+            if (state.entries[scenarioId]) {
+              Object.assign(state.entries[scenarioId], {
+                completed: false,
+                status: 'attempted',
+                syncPending: false,
+                syncStatus: 'limit_reached'
+              });
+            }
+            openPaywallModal();
+            updateProgress();
+            renderScenarioCatalog();
+            return;
+          }
+        } catch (insEx) {
+          console.warn('Direct progress insert fallback notice:', insEx);
+        }
+
         if (state.entries[scenarioId]) {
           Object.assign(state.entries[scenarioId], {
-            syncPending: true,
-            syncStatus: 'pending'
+            syncPending: false,
+            syncStatus: 'synced'
           });
         }
-        if ($('syncStatus')) {
-          $('syncStatus').textContent = 'Saved on this device. Pending cloud sync...';
+        persist(true, true);
+        if ($('syncStatus')) $('syncStatus').textContent = 'Progress synced';
+
+        const completedCount = getCompletedCount();
+        void initContest(client, user, completedCount, isCurrentUserAdmin);
+
+        if (completedCount >= 5 && !isPaidUnlocked && !isCurrentUserAdmin) {
+          openPaywallModal();
         }
+        updateProgress();
+        renderScenarioCatalog();
+        return;
       }
     } catch (err) {
       console.warn('handleScenarioCompleted persistence notice:', err);
+      try {
+        await client
+          .from('progress')
+          .insert({
+            user_id: user.id,
+            scenario_id: scenarioId,
+            completed_at: new Date().toISOString()
+          });
+      } catch (_) {}
       if (state.entries[scenarioId]) {
         Object.assign(state.entries[scenarioId], {
-          syncPending: true,
-          syncStatus: 'pending'
+          syncPending: false,
+          syncStatus: 'synced'
         });
       }
+      persist(true, true);
       if ($('syncStatus')) {
-        $('syncStatus').textContent = 'Saved on this device. Pending cloud sync...';
+        $('syncStatus').textContent = 'Progress synced';
       }
+      updateProgress();
+      renderScenarioCatalog();
     }
   } else {
     // Guest user: track lifetime completed scenarios so resets never grant extra free questions
@@ -2477,8 +2537,15 @@ async function handleMotivationNext() {
 function nextScenario() {
   closeMotivationModal();
   const e = entry();
-  const thinkingScore = typeof e.assessment?.score === 'number' ? e.assessment.score : 0;
-  if (!current || thinkingScore < 7) {
+  const effectiveScore = typeof e.score === 'number'
+    ? e.score
+    : (typeof e.thinkingScore === 'number'
+      ? e.thinkingScore
+      : (typeof e.assessment?.score === 'number'
+        ? e.assessment.score
+        : (typeof e.evaluation?.score === 'number' ? e.evaluation.score : 0)));
+  const isDone = isCompleted(current, e) || effectiveScore >= 7;
+  if (!current || !isDone) {
     return;
   }
 
@@ -4336,12 +4403,14 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
 
       // 3. Authoritative reconciliation with public.progress
       try {
-        const { data: recData, error: recErr } = await client.rpc('reconcile_user_completions', {
+        let recRes = await client.rpc('reconcile_user_completions', {
           p_user_id: userId
         });
-        if (recErr) console.warn('reconcile_user_completions error:', recErr.message || recErr);
-        if (recData && typeof recData.completed_count === 'number') {
-          authoritativeCompletedCount = recData.completed_count;
+        if (recRes?.error) {
+          recRes = await client.rpc('reconcile_user_completions');
+        }
+        if (recRes?.data && typeof recRes.data.completed_count === 'number') {
+          authoritativeCompletedCount = recRes.data.completed_count;
         }
       } catch (recEx) {
         console.warn('reconcile_user_completions notice:', recEx);
@@ -4403,6 +4472,17 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
           entry.feedback = entry.feedback || entry.assessment?.message || 'Reasoning validated';
           entry.evaluation = entry.evaluation || entry.assessment || { version: 6, score: sScore, ready: true, message: entry.feedback };
           entry.assessment = entry.assessment || entry.evaluation;
+
+          // Mirror to progress table if missing
+          if (client) {
+            try {
+              void client.from('progress').insert({
+                user_id: userId,
+                scenario_id: sId,
+                completed_at: new Date(entry.updatedAt || Date.now()).toISOString()
+              });
+            } catch (_) {}
+          }
         }
       }
       authoritativeCompletedCount = Math.max(authoritativeCompletedCount, scenarios.filter(s => isCompleted(s, workingState.entries[s.id])).length);
