@@ -126,39 +126,12 @@ describe('Certificate Page Progress Sync & Eligibility System', () => {
     assert.ok(status.completionDate);
   });
 
-  // 4. Level Locking: Intermediate and Expert locked until progression satisfied
-  it('keeps Intermediate and Expert locked until 20 questions + mandatory feedback completed', () => {
+  // 4. Level Unlocking: All levels and domains are unlocked by default
+  it('keeps all levels and domains unlocked by default', () => {
     const state = EMPTY();
-
-    // Initially: Beginner is unlocked, Intermediate & Expert are locked
     assert.strictEqual(isLevelUnlocked('Banking', 'Beginner', scenarios, state), true);
-    assert.strictEqual(isLevelUnlocked('Banking', 'Intermediate', scenarios, state), false);
-    assert.strictEqual(isLevelUnlocked('Banking', 'Expert', scenarios, state), false);
-
-    // Complete 20 questions in Beginner without feedback
-    const bankingBeg = scenarios.filter(s => s.domain === 'Banking' && s.level === 'Beginner');
-    for (const s of bankingBeg) {
-      state.entries[s.id] = { assessment: { score: 10 }, completed: true, updatedAt: 1000 };
-    }
-
-    assert.strictEqual(isLevelUnlocked('Banking', 'Intermediate', scenarios, state), false, 'Intermediate must remain locked without feedback');
-
-    // Submit mandatory feedback
-    state.levelFeedback = {
-      'Banking_Beginner': { submittedAt: Date.now(), text: 'Excellent foundation!' }
-    };
-
-    assert.strictEqual(isLevelUnlocked('Banking', 'Intermediate', scenarios, state), true, 'Intermediate unlocks after feedback');
-    assert.strictEqual(isLevelUnlocked('Banking', 'Expert', scenarios, state), false, 'Expert remains locked');
-
-    // Complete Intermediate 20 questions + feedback
-    const bankingInt = scenarios.filter(s => s.domain === 'Banking' && s.level === 'Intermediate');
-    for (const s of bankingInt) {
-      state.entries[s.id] = { assessment: { score: 9 }, completed: true, updatedAt: 2000 };
-    }
-    state.levelFeedback['Banking_Intermediate'] = { submittedAt: Date.now(), text: 'Challenging joins!' };
-
-    assert.strictEqual(isLevelUnlocked('Banking', 'Expert', scenarios, state), true, 'Expert unlocks after Intermediate feedback');
+    assert.strictEqual(isLevelUnlocked('Banking', 'Intermediate', scenarios, state), true);
+    assert.strictEqual(isLevelUnlocked('Banking', 'Expert', scenarios, state), true);
   });
 
   // 5. Reliable Cloud Sync: Stale localStorage data never overrides or wipes Supabase progress
@@ -223,12 +196,12 @@ describe('Certificate Page Progress Sync & Eligibility System', () => {
 
     const banInt = allStatuses.find(c => c.domain === 'Banking' && c.level === 'Intermediate');
     assert.ok(banInt);
-    assert.strictEqual(banInt.isUnlocked, false, 'Banking Intermediate is locked');
+    assert.strictEqual(banInt.isUnlocked, true, 'Banking Intermediate is unlocked');
     assert.strictEqual(banInt.isCompleted, false);
     assert.strictEqual(banInt.completedCount, 0);
 
     const heaBeg = allStatuses.find(c => c.domain === 'Healthcare' && c.level === 'Beginner');
     assert.ok(heaBeg);
-    assert.strictEqual(heaBeg.isUnlocked, false, 'Healthcare Beginner is locked');
+    assert.strictEqual(heaBeg.isUnlocked, true, 'Healthcare Beginner is unlocked');
   });
 });

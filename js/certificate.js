@@ -582,22 +582,11 @@ export function isDomainCompleted(domain, scenarios, state) {
 }
 
 export function isDomainUnlocked(domain, scenarios, state) {
-  const idx = ORDERED_DOMAINS.indexOf(domain);
-  if (idx <= 0) return true; // Domain 1 (Banking) is always unlocked
-  const prevDomain = ORDERED_DOMAINS[idx - 1];
-  return isDomainCompleted(prevDomain, scenarios, state);
+  return true;
 }
 
 export function isLevelUnlocked(domain, level, scenarios, state) {
-  if (!isDomainUnlocked(domain, scenarios, state)) return false;
-  if (level === 'Beginner') return true;
-  if (level === 'Intermediate') {
-    return isLevelCompleted(domain, 'Beginner', scenarios, state);
-  }
-  if (level === 'Expert') {
-    return isLevelCompleted(domain, 'Intermediate', scenarios, state);
-  }
-  return false;
+  return true;
 }
 
 export function getFirstUnlockedLevel(domain, scenarios, state) {

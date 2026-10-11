@@ -1513,100 +1513,25 @@ function handleProgressionNoticeAction() {
 }
 
 function onLockedDomainClick(domain) {
-  const idx = ORDERED_DOMAINS.indexOf(domain);
-  const prevDom = idx > 0 ? ORDERED_DOMAINS[idx - 1] : 'Banking';
-  showProgressionNoticeModal({
-    title: `🔒 ${domain} is Locked`,
-    message: `Complete all 3 levels in ${prevDom} (Beginner → Intermediate → Expert) and submit mandatory feedback to unlock ${domain}.`,
-    actionLabel: `Continue ${prevDom}`,
-    onAction: () => {
-      selectDomain(prevDom);
-    }
-  });
+  selectDomain(domain);
 }
 
 function onLockedLevelClick(domain, level) {
-  if (!isDomainUnlocked(domain, scenarios, state)) {
-    onLockedDomainClick(domain);
-    return;
-  }
-
-  if (level === 'Intermediate') {
-    const begQuestionsDone = isLevelQuestionsCompleted(domain, 'Beginner', scenarios, state);
-    const begFeedbackDone = isLevelFeedbackSubmitted(domain, 'Beginner', state);
-    if (begQuestionsDone && !begFeedbackDone) {
-      openMandatoryLevelFeedbackModal(domain, 'Beginner');
-      return;
-    }
-    const pool = scenarios.filter(s => s.domain === domain && s.level === 'Beginner');
-    const solved = pool.filter(s => isCompleted(s, state.entries[s.id])).length;
-    showProgressionNoticeModal({
-      title: '🔒 Intermediate Level is Locked',
-      message: `Complete all 20 questions in Beginner Level (${solved}/20 completed) and submit mandatory feedback to unlock Intermediate.`,
-      actionLabel: 'Practice Beginner Level',
-      onAction: () => {
-        selectedDomain = domain;
-        selectedLevel = 'Beginner';
-        renderDomainAndLevelPickers();
-        loadScenario();
-        showScreen('practice');
-      }
-    });
-    return;
-  }
-
-  if (level === 'Expert') {
-    const intQuestionsDone = isLevelQuestionsCompleted(domain, 'Intermediate', scenarios, state);
-    const intFeedbackDone = isLevelFeedbackSubmitted(domain, 'Intermediate', state);
-    if (intQuestionsDone && !intFeedbackDone) {
-      openMandatoryLevelFeedbackModal(domain, 'Intermediate');
-      return;
-    }
-    const pool = scenarios.filter(s => s.domain === domain && s.level === 'Intermediate');
-    const solved = pool.filter(s => isCompleted(s, state.entries[s.id])).length;
-    showProgressionNoticeModal({
-      title: '🔒 Expert Level is Locked',
-      message: `Complete all 20 questions in Intermediate Level (${solved}/20 completed) and submit mandatory feedback to unlock Expert.`,
-      actionLabel: 'Practice Intermediate Level',
-      onAction: () => {
-        selectedDomain = domain;
-        selectedLevel = 'Intermediate';
-        renderDomainAndLevelPickers();
-        loadScenario();
-        showScreen('practice');
-      }
-    });
-    return;
-  }
+  selectedDomain = domain;
+  selectedLevel = level;
+  renderDomainAndLevelPickers();
+  renderScenarioCatalog();
+  void loadScenario();
 }
 
 function renderDomainAndLevelPickers() {
   selectedDomain = selectedDomain || 'Banking';
-  if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
-    selectedDomain = 'Banking';
-  }
-  if (!isLevelUnlocked(selectedDomain, selectedLevel, scenarios, state)) {
-    selectedLevel = getFirstUnlockedLevel(selectedDomain, scenarios, state);
-  }
+  selectedLevel = selectedLevel || 'Beginner';
 
   function renderDomainCard(domain) {
     const meta = DOMAIN_METAS[domain] || { icon: '📁', note: `${domain} (60)` };
-    const unlocked = isDomainUnlocked(domain, scenarios, state);
     const completed = isDomainCompleted(domain, scenarios, state);
     const isActive = selectedDomain === domain;
-
-    if (!unlocked) {
-      return `
-        <div class="pick domain locked" onclick="onLockedDomainClick('${domain}')" role="button" tabindex="-1" aria-disabled="true">
-          <div class="icon">${meta.icon}</div>
-          <div class="pick-title">${escapeHtml(domain)}</div>
-          <div class="pick-note">${escapeHtml(meta.note)}</div>
-          <div style="margin-top: 6px; font-size: 11px; font-weight: 700; color: #64748b; background: #f1f5f9; padding: 2px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e2e8f0;">
-            <span>🔒 Locked</span>
-          </div>
-        </div>
-      `;
-    }
 
     if (completed) {
       return `
@@ -1640,17 +1565,12 @@ function renderDomainAndLevelPickers() {
     extraGrid.innerHTML = EXTRA_DOMAINS.map(renderDomainCard).join('');
   }
 
-  // Render Levels with lock icons on locked levels
+  // Render Levels (all unlocked)
   const levelsContainer = $('levelsPicker') || document.querySelector('.levels');
   if (levelsContainer) {
     levelsContainer.innerHTML = ORDERED_LEVELS.map(lvl => {
-      const isUnlocked = isLevelUnlocked(selectedDomain, lvl, scenarios, state);
       const isCurrent = selectedLevel === lvl;
-      if (isUnlocked) {
-        return `<div role="button" tabindex="0" class="level ${isCurrent ? 'active' : ''}" onclick="selectLevel('${lvl}', this)">${lvl}</div>`;
-      } else {
-        return `<div role="button" tabindex="-1" class="level locked" onclick="onLockedLevelClick('${selectedDomain}', '${lvl}')" aria-disabled="true" title="Complete previous level to unlock ${lvl}">🔒 ${lvl}</div>`;
-      }
+      return `<div role="button" tabindex="0" class="level ${isCurrent ? 'active' : ''}" onclick="selectLevel('${lvl}', this)">${lvl}</div>`;
     }).join('');
   }
 }
@@ -4296,12 +4216,6 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
 
   console.log('[D2D Progress] User authenticated:', userId);
 
-  if (client) {
-    try {
-      await client.auth.getSession();
-    } catch (e) {}
-  }
-
   // 1. Isolate in-memory state for this authenticated user (never reuse guest or previous user data)
   const localCached = readProgress(storage, userId, ids);
   const localHasEntries = localCached && Object.keys(localCached.entries).length > 0;
@@ -4355,10 +4269,9 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
       }
 
       if (error) {
-        console.error('[D2D Progress] Supabase load error:', error.message || error);
+        console.warn('[D2D Progress] Supabase load notice (preserving local progress):', error.message || error);
       } else if (row && row.state) {
         console.log('[D2D Progress] Cloud progress found');
-        // 3. Sanitize cloud state
         const cloudState = sanitize(row.state, ids);
         if (serverResetAt > 0 && cloudState.resetAt < serverResetAt) {
           cloudState.resetAt = serverResetAt;
@@ -4368,11 +4281,12 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
             }
           }
         }
-        // Supabase cloud progress is authoritative: prevent stale localStorage from overriding it
         workingState = mergeProgress(cloudState, workingState, ids);
       } else {
         console.log('[D2D Progress] No existing cloud progress found for user');
       }
+
+      if (userId !== user?.id) return;
 
       // Reconcile level feedback from prefetched feedback or question_feedback table in Supabase
       try {
@@ -4439,7 +4353,7 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
         }
         authoritativeCompletedCount = Math.max(authoritativeCompletedCount, confirmedSet.size);
 
-        // Mark confirmed scenarios as completed in working state
+        // Mark confirmed scenarios as completed in working state preserving existing details
         for (const sId of confirmedSet) {
           const prevEntry = workingState.entries[sId] || {};
           const prevScore = typeof prevEntry.score === 'number'
@@ -4448,7 +4362,9 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
               ? prevEntry.thinkingScore
               : (prevEntry.assessment?.score || 10));
           const prevFeedback = prevEntry.feedback || prevEntry.assessment?.message || 'Reasoning validated';
-          const prevAssessment = prevEntry.assessment || prevEntry.evaluation || { version: 6, score: prevScore, ready: true, message: prevFeedback };
+          const prevEvaluation = prevEntry.evaluation || null;
+          const prevAssessment = prevEntry.assessment || prevEvaluation || { version: 6, score: prevScore, ready: true, message: prevFeedback };
+          const finalEvaluation = prevEvaluation || prevAssessment;
 
           workingState.entries[sId] = {
             ...prevEntry,
@@ -4459,7 +4375,7 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
             score: prevScore,
             thinkingScore: prevScore,
             feedback: prevFeedback,
-            evaluation: prevAssessment,
+            evaluation: finalEvaluation,
             assessment: prevAssessment,
             attempts: prevEntry.attempts || 1,
             updatedAt: prevEntry.updatedAt || Date.now()
@@ -4476,24 +4392,15 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
           entry.score = sScore;
           entry.thinkingScore = sScore;
           entry.feedback = entry.feedback || entry.assessment?.message || 'Reasoning validated';
-          entry.evaluation = entry.evaluation || entry.assessment || { version: 6, score: sScore, ready: true, message: entry.feedback };
-          entry.assessment = entry.assessment || entry.evaluation;
-
-          // Mirror to progress table if missing
-          if (client) {
-            try {
-              void client.from('progress').insert({
-                user_id: userId,
-                scenario_id: sId,
-                completed_at: new Date(entry.updatedAt || Date.now()).toISOString()
-              });
-            } catch (_) {}
-          }
+          const prevEv = entry.evaluation || null;
+          const prevAs = entry.assessment || prevEv || { version: 6, score: sScore, ready: true, message: entry.feedback };
+          entry.evaluation = prevEv || prevAs;
+          entry.assessment = prevAs;
         }
       }
       authoritativeCompletedCount = Math.max(authoritativeCompletedCount, scenarios.filter(s => isCompleted(s, workingState.entries[s.id])).length);
 
-      // 4. Authoritative Certificate Reconciliation: if a certificate exists in public.certificates for a domain and level, ensure all 20 scenarios are marked completed (fixing 19/20 vs certificate discrepancies)
+      // 4. Authoritative Certificate Reconciliation
       try {
         const { data: certRows, error: certErr } = await client
           .from('certificates')
@@ -4534,6 +4441,12 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
     }
   }
 
+  if (userId !== user?.id) return;
+
+  // Merge account-specific cache edits made while restoration reads were pending
+  const latestLocal = readProgress(storage, userId, ids);
+  workingState = mergeProgress(workingState, latestLocal, ids);
+
   // 5. Save merged local cache under this user's storageKey
   saveProgress(storage, userId, workingState);
 
@@ -4549,11 +4462,6 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
   renderDomainAndLevelPickers();
   renderScenarioCatalog();
   if (current) renderScenario();
-
-  // 8. If there are local entries to synchronize, trigger cloud sync
-  if (Object.keys(state.entries).length > 0) {
-    cloud.request();
-  }
 }
 
 let authSessionCounter = 0;
@@ -4561,10 +4469,19 @@ let activeSessionInitPromise = null;
 let lastInitializedUserId = null;
 
 async function setSession(session) {
-  const currentAuthToken = ++authSessionCounter;
   const next = session?.user || null;
-  if (next) authNotice = '';
   const previousUserId = user?.id;
+
+  // Deduplicate rapid consecutive setSession calls for the same authenticated user
+  if (next && next.id === lastInitializedUserId && activeSessionInitPromise) {
+    return activeSessionInitPromise;
+  }
+  if (next && next.id === lastInitializedUserId && !activeSessionInitPromise && previousUserId === next.id) {
+    return;
+  }
+
+  const currentAuthToken = ++authSessionCounter;
+  if (next) authNotice = '';
   user = next;
 
   if (user) {
@@ -4574,17 +4491,14 @@ async function setSession(session) {
       isPaidUnlocked = false;
       authoritativeCompletedCount = 0;
       userPendingPayment = null;
+      currentUsername = null;
+      current = null;
       updateAdminPortalVisibility();
       hideAccessError();
+      const localCached = readProgress(storage, user.id, ids);
+      state = localCached;
     }
 
-    // Deduplicate rapid consecutive setSession calls for the same authenticated user
-    if (user.id === lastInitializedUserId && activeSessionInitPromise) {
-      return activeSessionInitPromise;
-    }
-    if (user.id === lastInitializedUserId && !activeSessionInitPromise && previousUserId === user.id) {
-      return;
-    }
     lastInitializedUserId = user.id;
 
     if ($('loginScreen')) $('loginScreen').hidden = true;
@@ -4615,7 +4529,7 @@ async function setSession(session) {
           fetchAdminNotifications()
         ]);
 
-        if (currentAuthToken !== authSessionCounter) return;
+        if (currentAuthToken !== authSessionCounter || user?.id !== lastInitializedUserId) return;
 
         initNotificationsState(user.id);
         updateNotificationsUI();
@@ -4624,12 +4538,12 @@ async function setSession(session) {
         const prefetchedLp = lpResult.status === 'fulfilled' ? lpResult.value : null;
         const prefetchedFb = feedbackResult.status === 'fulfilled' ? feedbackResult.value : null;
         await loadAndRestoreUserProgress(user.id, prefetchedLp, prefetchedFb);
-        if (currentAuthToken !== authSessionCounter) return;
+        if (currentAuthToken !== authSessionCounter || user?.id !== lastInitializedUserId) return;
 
         // Step 3: Username setup reusing already-resolved profile to eliminate duplicate queries
         const profile = accessResult.status === 'fulfilled' ? accessResult.value?.profile : null;
         await checkAndEnforceUsername(user.id, user.email, profile);
-        if (currentAuthToken !== authSessionCounter) return;
+        if (currentAuthToken !== authSessionCounter || user?.id !== lastInitializedUserId) return;
 
         // Step 4: Coordinated dashboard render with authoritative state
         renderAuth();
@@ -4769,9 +4683,11 @@ async function initAuth() {
       history.replaceState(null,'',location.pathname+location.search);
     }
     let authEventSeen=false;
-    client.auth.onAuthStateChange(async (_event,session)=>{
-      authEventSeen=true;
-      await setSession(session);
+    client.auth.onAuthStateChange((_event, session) => {
+      authEventSeen = true;
+      setTimeout(() => {
+        setSession(session).catch(err => console.error('setSession error in onAuthStateChange:', err));
+      }, 0);
     });
     const {data:auth,error}=await client.auth.getSession();
     if(error)throw error;
