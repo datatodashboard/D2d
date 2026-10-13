@@ -78,3 +78,76 @@ export function renderSchemaCards(schemaText) {
       '</div>';
   }).join('');
 }
+
+/**
+ * Prepares a complete SQL practice package containing:
+ * 1. The scenario's CREATE TABLE schema statements
+ * 2. The scenario's INSERT statements for sample data
+ * 3. The correct reference SQL query answer for that specific question
+ * 4. Clear SQL comments separating the schema, sample data, and reference answer
+ */
+export function buildFiddlePracticePackage(scenario, asset) {
+  if (!scenario || !asset) return '';
+
+  const domain = scenario.domain || '';
+  const level = scenario.level || '';
+  const questionText = scenario.question || '';
+  let referenceSql = (scenario.sql || '').trim();
+
+  // If referenceSql is missing on the scenario object, check variants
+  if (!referenceSql && scenario.variants && scenario.variants.length > 0) {
+    referenceSql = (scenario.variants[0].sql || '').trim();
+  }
+
+  const schemaRaw = String(asset.schema || '').trim();
+  const sampleRaw = String(asset.sample || '').trim();
+
+  // Format schema statements with clean double-line breaks between tables
+  const formattedSchema = schemaRaw
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => s + ';')
+    .join('\n\n');
+
+  // Format sample data statements with clean double-line breaks between tables
+  const formattedSample = sampleRaw
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => s + ';')
+    .join('\n\n');
+
+  const formattedQuery = referenceSql
+    ? (referenceSql.endsWith(';') ? referenceSql : referenceSql + ';')
+    : '-- No reference query available for this scenario.';
+
+  const packageLines = [
+    '-- ====================================================================',
+    '-- CRACK SQL PRACTICE PACKAGE',
+    `-- Scenario: ${scenario.id || 'N/A'}`,
+    `-- Domain: ${domain} | Level: ${level}`,
+    `-- Question: ${questionText}`,
+    '-- Database Engine: PostgreSQL',
+    '-- ====================================================================',
+    '',
+    '-- --------------------------------------------------------------------',
+    '-- 1. TABLE SCHEMA (CREATE TABLE STATEMENTS)',
+    '-- --------------------------------------------------------------------',
+    formattedSchema,
+    '',
+    '-- --------------------------------------------------------------------',
+    '-- 2. SAMPLE DATA (INSERT STATEMENTS)',
+    '-- --------------------------------------------------------------------',
+    formattedSample,
+    '',
+    '-- --------------------------------------------------------------------',
+    '-- 3. REFERENCE SQL QUERY (CORRECT ANSWER)',
+    `-- Question: ${questionText}`,
+    '-- --------------------------------------------------------------------',
+    formattedQuery,
+    ''
+  ];
+
+  return packageLines.join('\n');
+}

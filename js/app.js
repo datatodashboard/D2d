@@ -2,7 +2,7 @@ import {evaluateThinking, thinkingIsReady, thinkingText} from './thinking.js';
 import {EMPTY, readProgress, saveProgress, mergeProgress, sanitize, nextTimestamp, workFingerprint, stage, isCompleted, isAttempted, chooseNext, importLegacy, storageKey} from './progress.js';
 import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
-import {renderSchemaCards} from './schema.js';
+import {renderSchemaCards, buildFiddlePracticePackage} from './schema.js';
 import {escapeHtml, getOAuthRedirectUrl} from './util.js';
 import {SqlEngineManager, loadBrowserPGlite} from './sql-evaluator.js?v=4';
 import {initContest, renderContestCard, closeContestModal, getContestState} from './contest.js';
@@ -330,16 +330,57 @@ function updateGates() {
 }
 
 async function copySchemaAndOpenFiddle() {
-  if (!current || !data?.assets?.[current.domain]) return;
-  const asset = data.assets[current.domain];
-  const schema = (asset.schema || '').trim();
-  const sample = (asset.sample || '').trim();
-  const completeSetup = (schema + '\n\n' + sample).trim();
+  const confirmEl = $('fiddleCopyConfirmation');
+  if (!current) {
+    if (confirmEl) {
+      confirmEl.style.color = '#dc2626';
+      confirmEl.textContent = 'Please select a scenario first.';
+    }
+    return;
+  }
+
+  // Ensure full scenario data (including reference SQL and variants) is loaded
+  if (!current.sql || !current.variants) {
+    try {
+      const full = await ensureFullScenario(current);
+      if (full) current = full;
+    } catch (e) {
+      console.warn('ensureFullScenario notice:', e);
+    }
+  }
+
+  const domain = current.domain || selectedDomain || 'Banking';
+  const asset = data?.assets?.[domain];
+  if (!asset) {
+    if (confirmEl) {
+      confirmEl.style.color = '#dc2626';
+      confirmEl.textContent = 'Scenario database setup is unavailable. Please reload the exercise.';
+    }
+    return;
+  }
+
+  // Retrieve effective scenario variant and specific reference SQL answer
+  const effective = (typeof getEffectiveScenario === 'function'
+    ? getEffectiveScenario(current, user?.id || 'guest_user', state)
+    : null) || current;
+
+  // Fallback to scenario catalog if reference SQL is not yet loaded on current
+  if (!effective.sql && Array.isArray(scenarios)) {
+    const fromBank = scenarios.find(s => s.id === (effective.id || current.id));
+    if (fromBank) {
+      effective.sql = fromBank.sql;
+      if (!effective.sql && fromBank.variants?.[0]?.sql) {
+        effective.sql = fromBank.variants[0].sql;
+      }
+    }
+  }
+
+  const completePackage = buildFiddlePracticePackage(effective, asset);
 
   let copied = false;
   try {
     if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(completeSetup);
+      await navigator.clipboard.writeText(completePackage);
       copied = true;
     }
   } catch (err) {
@@ -349,23 +390,28 @@ async function copySchemaAndOpenFiddle() {
   if (!copied) {
     try {
       const textarea = document.createElement('textarea');
-      textarea.value = completeSetup;
+      textarea.value = completePackage;
       textarea.style.position = 'fixed';
       textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
       document.body.appendChild(textarea);
       textarea.focus();
       textarea.select();
-      document.execCommand('copy');
+      copied = document.execCommand('copy');
       document.body.removeChild(textarea);
-      copied = true;
     } catch (e) {
       console.warn('Fallback copy failed', e);
     }
   }
 
-  const confirmEl = $('fiddleCopyConfirmation');
   if (confirmEl) {
-    confirmEl.textContent = 'Schema and sample data copied. Paste it into DB Fiddle and write your SQL query.';
+    if (copied) {
+      confirmEl.style.color = '#166534';
+      confirmEl.textContent = '✓ Practice package copied to clipboard (Schema + Sample Data + Reference SQL). Paste into DB Fiddle to run.';
+    } else {
+      confirmEl.style.color = '#dc2626';
+      confirmEl.textContent = 'Could not copy to clipboard. Please check browser clipboard permissions.';
+    }
   }
 
   try {
@@ -5436,7 +5482,7 @@ Object.assign(window,{
   setDomainTrack,openOnboarding,closeOnboarding,toggleLandscapeMode,
   toggleProfileDropdown,closeProfileDropdown,openProfileModal,closeProfileModal,
   handleModalAuthAction,openMyProgress,handleProfileSignOut,openAdminPortal,
-  copySchemaAndOpenFiddle,isCompleted,isAttempted,
+  copySchemaAndOpenFiddle,buildFiddlePracticePackage,isCompleted,isAttempted,
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   saveFirstTimeUsername,validateUsernameField,closeUsernameModal,
   checkAdminStatus,retryUserAccessCheck,

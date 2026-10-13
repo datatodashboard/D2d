@@ -1,4 +1,4 @@
-const CACHE='crack-sql-verified-v13';
+const CACHE='crack-sql-verified-v14';
 const ROOT=new URL('./',self.location).href;
 const SHELL=['index.html','manifest.json','icon-512.png','icon-maskable-512.png','apple-touch-icon.png',
 'data/scenarios-metadata.json','data/scenarios.json','js/app.js','js/thinking.js','js/progress.js','js/cloud.js','js/schema.js','js/sql-evaluator.js','js/util.js',
