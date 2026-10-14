@@ -990,6 +990,7 @@ export function switchAdminTab(tab) {
   const isContests = tab === 'contests';
   const isNotifications = tab === 'notifications';
   const isFeedback = tab === 'feedback';
+  const isGmail = tab === 'gmail';
 
   if ($('learnersTabContent')) $('learnersTabContent').hidden = !isLearners;
   if ($('premiumTabContent')) $('premiumTabContent').hidden = !isPremium;
@@ -998,11 +999,12 @@ export function switchAdminTab(tab) {
   if ($('contestsTabContent')) $('contestsTabContent').hidden = !isContests;
   if ($('notificationsTabContent')) $('notificationsTabContent').hidden = !isNotifications;
   if ($('feedbackTabContent')) $('feedbackTabContent').hidden = !isFeedback;
+  if ($('gmailTabContent')) $('gmailTabContent').hidden = !isGmail;
 
   if ($('tabLearnersBtn')) $('tabLearnersBtn').classList.toggle('active', isLearners);
   if ($('tabPremiumBtn')) $('tabPremiumBtn').classList.toggle('active', isPremium);
   if ($('tabPaymentsBtn')) $('tabPaymentsBtn').classList.toggle('active', isPayments);
-  if ($('tabToolsBtn')) $('tabToolsBtn').classList.toggle('active', isTools || isContests || isNotifications || isFeedback);
+  if ($('tabToolsBtn')) $('tabToolsBtn').classList.toggle('active', isTools || isContests || isNotifications || isFeedback || isGmail);
 
   if (tab === 'contests') {
     void loadContests();
@@ -1014,6 +1016,8 @@ export function switchAdminTab(tab) {
     void loadAdminNotifications();
   } else if (tab === 'feedback') {
     void loadAdminFeedback();
+  } else if (tab === 'gmail') {
+    void loadGmailLearners();
   }
 }
 
@@ -3154,6 +3158,434 @@ export function closeLearnerFeedbackModal() {
   if (modal) modal.style.display = 'none';
 }
 
+// ------------------------------------------------------------
+// ✉️ Gmail Sender Controller (Tools Tab)
+// ------------------------------------------------------------
+const DEFAULT_GMAIL_SENDER = 'datatodashboard2@gmail.com';
+let gmailLearnersList = [];
+let gmailFilteredLearners = [];
+let gmailSentCount = 0;
+let isSendingGmail = false;
+
+export async function loadGmailLearners() {
+  const tbody = $('gmailLearnersTableBody');
+  if (tbody && gmailLearnersList.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">Loading registered learners from Supabase…</td></tr>';
+  }
+
+  // Ensure learnersData is loaded
+  if (!learnersData || learnersData.length === 0) {
+    if (typeof loadLearners === 'function') {
+      try {
+        await loadLearners();
+      } catch (err) {
+        console.warn('loadLearners notice:', err);
+      }
+    }
+  }
+
+  // If still empty and Supabase client is available, fetch profiles directly
+  if ((!learnersData || learnersData.length === 0) && client) {
+    try {
+      const { data: profs, error: pErr } = await client
+        .from('profiles')
+        .select('id, username, email, is_admin, paid_unlocked, created_at, last_active')
+        .order('created_at', { ascending: false });
+
+      if (!pErr && Array.isArray(profs)) {
+        gmailLearnersList = profs.map(p => ({
+          id: p.id,
+          username: p.username ? String(p.username).trim() : null,
+          email: p.email || null,
+          displayName: p.username ? `@${p.username}` : (p.email || 'Anonymous Learner'),
+          isAdmin: p.is_admin === true,
+          paidUnlocked: p.paid_unlocked === true,
+          solved: 0,
+          lastActivity: p.last_active || p.created_at || null
+        }));
+      }
+    } catch (e) {
+      console.warn('Direct profiles fetch error:', e);
+    }
+  } else {
+    gmailLearnersList = Array.isArray(learnersData) ? [...learnersData] : [];
+  }
+
+  // Sort learners: those with valid emails first, then by solved/last active
+  gmailLearnersList.sort((a, b) => {
+    const aHasEmail = Boolean(a.email && a.email !== '—' && a.email.includes('@'));
+    const bHasEmail = Boolean(b.email && b.email !== '—' && b.email.includes('@'));
+    if (aHasEmail !== bHasEmail) return bHasEmail ? 1 : -1;
+    return (b.solved || 0) - (a.solved || 0);
+  });
+
+  const validEmailCount = gmailLearnersList.filter(l => l.email && l.email !== '—' && l.email.includes('@')).length;
+  if ($('statGmailTotalLearners')) $('statGmailTotalLearners').textContent = String(gmailLearnersList.length);
+  if ($('statGmailWithEmail')) $('statGmailWithEmail').textContent = String(validEmailCount);
+  if ($('statGmailSentToday')) $('statGmailSentToday').textContent = String(gmailSentCount);
+  if ($('statGmailSenderAccount')) $('statGmailSenderAccount').textContent = currentUser?.email || DEFAULT_GMAIL_SENDER;
+
+  filterGmailLearners();
+}
+
+export function filterGmailLearners() {
+  const query = $('gmailLearnerSearch')?.value?.trim().toLowerCase() || '';
+  const filterType = $('gmailEmailFilter')?.value || 'HAS_EMAIL';
+
+  gmailFilteredLearners = gmailLearnersList.filter(l => {
+    const hasEmail = Boolean(l.email && l.email !== '—' && l.email.includes('@'));
+    if (filterType === 'HAS_EMAIL' && !hasEmail) return false;
+    if (filterType === 'PREMIUM' && !l.paidUnlocked) return false;
+
+    if (!query) return true;
+    const uMatch = l.username && l.username.toLowerCase().includes(query);
+    const eMatch = l.email && l.email.toLowerCase().includes(query);
+    const dMatch = l.displayName && l.displayName.toLowerCase().includes(query);
+    return Boolean(uMatch || eMatch || dMatch);
+  });
+
+  renderGmailLearnersTable();
+}
+
+function renderGmailLearnersTable() {
+  const tbody = $('gmailLearnersTableBody');
+  if (!tbody) return;
+
+  if (gmailFilteredLearners.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">No matching learners found. Try adjusting your search query or filter.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = gmailFilteredLearners.map((l, idx) => {
+    const hasValidEmail = Boolean(l.email && l.email !== '—' && l.email.includes('@'));
+    const emailDisplay = hasValidEmail
+      ? `<code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:0.84rem;color:#0f172a;">${escapeHtml(l.email)}</code>`
+      : '<span style="color:var(--muted);font-style:italic;">No email on record</span>';
+
+    const usernameDisplay = l.username
+      ? `<strong>@${escapeHtml(l.username)}</strong>`
+      : '<span style="color:var(--muted);font-size:0.85rem;">—</span>';
+
+    let statusBadge = '<span class="badge" style="background:#f1f5f9;color:#64748b;">Free</span>';
+    if (l.isAdmin) {
+      statusBadge = '<span class="badge admin">Admin</span>';
+    } else if (l.paidUnlocked) {
+      statusBadge = '<span class="badge pass">⭐ Premium</span>';
+    }
+
+    const lastActiveStr = l.lastActivity
+      ? new Date(l.lastActivity).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+      : '—';
+
+    const actionBtn = hasValidEmail
+      ? `<button class="action primary sm" onclick="window.openGmailComposer('${escapeHtml(l.email)}', '${escapeHtml(l.username || '')}')" style="font-weight:700;">✉️ Send Mail</button>`
+      : `<button class="action secondary sm" disabled title="No registered email address on file" style="opacity:0.45;cursor:not-allowed;">No Email</button>`;
+
+    return `
+      <tr>
+        <td class="num">${idx + 1}</td>
+        <td>${usernameDisplay}</td>
+        <td>${emailDisplay}</td>
+        <td>${statusBadge}</td>
+        <td><strong style="color:var(--primary);">${l.solved || 0}</strong></td>
+        <td style="font-size:0.82rem;color:var(--muted);">${escapeHtml(lastActiveStr)}</td>
+        <td style="text-align:right;">${actionBtn}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+export function openGmailComposer(toEmail, username = '') {
+  const modal = $('gmailComposerModal');
+  if (!modal) return;
+
+  const sender = currentUser?.email || DEFAULT_GMAIL_SENDER;
+  if ($('gmailComposerFrom')) $('gmailComposerFrom').value = sender;
+  if ($('gmailComposerTo')) $('gmailComposerTo').value = toEmail || '';
+
+  const badge = $('gmailRecipientUsernameBadge');
+  if (badge) {
+    if (username) {
+      badge.textContent = `@${username}`;
+      badge.style.display = 'inline-block';
+      badge.className = 'badge';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  if ($('gmailComposerSubject')) $('gmailComposerSubject').value = '';
+  if ($('gmailComposerMessage')) $('gmailComposerMessage').value = '';
+
+  const notice = $('gmailComposerNotice');
+  if (notice) notice.style.display = 'none';
+
+  const btnSend = $('btnSendGmail');
+  if (btnSend) {
+    btnSend.disabled = false;
+    btnSend.textContent = '✉️ Send Email';
+  }
+  const spinner = $('gmailSendingSpinner');
+  if (spinner) spinner.style.display = 'none';
+
+  modal.style.display = 'flex';
+}
+
+export function openTestGmailComposer() {
+  const sender = currentUser?.email || DEFAULT_GMAIL_SENDER;
+  openGmailComposer(sender, 'Admin Self-Test');
+
+  if ($('gmailComposerSubject')) {
+    $('gmailComposerSubject').value = '[Verification Test] Crack SQL Admin Gmail Integration';
+  }
+  if ($('gmailComposerMessage')) {
+    $('gmailComposerMessage').value = `Hello,\n\nThis is a test verification email from the Crack SQL Admin Portal sent via the authorized Data2Dashboard Gmail API to confirm backend email delivery.\n\nFrom: ${sender}\nRecipient: ${sender}\nTimestamp: ${new Date().toLocaleString()}`;
+  }
+
+  const notice = $('gmailComposerNotice');
+  if (notice) {
+    notice.style.display = 'block';
+    notice.style.background = '#eff6ff';
+    notice.style.color = '#1e40af';
+    notice.style.border = '1px solid #bfdbfe';
+    notice.innerHTML = '<strong>Self-Test Mode:</strong> Send this email to your own address to verify that Google OAuth and the Gmail API are functioning properly before emailing learners.';
+  }
+}
+
+export function closeGmailComposer() {
+  const modal = $('gmailComposerModal');
+  if (modal) modal.style.display = 'none';
+}
+
+export async function checkGmailBackendStatus() {
+  const banner = $('gmailConfigBanner');
+  if (!banner) return;
+
+  banner.style.display = 'block';
+  banner.style.background = '#f8fafc';
+  banner.style.color = 'var(--muted)';
+  banner.style.border = '1px solid var(--line)';
+  banner.innerHTML = '🔍 Checking Gmail API backend status…';
+
+  let data = null;
+  let errorMsg = null;
+
+  try {
+    if (client && client.functions) {
+      const edgeRes = await client.functions.invoke('send-gmail', {
+        body: { action: 'status' }
+      });
+      if (edgeRes.data) data = edgeRes.data;
+      else if (edgeRes.error) errorMsg = edgeRes.error.message;
+    }
+  } catch (e) {
+    errorMsg = e.message;
+  }
+
+  if (!data) {
+    try {
+      const { data: sessionData } = await client?.auth?.getSession?.() || {};
+      const token = sessionData?.session?.access_token || '';
+      const fallbackRes = await fetch('/api/admin/send-gmail', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: 'status' })
+      });
+      if (fallbackRes.ok) data = await fallbackRes.json();
+    } catch (fbErr) {
+      console.warn('Fallback status check warning:', fbErr);
+    }
+  }
+
+  if (data && data.configured) {
+    banner.style.background = '#dcfce7';
+    banner.style.color = '#166534';
+    banner.style.border = '1px solid #86efac';
+    banner.innerHTML = `<strong>✓ Gmail API Configured &amp; Active</strong><div style="font-size:0.83rem;margin-top:4px;">Connected to authorized sender <code>${escapeHtml(data.senderEmail || DEFAULT_GMAIL_SENDER)}</code> via Supabase Edge Function. Ready to deliver messages to learners.</div>`;
+  } else {
+    banner.style.background = '#fffbeb';
+    banner.style.color = '#92400e';
+    banner.style.border = '1px solid #fcd34d';
+    const missing = data?.missingSecrets?.length ? data.missingSecrets.join(', ') : 'GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN';
+    const steps = (data?.setupSteps || [
+      '1. In Google Cloud Console, enable Gmail API and configure an OAuth 2.0 Web Client ID.',
+      '2. Authorize scope "https://www.googleapis.com/auth/gmail.send".',
+      '3. Obtain an authorized OAuth refresh token for datatodashboard2@gmail.com.',
+      '4. Set secrets in Supabase Edge Functions: supabase secrets set GMAIL_CLIENT_ID="..." GMAIL_CLIENT_SECRET="..." GMAIL_REFRESH_TOKEN="..." GMAIL_SENDER_EMAIL="datatodashboard2@gmail.com"',
+      '5. Test delivery with your own email first.'
+    ]).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+
+    banner.innerHTML = `
+      <div style="font-weight:700;margin-bottom:4px;">⚠️ Gmail API Configuration Notice</div>
+      <div style="font-size:0.84rem;margin-bottom:8px;">
+        To deliver live emails from <code>${escapeHtml(data?.senderEmail || DEFAULT_GMAIL_SENDER)}</code>, the server requires OAuth credentials.
+        <br>Missing secrets: <strong>${escapeHtml(missing)}</strong>
+      </div>
+      <details style="font-size:0.82rem;cursor:pointer;">
+        <summary style="font-weight:700;color:#b45309;">View Supabase Edge Function Setup Steps</summary>
+        <ol style="margin:8px 0 4px 18px;line-height:1.6;color:#78350f;">${steps}</ol>
+      </details>
+    `;
+  }
+}
+
+export async function sendGmailMessage() {
+  if (isSendingGmail) return;
+
+  const to = $('gmailComposerTo')?.value?.trim();
+  const subject = $('gmailComposerSubject')?.value?.trim();
+  const message = $('gmailComposerMessage')?.value?.trim();
+  const notice = $('gmailComposerNotice');
+  const btnSend = $('btnSendGmail');
+  const spinner = $('gmailSendingSpinner');
+
+  if (notice) notice.style.display = 'none';
+
+  if (!to || !to.includes('@')) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fee2e2';
+      notice.style.color = '#991b1b';
+      notice.style.border = '1px solid #fca5a5';
+      notice.textContent = 'Recipient email address is invalid or missing.';
+    }
+    return;
+  }
+
+  if (!subject) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fee2e2';
+      notice.style.color = '#991b1b';
+      notice.style.border = '1px solid #fca5a5';
+      notice.textContent = 'Please enter an email subject line.';
+    }
+    $('gmailComposerSubject')?.focus();
+    return;
+  }
+
+  if (!message) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fee2e2';
+      notice.style.color = '#991b1b';
+      notice.style.border = '1px solid #fca5a5';
+      notice.textContent = 'Please enter email message content.';
+    }
+    $('gmailComposerMessage')?.focus();
+    return;
+  }
+
+  // Require explicit review & confirmation before sending
+  const confirmed = window.confirm(`Review and Confirm Email:\n\nFrom: ${currentUser?.email || DEFAULT_GMAIL_SENDER}\nTo: ${to}\nSubject: ${subject}\n\nAre you sure you want to send this email now?`);
+  if (!confirmed) return;
+
+  isSendingGmail = true;
+  if (btnSend) {
+    btnSend.disabled = true;
+    btnSend.textContent = 'Sending…';
+  }
+  if (spinner) spinner.style.display = 'inline-block';
+
+  try {
+    let result = null;
+    let invokeError = null;
+
+    // 1. Send via Supabase Edge Function
+    if (client && client.functions) {
+      try {
+        const edgeRes = await client.functions.invoke('send-gmail', {
+          body: { to, subject, message }
+        });
+        if (edgeRes.data) {
+          result = edgeRes.data;
+        } else if (edgeRes.error) {
+          invokeError = edgeRes.error;
+        }
+      } catch (invokeErr) {
+        invokeError = invokeErr;
+      }
+    }
+
+    // 2. Fallback to local server proxy route if edge function is unreachable locally
+    if (!result || invokeError) {
+      try {
+        const { data: sessionData } = await client?.auth?.getSession?.() || {};
+        const token = sessionData?.session?.access_token || '';
+        const fallbackRes = await fetch('/api/admin/send-gmail', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ to, subject, message })
+        });
+        if (fallbackRes.ok || fallbackRes.status === 400 || fallbackRes.status === 502) {
+          result = await fallbackRes.json();
+        }
+      } catch (fbErr) {
+        console.warn('Fallback send attempt notice:', fbErr);
+      }
+    }
+
+    if (result && result.success) {
+      if (notice) {
+        notice.style.display = 'block';
+        notice.style.background = '#dcfce7';
+        notice.style.color = '#166534';
+        notice.style.border = '1px solid #86efac';
+        notice.innerHTML = `
+          <div style="font-weight:700;font-size:0.95rem;margin-bottom:4px;">✓ Email Successfully Delivered!</div>
+          <div style="font-size:0.83rem;">
+            Recipient: <code>${escapeHtml(result.recipient || to)}</code><br>
+            Message ID: <code>${escapeHtml(result.messageId || 'SENT')}</code><br>
+            Sent at: ${new Date().toLocaleTimeString()}
+          </div>
+        `;
+      }
+      gmailSentCount++;
+      if ($('statGmailSentToday')) $('statGmailSentToday').textContent = String(gmailSentCount);
+      if (btnSend) btnSend.textContent = '✓ Sent';
+    } else {
+      if (notice) {
+        notice.style.display = 'block';
+        notice.style.background = '#fee2e2';
+        notice.style.color = '#991b1b';
+        notice.style.border = '1px solid #fca5a5';
+
+        if (result?.code === 'GMAIL_CONFIG_MISSING' || result?.setupSteps) {
+          const steps = (result.setupSteps || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+          notice.innerHTML = `
+            <div style="font-weight:700;margin-bottom:4px;">⚠️ Gmail API Configuration Required</div>
+            <div style="font-size:0.83rem;margin-bottom:6px;">${escapeHtml(result.error || 'Server secrets missing.')}</div>
+            <div style="font-size:0.82rem;font-weight:700;margin-top:6px;">Required Setup:</div>
+            <ol style="margin:4px 0 0 16px;font-size:0.8rem;line-height:1.5;">${steps}</ol>
+          `;
+        } else {
+          notice.innerHTML = `<strong>Error sending email:</strong> ${escapeHtml(result?.error || invokeError?.message || 'Unable to deliver email.')}`;
+        }
+      }
+      if (btnSend) btnSend.textContent = 'Retry ✉️';
+    }
+  } catch (err) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.background = '#fee2e2';
+      notice.style.color = '#991b1b';
+      notice.style.border = '1px solid #fca5a5';
+      notice.textContent = `Unexpected error: ${err.message}`;
+    }
+    if (btnSend) btnSend.textContent = 'Retry ✉️';
+  } finally {
+    isSendingGmail = false;
+    if (btnSend) btnSend.disabled = false;
+    if (spinner) spinner.style.display = 'none';
+  }
+}
+
 // Expose on window for inline handlers
 Object.assign(window, {
   switchAdminTab,
@@ -3206,6 +3638,13 @@ Object.assign(window, {
   filterFeedbackTable,
   openLearnerFeedbackHistory,
   closeLearnerFeedbackModal,
-  toggleAdvancedFilters
+  toggleAdvancedFilters,
+  loadGmailLearners,
+  filterGmailLearners,
+  openGmailComposer,
+  openTestGmailComposer,
+  closeGmailComposer,
+  checkGmailBackendStatus,
+  sendGmailMessage
 });
 

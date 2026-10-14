@@ -1571,13 +1571,10 @@ function onLockedLevelClick(domain, level) {
 }
 
 function renderDomainAndLevelPickers() {
-  selectedDomain = selectedDomain || 'Banking';
-  selectedLevel = selectedLevel || 'Beginner';
-
   function renderDomainCard(domain) {
     const meta = DOMAIN_METAS[domain] || { icon: '📁', note: `${domain} (60)` };
     const completed = isDomainCompleted(domain, scenarios, state);
-    const isActive = selectedDomain === domain;
+    const isActive = Boolean(selectedDomain && selectedDomain === domain);
 
     if (completed) {
       return `
@@ -1615,7 +1612,7 @@ function renderDomainAndLevelPickers() {
   const levelsContainer = $('levelsPicker') || document.querySelector('.levels');
   if (levelsContainer) {
     levelsContainer.innerHTML = ORDERED_LEVELS.map(lvl => {
-      const isCurrent = selectedLevel === lvl;
+      const isCurrent = Boolean(selectedLevel && selectedLevel === lvl);
       return `<div role="button" tabindex="0" class="level ${isCurrent ? 'active' : ''}" onclick="selectLevel('${lvl}', this)">${lvl}</div>`;
     }).join('');
   }
@@ -1667,11 +1664,12 @@ async function loadScenario() {
   if (activeSessionInitPromise) {
     await activeSessionInitPromise;
   }
-  selectedDomain = selectedDomain || 'Banking';
-  if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
-    selectedDomain = 'Banking';
+  if (!selectedDomain || !selectedLevel) {
+    return;
   }
-  selectedLevel = selectedLevel || 'Beginner';
+  if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
+    return;
+  }
   if (!isLevelUnlocked(selectedDomain, selectedLevel, scenarios, state)) {
     selectedLevel = getFirstUnlockedLevel(selectedDomain, scenarios, state);
   }
@@ -1707,23 +1705,31 @@ function selectDomain(domain, el) {
     return;
   }
   selectedDomain = domain;
-  if (!isLevelUnlocked(domain, selectedLevel, scenarios, state)) {
+  if (selectedLevel && !isLevelUnlocked(domain, selectedLevel, scenarios, state)) {
     selectedLevel = getFirstUnlockedLevel(domain, scenarios, state);
   }
   renderDomainAndLevelPickers();
   renderScenarioCatalog();
-  loadScenario();
+  if (selectedDomain && selectedLevel) {
+    void loadScenario().then(() => {
+      showScreen('practice');
+    });
+  }
 }
 
 function selectLevel(level, el) {
-  if (!isLevelUnlocked(selectedDomain, level, scenarios, state)) {
+  if (selectedDomain && !isLevelUnlocked(selectedDomain, level, scenarios, state)) {
     onLockedLevelClick(selectedDomain, level);
     return;
   }
   selectedLevel = level;
   renderDomainAndLevelPickers();
   renderScenarioCatalog();
-  loadScenario();
+  if (selectedDomain && selectedLevel) {
+    void loadScenario().then(() => {
+      showScreen('practice');
+    });
+  }
 }
 function evaluatePlan() {
   if(!current) return;
@@ -3302,9 +3308,12 @@ async function showScreen(name) {
       await activeSessionInitPromise;
     }
     if (!current || isCompleted(current, state.entries[current?.id])) {
-      selectedDomain = selectedDomain || 'Banking';
-      selectedLevel = selectedLevel || 'Beginner';
-      await loadScenario();
+      if (selectedDomain && selectedLevel) {
+        await loadScenario();
+      } else {
+        showScreen('home');
+        return;
+      }
     } else {
       renderScenario();
     }
@@ -4592,27 +4601,13 @@ async function setSession(session) {
         if (currentAuthToken !== authSessionCounter || user?.id !== lastInitializedUserId) return;
 
         // Step 4: Coordinated dashboard render with authoritative state
+        selectedDomain = null;
+        selectedLevel = null;
+        current = null;
         renderAuth();
         updateProgress();
         renderDomainAndLevelPickers();
         renderScenarioCatalog();
-
-        // Step 4b: Hydration complete - select the next unsolved scenario so practice screen resumes properly
-        selectedDomain = selectedDomain || 'Banking';
-        if (!isDomainUnlocked(selectedDomain, scenarios, state)) {
-          selectedDomain = 'Banking';
-        }
-        selectedLevel = selectedLevel || 'Beginner';
-        if (!isLevelUnlocked(selectedDomain, selectedLevel, scenarios, state)) {
-          selectedLevel = getFirstUnlockedLevel(selectedDomain, scenarios, state);
-        }
-        const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
-        const nextUnsolved = chooseNext(pool, state, null);
-        if (nextUnsolved) {
-          current = await ensureFullScenario(nextUnsolved);
-        } else if (pool.length > 0) {
-          current = await ensureFullScenario(pool[pool.length - 1]);
-        }
 
         // Step 5: Initialize contest ONCE with authoritative completion count and admin status
         void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
@@ -4649,6 +4644,8 @@ async function setSession(session) {
     cloud.changeSession();
     state = EMPTY();
     current = null;
+    selectedDomain = null;
+    selectedLevel = null;
     renderAuth();
     void initContest(null, null, 0, false);
   }
@@ -5587,8 +5584,9 @@ try {
       }
     });
   }
-  selectedDomain = selectedDomain || 'Banking';
-  selectedLevel = selectedLevel || getFirstUnlockedLevel(selectedDomain, scenarios, state);
+  selectedDomain = null;
+  selectedLevel = null;
+  current = null;
   updateProgress();
   renderDomainAndLevelPickers();
   renderScenarioCatalog();

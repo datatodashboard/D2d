@@ -774,6 +774,21 @@ textarea.form-control{min-height:90px;}
             <span>→</span>
           </div>
         </div>
+
+        <!-- Card 4: Gmail Sender -->
+        <div class="panel" style="cursor:pointer;transition:transform 0.15s ease,box-shadow 0.15s ease;" onclick="window.switchAdminTab('gmail')" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 28px rgba(15,23,42,0.06)';" onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 20px rgba(15,23,42,0.03)';">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+            <div style="width:40px;height:40px;background:var(--soft);color:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:800;">✉️</div>
+            <div>
+              <h3 style="margin:0;font-size:1.05rem;font-weight:800;">Gmail Sender</h3>
+              <div style="font-size:0.82rem;color:var(--muted);">Send direct emails to registered learners via authorized Gmail account</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;font-weight:700;color:var(--primary);border-top:1px solid var(--line);padding-top:12px;margin-top:12px;">
+            <span>Open Gmail Sender</span>
+            <span>→</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -939,6 +954,67 @@ textarea.form-control{min-height:90px;}
             <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">Loading learner feedback…</td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Tab 7: ✉️ Gmail Sender -->
+    <div id="gmailTabContent" hidden>
+      <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <button class="action secondary sm" onclick="window.switchAdminTab('tools')">← Back to Tools</button>
+        <div style="display:flex;gap:8px;">
+          <button class="action secondary sm" onclick="window.checkGmailBackendStatus()">Check Gmail Status 🔍</button>
+          <button class="action primary sm" onclick="window.openTestGmailComposer()">✉️ Send Test Email to Myself</button>
+          <button class="action secondary sm" onclick="window.loadGmailLearners()">Refresh Learners 🔄</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <h2 style="margin:0 0 6px;font-size:1.25rem;">✉️ Gmail Sender</h2>
+        <div style="color:var(--muted);font-size:0.85rem;">
+          Send official communications directly to registered learners from your authorized Data2Dashboard Gmail account (<code>datatodashboard2@gmail.com</code>).
+        </div>
+      </div>
+
+      <!-- Backend configuration banner (shown if backend secrets are missing or checked) -->
+      <div id="gmailConfigBanner" style="display:none;margin-bottom:16px;"></div>
+
+      <div class="stats">
+        <div class="stat"><div class="num" id="statGmailTotalLearners">0</div><div class="label">Total Registered</div></div>
+        <div class="stat"><div class="num" id="statGmailWithEmail" style="color:var(--good);">0</div><div class="label">With Valid Email</div></div>
+        <div class="stat"><div class="num" id="statGmailSentToday" style="color:var(--primary);">0</div><div class="label">Sent in Session</div></div>
+        <div class="stat"><div class="num" id="statGmailSenderAccount" style="font-size:0.95rem;word-break:break-all;color:var(--ink);">datatodashboard2@gmail.com</div><div class="label">From Account</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="controls" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+          <input type="text" id="gmailLearnerSearch" placeholder="Search by username or email…" oninput="window.filterGmailLearners()" style="flex:1;min-width:240px;" />
+          <select id="gmailEmailFilter" onchange="window.filterGmailLearners()" style="width:auto;">
+            <option value="ALL">All Learners</option>
+            <option value="HAS_EMAIL" selected>Has Email Address</option>
+            <option value="PREMIUM">Premium Customers Only</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="num" style="width:40px;">#</th>
+                <th>Learner Username</th>
+                <th>Registered Email</th>
+                <th>Account Status</th>
+                <th>Questions Solved</th>
+                <th>Last Active</th>
+                <th style="text-align:right;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="gmailLearnersTableBody">
+              <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">Loading registered learners…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -1276,6 +1352,47 @@ textarea.form-control{min-height:90px;}
     <div class="modal-footer">
       <button class="action secondary" onclick="window.closeNotificationEditor()">Cancel</button>
       <button class="action primary" id="btnSaveAdminNotif" onclick="window.saveAdminNotification()">Broadcast Notification 📢</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 8: Gmail Composer -->
+<div id="gmailComposerModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box" style="max-width:640px;">
+    <div class="modal-header">
+      <h3 id="gmailComposerTitle">✉️ Compose Email via Gmail API</h3>
+      <button class="modal-close" onclick="window.closeGmailComposer()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="font-size:0.82rem;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">From (Authorized Sender)</label>
+        <input type="text" id="gmailComposerFrom" class="form-control" value="datatodashboard2@gmail.com" readonly style="background:#f8fafc;font-family:monospace;font-size:0.85rem;" />
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <label style="font-size:0.82rem;font-weight:700;color:var(--muted);">To (Registered Learner Email)</label>
+          <span id="gmailRecipientUsernameBadge" class="badge" style="display:none;"></span>
+        </div>
+        <input type="email" id="gmailComposerTo" class="form-control" readonly style="background:#f8fafc;font-family:monospace;font-size:0.88rem;" />
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="font-size:0.82rem;font-weight:700;color:var(--ink);display:block;margin-bottom:4px;">Subject *</label>
+        <input type="text" id="gmailComposerSubject" class="form-control" placeholder="e.g. Update regarding your Crack SQL training" />
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="font-size:0.82rem;font-weight:700;color:var(--ink);display:block;margin-bottom:4px;">Message *</label>
+        <textarea id="gmailComposerMessage" class="form-control" rows="8" placeholder="Type your message to this learner..."></textarea>
+      </div>
+
+      <!-- Live notice / status area in modal -->
+      <div id="gmailComposerNotice" style="display:none;padding:12px 14px;border-radius:8px;font-size:0.85rem;margin-top:12px;line-height:1.5;"></div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+      <button class="action secondary" onclick="window.closeGmailComposer()" id="btnCancelGmail">Cancel</button>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span id="gmailSendingSpinner" style="display:none;font-size:0.85rem;color:var(--muted);font-weight:600;">⏳ Sending via Gmail API…</span>
+        <button class="action primary" id="btnSendGmail" onclick="window.sendGmailMessage()">✉️ Send Email</button>
+      </div>
     </div>
   </div>
 </div>

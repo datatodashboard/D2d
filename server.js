@@ -97,6 +97,147 @@ app.post('/api/progress/complete', (req, res) => {
   });
 });
 
+// Trusted Backend Gmail Sender Route
+app.post('/api/admin/send-gmail', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Missing authorization header', code: 'UNAUTHORIZED' });
+  }
+
+  const { action, to, subject, message } = req.body || {};
+
+  // Check secrets from environment (never in client)
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
+  const senderEmail = process.env.GMAIL_SENDER_EMAIL || 'datatodashboard2@gmail.com';
+
+  const missingSecrets = [];
+  if (!clientId || clientId.trim() === '' || clientId.includes('placeholder')) missingSecrets.push('GMAIL_CLIENT_ID');
+  if (!clientSecret || clientSecret.trim() === '' || clientSecret.includes('placeholder')) missingSecrets.push('GMAIL_CLIENT_SECRET');
+  if (!refreshToken || refreshToken.trim() === '' || refreshToken.includes('placeholder')) missingSecrets.push('GMAIL_REFRESH_TOKEN');
+
+  const setupSteps = [
+    '1. In Google Cloud Console, enable Gmail API and configure an OAuth 2.0 Web Client ID.',
+    '2. Authorize scope "https://www.googleapis.com/auth/gmail.send".',
+    '3. Generate an authorized OAuth refresh token for datatodashboard2@gmail.com.',
+    '4. Store credentials securely in environment secrets (e.g., GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN).',
+    '5. Test delivery with your own email before broadcasting to learners.'
+  ];
+
+  if (action === 'status') {
+    return res.json({
+      success: true,
+      configured: missingSecrets.length === 0,
+      senderEmail,
+      missingSecrets,
+      setupSteps: missingSecrets.length === 0 ? [] : setupSteps
+    });
+  }
+
+  if (missingSecrets.length > 0) {
+    return res.status(400).json({
+      success: false,
+      configured: false,
+      code: 'GMAIL_CONFIG_MISSING',
+      error: `Gmail API credentials not fully configured. Missing secrets: ${missingSecrets.join(', ')}.`,
+      missingSecrets,
+      setupSteps
+    });
+  }
+
+  if (!to || typeof to !== 'string' || !to.includes('@') || to.trim().length < 5) {
+    return res.status(400).json({ success: false, error: 'Invalid recipient email address.', code: 'INVALID_RECIPIENT' });
+  }
+
+  if (!subject || typeof subject !== 'string' || subject.trim().length === 0) {
+    return res.status(400).json({ success: false, error: 'Email subject is required.', code: 'INVALID_SUBJECT' });
+  }
+
+  if (!message || typeof message !== 'string' || message.trim().length === 0) {
+    return res.status(400).json({ success: false, error: 'Email message content is required.', code: 'INVALID_MESSAGE' });
+  }
+
+  try {
+    const tokenParams = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token'
+    });
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenParams.toString()
+    });
+
+    if (!tokenRes.ok) {
+      const tokenErr = await tokenRes.json().catch(() => ({}));
+      return res.status(502).json({
+        success: false,
+        error: `Failed to refresh Gmail OAuth access token: ${tokenErr.error_description || tokenErr.error || 'Invalid credentials'}`,
+        code: 'TOKEN_REFRESH_FAILED',
+        setupSteps
+      });
+    }
+
+    const tokenData = await tokenRes.json();
+    const accessToken = tokenData.access_token;
+
+    const utf8Subject = `=?utf-8?B?${Buffer.from(subject.trim()).toString('base64')}?=`;
+    const mimeLines = [
+      `From: "Crack SQL (Data2Dashboard)" <${senderEmail}>`,
+      `To: <${to.trim()}>`,
+      `Subject: ${utf8Subject}`,
+      `Date: ${new Date().toUTCString()}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset=UTF-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      Buffer.from(message.trim()).toString('base64')
+    ];
+
+    const rawMime = mimeLines.join('\r\n');
+    const rawSafeBase64 = Buffer.from(rawMime)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ raw: rawSafeBase64 })
+    });
+
+    if (!gmailRes.ok) {
+      const gmailErr = await gmailRes.json().catch(() => ({}));
+      return res.status(502).json({
+        success: false,
+        error: `Gmail API delivery rejected: ${gmailErr.error?.message || 'Unknown Gmail API error'}`,
+        code: 'GMAIL_API_ERROR',
+        details: gmailErr.error
+      });
+    }
+
+    const gmailData = await gmailRes.json();
+    return res.json({
+      success: true,
+      messageId: gmailData.id,
+      threadId: gmailData.threadId,
+      recipient: to.trim(),
+      sender: senderEmail,
+      sentAt: new Date().toISOString()
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message || 'Server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
 // Static assets options
 const staticOptions = {
   dotfiles: 'ignore',

@@ -180,20 +180,45 @@ h1 { margin:0; font-size:31px; letter-spacing:-.9px; }
 .icon { font-size:26px; margin-bottom:7px; }
 .pick-title { font-weight:900; }
 .pick-note { color:var(--muted); font-size:12px; margin-top:4px; }
-.levels { display:flex; gap:10px; flex-wrap:wrap; }
+.levels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
 .level {
-  background:var(--surface);
-  border:1px solid var(--line);
-  border-radius:999px;
-  padding:12px 15px;
-  font-weight:900;
-  font-size:13px;
-  cursor:pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 48px;
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 13px 10px;
+  font-weight: 800;
+  font-size: 14.5px;
+  color: var(--text, #0f172a);
+  cursor: pointer;
+  text-align: center;
+  box-sizing: border-box;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.level:hover:not(.locked):not(.active) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+.level:active {
+  transform: scale(0.985);
 }
 .level.active {
-  background:var(--primary);
-  color:white;
-  border-color:var(--primary);
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
 }
 .level.locked {
   background:#f1f5f9;
@@ -617,16 +642,16 @@ button, .pick, .level, .tab-btn, .sample-tab, .nav-item, .tool-btn, .ide-tool-bt
     margin-bottom: 4px;
   }
   .levels {
-    display: flex;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
     width: 100%;
   }
   .level {
-    flex: 1;
-    min-width: 0;
-    text-align: center;
-    padding: 10px 4px;
-    font-size: 12px;
+    min-height: 46px;
+    padding: 11px 6px;
+    font-size: 13.5px;
+    border-radius: 10px;
   }
   .card {
     padding: 14px 12px;
@@ -845,16 +870,17 @@ button, .pick, .level, .tab-btn, .sample-tab, .nav-item, .tool-btn, .ide-tool-bt
     margin-top: 2px;
   }
   .levels {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
     width: 100%;
   }
   .level {
-    width: 100%;
-    padding: 9px 8px;
-    font-size: 12px;
-    text-align: center;
+    min-height: 44px;
+    padding: 10px 4px;
+    font-size: 12.5px;
+    border-radius: 10px;
+    letter-spacing: -0.2px;
   }
   .meta {
     max-width: 110px;
