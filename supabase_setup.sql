@@ -3,11 +3,14 @@
 -- Run this in: Supabase Dashboard -> SQL Editor -> New query -> Run
 -- ============================================================
 
--- 1. Profiles Table with paid_unlocked, contest_eligible, completed_count, and username
+-- 1. Profiles Table with paid_unlocked, contest_eligible, completed_count, username, mobile_number, and whatsapp_consent
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
   username text unique,
   email text,
+  mobile_number text,
+  whatsapp_consent boolean default false,
+  whatsapp_consent_at timestamptz,
   is_admin boolean default false,
   paid_unlocked boolean default false,
   contest_eligible boolean default false,
@@ -20,6 +23,9 @@ create table if not exists public.profiles (
 alter table public.profiles
   add column if not exists username text,
   add column if not exists email text,
+  add column if not exists mobile_number text,
+  add column if not exists whatsapp_consent boolean default false,
+  add column if not exists whatsapp_consent_at timestamptz,
   add column if not exists is_admin boolean default false,
   add column if not exists paid_unlocked boolean default false,
   add column if not exists contest_eligible boolean default false,

@@ -304,16 +304,9 @@ h2 {
   line-height:1.2;
 }
 .problem {
-  color:#0f172a;
-  line-height:1.6;
-  font-size:15.5px;
-  font-weight:700;
-  background:#f8fafc;
-  border-left:4px solid var(--primary);
-  border-radius:10px;
-  padding:12px 16px;
-  margin-top:10px;
-  box-shadow:0 1px 3px rgba(15,23,42,0.05);
+  color:#334155;
+  line-height:1.55;
+  font-size:15px;
 }
 .tags { display:flex; gap:7px; flex-wrap:wrap; margin-top:12px; }
 .tag {
@@ -4275,70 +4268,172 @@ body.landscape-layout .practice-container {
   </div>
 </div>
 
-<!-- First-Time Username Setup Modal (Permanent Supabase Profile Handle) -->
-<div id="usernameSetupModal" class="modal-backdrop" hidden style="z-index: 100000; background: rgba(15,23,42,0.75); backdrop-filter: blur(4px);">
-  <div class="modal-dialog" style="max-width: 420px; box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.35); border-radius: 18px; border: 1.5px solid var(--line);">
-    <div class="modal-header" style="border-bottom: 1px solid var(--line); padding-bottom: 14px;">
+<!-- Complete Profile Setup Modal (Name, Mobile & WhatsApp Consent) -->
+<div id="profileSetupModal" class="modal-backdrop" hidden style="z-index: 100000; background: rgba(15,23,42,0.75); backdrop-filter: blur(4px);">
+  <div class="modal-dialog" style="max-width: 440px; box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.35); border-radius: 20px; border: 1.5px solid var(--line); padding: 22px 20px;">
+    <div class="modal-header" style="border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 14px;">
       <div>
-        <div style="font-weight: 800; font-size: 18px; color: var(--ink);">Create Username</div>
-        <div style="font-size: 12px; color: var(--muted);">One-time setup for your account</div>
+        <div style="font-weight: 800; font-size: 18px; color: var(--ink);" id="profileSetupModalTitle">Welcome to Crack SQL</div>
+        <div style="font-size: 12px; color: var(--muted);" id="profileSetupModalSubtitle">Complete your learner profile to continue</div>
       </div>
     </div>
     
-    <div style="padding: 16px 0 10px;">
-      <div style="margin-bottom: 14px;">
-        <label for="usernameInput" style="display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
-          Username
+    <div>
+      <!-- Account Gmail ID (Read-only retrieved from authenticated account) -->
+      <div style="background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; color: var(--muted); margin-bottom: 14px;">
+        <span style="font-weight: 700; color: var(--ink);">Gmail ID:</span> <span id="profileSetupGmailDisplay" style="color: var(--primary); font-weight: 600;">—</span>
+      </div>
+
+      <!-- Username / Full Name field (Shown when username is missing) -->
+      <div id="profileSetupUsernameWrapper" style="margin-bottom: 14px;">
+        <label for="profileSetupUsernameInput" style="display: block; font-size: 11.5px; font-weight: 700; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
+          Username / Full Name <span style="color: #dc2626;">*</span>
         </label>
         <input 
           type="text" 
-          id="usernameInput" 
+          id="profileSetupUsernameInput" 
           placeholder="e.g. Sundar" 
           maxlength="30"
           autocomplete="off"
           spellcheck="false"
-          style="width: 100%; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 15px; font-weight: 600; color: var(--ink); background: var(--surface); box-sizing: border-box; outline: none; transition: border-color 0.2s;"
-          oninput="this.value=this.value.replace(/[^A-Za-z]/g,''); if(window.validateUsernameField) window.validateUsernameField();"
-          onkeydown="if(event.key==='Enter') saveFirstTimeUsername();"
+          style="width: 100%; padding: 11px 13px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 14.5px; font-weight: 600; color: var(--ink); background: var(--surface); box-sizing: border-box; outline: none;"
+          oninput="this.value=this.value.replace(/[^A-Za-z]/g,''); if($('profileSetupError')) $('profileSetupError').style.display='none';"
         />
-        <div id="usernameInputHelp" style="font-size: 11.5px; color: var(--muted); margin-top: 6px;">
-          Only normal English letters (A-Z, a-z). No numbers, spaces, or symbols.
+        <div id="profileSetupUsernameHelp" style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+          Only normal English letters (A-Z, a-z).
         </div>
-        <div id="usernameInputError" style="display: none; font-size: 12px; color: #dc2626; font-weight: 600; margin-top: 6px;"></div>
       </div>
 
-      <div style="background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-size: 12px; color: var(--muted); margin-bottom: 16px; line-height: 1.5;">
-        🔒 Saved permanently to your account (<span id="usernameModalEmail" style="color:var(--ink);font-weight:600;"></span>). You will not be asked again on future logins.
+      <!-- Existing Username Read-Only Display (When Username already exists) -->
+      <div id="profileSetupUsernameStaticWrapper" hidden style="margin-bottom: 14px; background: #f1f5f9; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;">
+        <div style="font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;">Username / Name</div>
+        <div id="profileSetupUsernameStaticVal" style="font-size: 15px; font-weight: 800; color: var(--ink); margin-top: 2px;"></div>
       </div>
+
+      <!-- Mobile Number Field -->
+      <div style="margin-bottom: 14px;">
+        <label for="profileSetupMobileInput" style="display: block; font-size: 11.5px; font-weight: 700; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
+          Mobile Number <span style="color: #dc2626;">*</span>
+        </label>
+        <div style="display: flex; align-items: center; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden;">
+          <span style="padding: 11px 10px 11px 13px; font-size: 14px; font-weight: 700; color: var(--muted); background: #f8fafc; border-right: 1px solid var(--line); user-select: none;">
+            🇮🇳 +91
+          </span>
+          <input 
+            type="tel" 
+            id="profileSetupMobileInput" 
+            placeholder="10-digit mobile number" 
+            maxlength="15"
+            autocomplete="tel"
+            style="flex: 1; padding: 11px 12px; border: none; font-size: 14.5px; font-weight: 600; color: var(--ink); background: transparent; outline: none;"
+            oninput="if($('profileSetupError')) $('profileSetupError').style.display='none';"
+            onkeydown="if(event.key==='Enter') saveProfileContactDetails();"
+          />
+        </div>
+        <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+          Indian numbers (10 digits). Saved in +91 format.
+        </div>
+      </div>
+
+      <!-- WhatsApp Consent Checkbox (Optional, Unchecked by default) -->
+      <div style="margin-bottom: 16px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 11px 13px;">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0; font-weight: 600; font-size: 12.5px; color: #166534; line-height: 1.4;">
+          <input 
+            type="checkbox" 
+            id="profileSetupWhatsappConsent" 
+            style="width: 17px; height: 17px; accent-color: #16a34a; margin-top: 2px; cursor: pointer; flex-shrink: 0;"
+          />
+          <span>I agree to receive Crack SQL updates on WhatsApp.</span>
+        </label>
+        <div style="font-size: 11px; color: #15803d; margin-top: 4px; padding-left: 27px;">
+          Optional. You can withdraw consent anytime in Profile Settings.
+        </div>
+      </div>
+
+      <div id="profileSetupError" style="display: none; font-size: 12px; color: #dc2626; font-weight: 700; margin-bottom: 12px;"></div>
 
       <button 
-        id="saveUsernameBtn" 
+        id="profileSetupSaveBtn" 
         class="action primary" 
-        onclick="saveFirstTimeUsername()" 
+        onclick="saveProfileContactDetails()" 
         style="width: 100%; padding: 12px; font-size: 14.5px; font-weight: 800; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-        Save Username
+        Save Profile &amp; Continue
       </button>
     </div>
   </div>
 </div>
 
-<!-- Profile Details Modal -->
+<!-- Legacy Username Modal Wrapper Alias for DOM compatibility -->
+<div id="usernameSetupModal" hidden>
+  <input type="text" id="usernameInput" hidden />
+  <span id="usernameModalEmail" hidden></span>
+  <span id="usernameInputHelp" hidden></span>
+  <span id="usernameInputError" hidden></span>
+  <button id="saveUsernameBtn" hidden onclick="saveFirstTimeUsername()"></button>
+</div>
+
+<!-- Profile Details & Settings Modal -->
 <div id="profileModal" class="modal-backdrop" hidden>
-  <div class="modal-dialog" style="max-width: 440px;">
+  <div class="modal-dialog" style="max-width: 460px;">
     <div class="modal-header">
-      <div class="modal-badge">User Profile</div>
+      <div class="modal-badge">User Profile Settings</div>
       <button class="modal-close-btn" onclick="closeProfileModal()">✕</button>
     </div>
     
-    <div style="text-align: center; padding: 14px 0 16px;">
-      <div id="modalProfileAvatar" class="dropdown-user-avatar" style="width: 72px; height: 72px; font-size: 28px; margin: 0 auto 12px; box-shadow: 0 4px 14px rgba(37,99,235,0.18);">
+    <div style="text-align: center; padding: 12px 0 14px;">
+      <div id="modalProfileAvatar" class="dropdown-user-avatar" style="width: 68px; height: 68px; font-size: 26px; margin: 0 auto 10px; box-shadow: 0 4px 14px rgba(37,99,235,0.18);">
         👤
       </div>
       <div id="modalProfileUsernameBadge" style="display:none; font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 4px;"></div>
-      <h2 id="modalProfileName" style="margin: 0 0 4px; font-size: 20px;">Guest Learner</h2>
+      <h2 id="modalProfileName" style="margin: 0 0 2px; font-size: 20px;">Guest Learner</h2>
       <div id="modalProfileEmail" style="color: var(--muted); font-size: 13px;">Practicing on this device</div>
-      <div id="modalProfileStatus" style="margin-top: 10px; display: inline-block; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 999px; background: #eff6ff; color: #1e40af;">
+      <div id="modalProfileStatus" style="margin-top: 8px; display: inline-block; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 999px; background: #eff6ff; color: #1e40af;">
         Local Guest Mode
+      </div>
+    </div>
+
+    <!-- Contact & WhatsApp Details Box -->
+    <div id="modalProfileContactInfoCard" style="background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted);">Contact &amp; WhatsApp Settings</div>
+        <button class="ghost-btn-sm" id="modalProfileEditContactBtn" onclick="toggleEditProfileContactForm()" style="font-size: 11.5px; padding: 2px 8px; color: var(--primary); font-weight: 700;">✏️ Edit</button>
+      </div>
+      
+      <!-- Static Display -->
+      <div id="modalProfileContactView">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div style="background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;">
+            <div style="font-size: 10.5px; color: var(--muted); font-weight: 700; text-transform: uppercase;">Mobile Number</div>
+            <div id="modalProfileMobileVal" style="font-size: 13.5px; font-weight: 800; color: var(--ink); margin-top: 2px;">Not provided</div>
+          </div>
+          <div style="background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;">
+            <div style="font-size: 10.5px; color: var(--muted); font-weight: 700; text-transform: uppercase;">WhatsApp Updates</div>
+            <div id="modalProfileWhatsappVal" style="font-size: 13.5px; font-weight: 800; color: #64748b; margin-top: 2px;">Not consented</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Editable Form (Collapsible) -->
+      <div id="modalProfileContactEditForm" hidden style="margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px;">
+        <div style="margin-bottom: 10px;">
+          <label for="modalEditUsernameInput" style="font-size: 11px; font-weight: 700; color: var(--muted); display: block; margin-bottom: 4px;">USERNAME / NAME</label>
+          <input type="text" id="modalEditUsernameInput" style="width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13.5px; font-weight: 600; outline: none;" />
+        </div>
+        <div style="margin-bottom: 10px;">
+          <label for="modalEditMobileInput" style="font-size: 11px; font-weight: 700; color: var(--muted); display: block; margin-bottom: 4px;">MOBILE NUMBER (10 DIGITS)</label>
+          <input type="tel" id="modalEditMobileInput" placeholder="e.g. 9876543210" style="width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13.5px; font-weight: 600; outline: none;" />
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--ink); cursor: pointer;">
+            <input type="checkbox" id="modalEditWhatsappCheckbox" style="width: 16px; height: 16px; accent-color: #16a34a;" />
+            <span>I agree to receive Crack SQL updates on WhatsApp.</span>
+          </label>
+        </div>
+        <div id="modalEditContactError" style="display: none; font-size: 11.5px; color: #dc2626; font-weight: 700; margin-bottom: 8px;"></div>
+        <div style="display: flex; gap: 8px;">
+          <button class="action secondary sm" onclick="toggleEditProfileContactForm(false)">Cancel</button>
+          <button class="action primary sm" id="modalEditContactSaveBtn" onclick="saveProfileModalContactChanges()">Save Contact Details</button>
+        </div>
       </div>
     </div>
 
@@ -5076,7 +5171,7 @@ body.landscape-layout .practice-container {
     </div>
 
     <!-- Optional SQL Practice Section -->
-    <div class="card optional-sql-card" id="optionalSqlCard" style="text-align: center; padding: 22px 18px; margin-top: 4px;">
+    <div class="card optional-sql-card" style="text-align: center; padding: 22px 18px; margin-top: 4px;">
       <p style="font-size: 14px; color: var(--ink); margin: 0 0 14px; line-height: 1.5;">
         Want to try the SQL yourself? You can copy the scenario setup and practice it in DB Fiddle.
       </p>

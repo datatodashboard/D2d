@@ -52,3 +52,34 @@ export function getOAuthRedirectUrl() {
   return 'https://crack-sql-d2d.netlify.app';
 }
 
+/**
+ * Validates and formats Indian mobile numbers.
+ * Requires 10 digits, saved in +91 format (e.g., +919876543210).
+ */
+export function validateAndFormatIndianMobile(mobileStr) {
+  if (mobileStr === null || mobileStr === undefined) {
+    return { isValid: false, formatted: '', error: 'Mobile number is required.' };
+  }
+  const str = String(mobileStr).trim();
+  if (!str) {
+    return { isValid: false, formatted: '', error: 'Mobile number is required.' };
+  }
+
+  // Remove spaces, hyphens, brackets, dots
+  let cleaned = str.replace(/[\s\-\(\)\.]/g, '');
+
+  if (cleaned.startsWith('+91')) {
+    cleaned = cleaned.slice(3);
+  } else if (cleaned.startsWith('91') && cleaned.length === 12) {
+    cleaned = cleaned.slice(2);
+  } else if (cleaned.startsWith('0') && cleaned.length === 11) {
+    cleaned = cleaned.slice(1);
+  }
+
+  if (/^[6-9]\d{9}$/.test(cleaned) || /^\d{10}$/.test(cleaned)) {
+    return { isValid: true, formatted: `+91${cleaned}`, error: null };
+  }
+
+  return { isValid: false, formatted: '', error: 'Please enter a valid 10-digit Indian mobile number.' };
+}
+

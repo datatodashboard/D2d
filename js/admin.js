@@ -553,6 +553,9 @@ async function loadDashboardData() {
         username,
         name,
         email: email || '—',
+        mobileNumber: p.mobile_number || null,
+        whatsappConsent: p.whatsapp_consent === true,
+        whatsappConsentAt: p.whatsapp_consent_at || null,
         displayName,
         isAdmin: p.is_admin === true,
         paidUnlocked: p.paid_unlocked === true,
@@ -651,6 +654,7 @@ function renderLearnersTable() {
         (l.username && l.username.toLowerCase().includes(searchQuery)) ||
         l.displayName.toLowerCase().includes(searchQuery) ||
         l.email.toLowerCase().includes(searchQuery) ||
+        (l.mobileNumber && l.mobileNumber.toLowerCase().includes(searchQuery)) ||
         l.id.toLowerCase().includes(searchQuery)
       );
       if (!matchText) return false;
@@ -763,6 +767,14 @@ function renderLearnersTable() {
       return sortAsc ? (timeA - timeB) : (timeB - timeA);
     }
 
+    if (sortField === 'mobile') {
+      const strA = String(a.mobileNumber || '').toLowerCase();
+      const strB = String(b.mobileNumber || '').toLowerCase();
+      if (strA < strB) return sortAsc ? -1 : 1;
+      if (strA > strB) return sortAsc ? 1 : -1;
+      return 0;
+    }
+
     valA = String(a.username || a.displayName || a.email || '').toLowerCase();
     valB = String(b.username || b.displayName || b.email || '').toLowerCase();
 
@@ -787,7 +799,7 @@ function renderLearnersTable() {
   }
 
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty">No matching learners found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty">No matching learners found.</td></tr>';
     return;
   }
 
@@ -801,6 +813,13 @@ function renderLearnersTable() {
       : `<span style="color:var(--muted);font-style:italic;font-size:0.85rem;">Username not set</span>`;
 
     const emailDisplay = (l.email && l.email !== '—') ? l.email : 'No email';
+    const mobileDisplay = l.mobileNumber 
+      ? `<span style="font-family:monospace;font-weight:600;color:var(--ink);">${escapeHtml(l.mobileNumber)}</span>`
+      : `<span style="color:var(--muted);font-style:italic;font-size:0.8rem;">Not provided</span>`;
+
+    const whatsappBadge = l.whatsappConsent 
+      ? '<span class="badge verified" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:0.75rem;">✓ Opted In</span>'
+      : '<span class="badge draft" style="color:var(--muted);font-size:0.75rem;">Not opted in</span>';
 
     const isNeedsReconcile = !l.paidUnlocked && (paymentsData && paymentsData.some(p => (p.user_email || '').toLowerCase() === (l.email || '').toLowerCase() && (p.status === 'pending' || p.status === 'captured')));
 
@@ -827,6 +846,16 @@ function renderLearnersTable() {
         <td>
           <div class="learner-email" style="font-size:0.85rem;color:var(--ink);">
             ${escapeHtml(emailDisplay)}
+          </div>
+        </td>
+        <td>
+          <div style="font-size:0.85rem;">
+            ${mobileDisplay}
+          </div>
+        </td>
+        <td>
+          <div>
+            ${whatsappBadge}
           </div>
         </td>
         <td class="num">
@@ -918,18 +947,21 @@ function exportCSV() {
     return;
   }
 
-  let csv = 'Index,User ID,Username,Name,Email,Role,Solved,Attempted,Completion %,Top Domains,Reached Threshold,Last Active\n';
+  let csv = 'Index,User ID,Username,Name,Email,Mobile Number,WhatsApp Consent,WhatsApp Consent Date,Role,Solved,Attempted,Completion %,Top Domains,Reached Threshold,Last Active\n';
   targetData.forEach((l, idx) => {
     const pct = Math.min(100, Math.round((l.solved / totalScenariosCount) * 100));
     const role = l.isAdmin ? 'Admin' : 'Learner';
     const cleanUsername = (l.username || 'Username not set').replace(/"/g, '""');
     const cleanName = (l.name || '').replace(/"/g, '""');
     const cleanEmail = (l.email || '').replace(/"/g, '""');
+    const cleanMobile = (l.mobileNumber || 'Not provided').replace(/"/g, '""');
+    const waConsentStr = l.whatsappConsent ? 'YES' : 'NO';
+    const waConsentDateStr = l.whatsappConsentAt ? new Date(l.whatsappConsentAt).toISOString() : '';
     const cleanDomains = (l.topDomains || '').replace(/"/g, '""');
     const reachedStr = l.reachedAt ? new Date(l.reachedAt).toISOString() : '';
     const activeStr = l.lastActivity ? new Date(l.lastActivity).toISOString() : '';
 
-    csv += `"${idx + 1}","${l.id}","${cleanUsername}","${cleanName}","${cleanEmail}","${role}",${l.solved},${l.attempted},"${pct}%","${cleanDomains}","${reachedStr}","${activeStr}"\n`;
+    csv += `"${idx + 1}","${l.id}","${cleanUsername}","${cleanName}","${cleanEmail}","${cleanMobile}","${waConsentStr}","${waConsentDateStr}","${role}",${l.solved},${l.attempted},"${pct}%","${cleanDomains}","${reachedStr}","${activeStr}"\n`;
   });
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

@@ -1,9 +1,9 @@
 import {evaluateThinking, thinkingIsReady, thinkingText} from './thinking.js';
 import {EMPTY, readProgress, saveProgress, mergeProgress, sanitize, nextTimestamp, workFingerprint, stage, isCompleted, isAttempted, chooseNext, importLegacy, storageKey} from './progress.js';
-import {getEffectiveScenario, recordSkillAttempt, validateScenariosData} from './curriculum.js';
+import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
 import {renderSchemaCards, buildFiddlePracticePackage} from './schema.js';
-import {escapeHtml, getOAuthRedirectUrl} from './util.js';
+import {escapeHtml, getOAuthRedirectUrl, validateAndFormatIndianMobile} from './util.js';
 import {SqlEngineManager, loadBrowserPGlite} from './sql-evaluator.js?v=4';
 import {initContest, renderContestCard, closeContestModal, getContestState} from './contest.js';
 import {
@@ -315,7 +315,7 @@ function renderAssessment(result) {
         </div>
         <div style="font-size:13px;line-height:1.6;color:var(--ink);">
           <div style="margin-bottom:6px;"><strong>1. Table:</strong> From the <code>${current.tables.join(', ')}</code> table${current.tables.length > 1 ? 's' : ''}, where this data lives.</div>
-          <div style="margin-bottom:6px;"><strong>2. What to do:</strong> ${escapeHtml(current.thinkingExpectations?.find(e => e.includes('Describe') || e.includes('filter') || e.includes('transformation')) || current.skill || 'Apply the required filter, join, or aggregation logic to isolate target rows.')}</div>
+          <div style="margin-bottom:6px;"><strong>2. What to do:</strong> ${escapeHtml(current.pseudo || 'Apply the required filter, join, or aggregation logic to isolate the target rows.')}</div>
           <div><strong>3. Expected result:</strong> Show the requested details in the final output.</div>
         </div>
       </div>
@@ -722,20 +722,11 @@ function renderScenario() {
   $('home').classList.remove('active');$('progressScreen').classList.remove('active');$('practice').classList.add('active');
   if ($('navHome')) { $('navHome').classList.remove('active'); $('navProgress').classList.remove('active'); $('navPractice').classList.add('active'); }
   $('meta').textContent=effective.domain+' • '+effective.level;
-  $('title').textContent = `${effective.domain} — ${effective.level} (Exercise ${effective.questionNo})`;
-  $('question').textContent=effective.question;
+  $('title').textContent=effective.id;$('question').textContent=effective.question;
   const pool=scenarios.filter(s=>s.domain===effective.domain&&s.level===effective.level);
   $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
-  $('tags').textContent = 'Read the situation → Explain your thinking → Review feedback';
-  const hasChecked = current && isAttempted(current, entry());
-  if (!hasChecked) {
-    if ($('schema')) $('schema').innerHTML = `<div style="padding:20px; background:#f8fafc; border:1px dashed var(--line); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; font-weight:700;">🔒 Schema Overview &amp; Sample Data unlock after checking your thinking.</div>`;
-    if ($('sampleDataView')) $('sampleDataView').innerHTML = `<div style="padding:20px; background:#f8fafc; border:1px dashed var(--line); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; font-weight:700;">🔒 Schema Overview &amp; Sample Data unlock after checking your thinking.</div>`;
-    if ($('optionalSqlCard')) $('optionalSqlCard').hidden = true;
-  } else {
-    renderSchemaCards(effective.schemaText);
-    if ($('optionalSqlCard')) $('optionalSqlCard').hidden = false;
-  }
+  $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
+  renderSchemaCards(effective.schemaText);
   currentSampleTable = null;
   setSchemaTab('schema');
   $('thinking').value=thinkingText(e.thinking);
@@ -899,6 +890,11 @@ async function checkUserAccessStatus(userId) {
           renderAuth();
         }
       }
+
+      if (profile.mobile_number) {
+        currentMobileNumber = (profile.mobile_number || '').trim();
+      }
+      currentWhatsappConsent = profile.whatsapp_consent === true;
 
       // Load is_admin normally
       if (profile.is_admin === true) {
@@ -1684,21 +1680,6 @@ async function loadScenario() {
   }
 
   const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
-  if (!pool || pool.length === 0) {
-    if ($('question')) {
-      $('question').innerHTML = `
-        <div style="padding: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; color: #991b1b; font-size: 14px;">
-          <strong>⚠️ Unable to load questions for ${escapeHtml(selectedDomain || '')} (${escapeHtml(selectedLevel || '')}).</strong><br>
-          <span style="font-size:12.5px; opacity: 0.9;">Please check your connection or retry loading the question bank.</span><br>
-          <button class="action secondary sm" onclick="window.location.reload()" style="margin-top: 10px; padding: 6px 14px; cursor: pointer; font-weight: 700;">
-            🔄 Retry Loading Questions
-          </button>
-        </div>
-      `;
-    }
-    return;
-  }
-
   const next = chooseNext(pool, state, null);
   if (next) {
     const isTargetCompleted = isCompleted(next, state.entries[next.id]);
@@ -1715,7 +1696,7 @@ async function loadScenario() {
     current = await ensureFullScenario(next);
     renderScenario();
   } else {
-    // Case D: 20/20 completed. Load last scenario in pool.
+    // Case D: 20/20 completed. Do not reset to Question 1! Load last scenario in pool.
     if (pool.length > 0) {
       current = await ensureFullScenario(pool[pool.length - 1]);
       renderScenario();
@@ -1781,8 +1762,6 @@ function evaluatePlan() {
     skill: effective.skill
   }, true);
   renderAssessment(assessment);
-  renderSchemaCards(effective.schemaText);
-  if ($('optionalSqlCard')) $('optionalSqlCard').hidden = false;
   updateGates();
 
   // Handle completion tracking and paywall/eligibility gates
@@ -3394,7 +3373,7 @@ async function openScenario(id) {
 function showSampleThinking() {
   if (!current) return;
   const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
-  $('thinking').value = effective.exampleThinking || (Array.isArray(effective.thinkingExpectations) ? effective.thinkingExpectations.join('\n') : `Query the ${effective.tables.join(', ')} table to calculate the required scenario output.`);
+  $('thinking').value = effective.exampleThinking || effective.pseudo;
   evaluatePlan();
 }
 function improveLogic() {
@@ -3709,13 +3688,17 @@ function renderScenarioCatalog() {
 
 function renderProgressScreen() {
   if (!scenarios.length) return;
-  const totalQuestions = 420;
-  const completedCount = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
-  const inProgressCount = scenarios.filter(s => isAttempted(s, state.entries[s.id]) && !isCompleted(s, state.entries[s.id])).length;
+  const trackScenarios = (currentDomainTrack === 'core')
+    ? scenarios.filter(s => CORE_DOMAINS.includes(s.domain))
+    : scenarios;
+  
+  const totalQuestions = trackScenarios.length;
+  const completedCount = trackScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+  const inProgressCount = trackScenarios.filter(s => isAttempted(s, state.entries[s.id]) && !isCompleted(s, state.entries[s.id])).length;
   const completionPct = totalQuestions > 0 ? Math.round((completedCount / totalQuestions) * 100) : 0;
 
   let totalScore = 0, countWithScore = 0;
-  for (const s of scenarios) {
+  for (const s of trackScenarios) {
     const e = state.entries[s.id];
     if (e?.assessment?.score !== undefined && typeof e.assessment.score === 'number') {
       totalScore += e.assessment.score;
@@ -3725,100 +3708,85 @@ function renderProgressScreen() {
   const avgScore = countWithScore ? (totalScore / countWithScore).toFixed(1) : '0.0';
 
   if ($('progressTrackSubtitle')) {
-    $('progressTrackSubtitle').textContent = `All Domains Track (420 questions) • ${completedCount} Completed • ${inProgressCount} In Progress`;
+    const trackTitle = currentDomainTrack === 'core' 
+      ? '4 Core Domains Track (240 questions)' 
+      : 'All Domains Track (420 questions)';
+    $('progressTrackSubtitle').textContent = `${trackTitle} • ${completedCount} Completed • ${inProgressCount} In Progress`;
   }
   if ($('progressTotalQuestions')) $('progressTotalQuestions').textContent = String(totalQuestions);
-  if ($('progressCompletedQuestions')) $('progressCompletedQuestions').textContent = `${completedCount} / 420`;
+  if ($('progressCompletedQuestions')) $('progressCompletedQuestions').textContent = String(completedCount);
   if ($('progressCompletionPct')) $('progressCompletionPct').textContent = `${completionPct}%`;
   if ($('progressAvgThinkingScore')) $('progressAvgThinkingScore').textContent = `${avgScore} / 10`;
 
-  const allDomains = [
+  // Domain-wise completed questions: Banking, Healthcare, Insurance, Retail
+  const targetDomains = [
     { name: 'Banking', icon: '🏦', color: '#2563eb' },
     { name: 'Healthcare', icon: '🏥', color: '#059669' },
     { name: 'Insurance', icon: '🛡️', color: '#7c3aed' },
-    { name: 'Capital Markets', icon: '📈', color: '#0284c7' },
-    { name: 'Semiconductor', icon: '🔬', color: '#d97706' },
-    { name: 'Education', icon: '🎓', color: '#9333ea' },
     { name: 'Retail', icon: '🛒', color: '#ea580c' }
   ];
 
-  const domainRowsHtml = allDomains.map(d => {
+  const domainCounts = targetDomains.map(d => {
     const dScenarios = scenarios.filter(s => s.domain === d.name);
-    const dCompleted = dScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
-    const dPct = Math.round((dCompleted / 60) * 100);
+    const count = dScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    return { ...d, count, total: dScenarios.length };
+  });
 
-    const begScenarios = dScenarios.filter(s => s.level === 'Beginner');
-    const intScenarios = dScenarios.filter(s => s.level === 'Intermediate');
-    const expScenarios = dScenarios.filter(s => s.level === 'Expert');
-
-    const begCount = begScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
-    const intCount = intScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
-    const expCount = expScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
-
-    return `
-      <div style="background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:20px;">${d.icon}</span>
-            <span style="font-weight:800; font-size:15px; color:var(--ink);">${d.name}</span>
-          </div>
-          <div style="font-size:13px; font-weight:800; color:var(--primary);">${dCompleted} / 60 (${dPct}%)</div>
-        </div>
-        <div style="background:#e2e8f0; border-radius:999px; height:8px; overflow:hidden; margin-bottom:10px;">
-          <div style="background:${d.color}; height:100%; width:${dPct}%; border-radius:999px; transition:width 0.3s ease;"></div>
-        </div>
-        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; font-size:11.5px; color:var(--muted); text-align:center; background:#f8fafc; padding:6px 8px; border-radius:8px;">
-          <div>Beginner: <strong style="color:var(--ink);">${begCount}/20</strong></div>
-          <div>Intermediate: <strong style="color:var(--ink);">${intCount}/20</strong></div>
-          <div>Expert: <strong style="color:var(--ink);">${expCount}/20</strong></div>
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  const recentEntries = Object.entries(state.entries || {})
-    .filter(([_, e]) => e && (e.updatedAt || e.score || e.thinkingScore || e.status))
-    .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0))
-    .slice(0, 5);
-
-  let recentActivityHtml = '';
-  if (recentEntries.length > 0) {
-    const itemsHtml = recentEntries.map(([sId, e]) => {
-      const scenario = scenarios.find(s => s.id === sId) || { id: sId, domain: 'Practice', level: '', questionNo: '' };
-      const score = typeof e.assessment?.score === 'number' ? e.assessment.score : (typeof e.score === 'number' ? e.score : 0);
-      const isDone = isCompleted(scenario, e);
-      const badgeStyle = isDone ? 'background:#dcfce7; color:#166534;' : 'background:#fef3c7; color:#b45309;';
-      const badgeText = isDone ? `Completed (${score}/10)` : (e.status === 'attempted' ? `Attempted (${score}/10)` : 'In Progress');
-      const dateStr = e.updatedAt ? new Date(e.updatedAt).toLocaleDateString() : 'Recently';
-
-      return `
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#f8fafc; border:1px solid var(--line); border-radius:10px; margin-bottom:8px;">
-          <div>
-            <div style="font-weight:800; font-size:13.5px; color:var(--ink);">${escapeHtml(scenario.domain || 'SQL Practice')} ${scenario.level ? '• ' + escapeHtml(scenario.level) : ''} ${scenario.questionNo ? '(Ex ' + scenario.questionNo + ')' : ''}</div>
-            <div style="font-size:12px; color:var(--muted);">${escapeHtml(scenario.question ? (scenario.question.length > 65 ? scenario.question.slice(0, 65) + '...' : scenario.question) : scenario.id)}</div>
-          </div>
-          <div style="text-align:right; flex-shrink:0; margin-left:12px;">
-            <span style="font-size:11px; font-weight:800; padding:3px 8px; border-radius:999px; ${badgeStyle}">${badgeText}</span>
-            <div style="font-size:11px; color:var(--muted); margin-top:3px;">${dateStr}</div>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    recentActivityHtml = `
-      <div style="margin-top: 16px; text-align: left; border-top: 1px solid var(--line); padding-top: 14px;">
-        <h3 style="font-size:14px; font-weight:800; margin:0 0 10px; color:var(--ink);">Recent Practice Activity</h3>
-        ${itemsHtml}
-      </div>
-    `;
-  }
+  const sumDomainCompleted = domainCounts.reduce((acc, cur) => acc + cur.count, 0);
 
   const container = $('domainChartContent');
   if (container) {
+    const size = 140;
+    const r = 50;
+    const cx = size / 2;
+    const cy = size / 2;
+    const circumference = 2 * Math.PI * r;
+
+    let slicesSvg = '';
+    if (sumDomainCompleted === 0) {
+      slicesSvg = `
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e2e8f0" stroke-width="16" />
+        <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="20" font-weight="900" fill="#94a3b8">0</text>
+        <text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="11" font-weight="700" fill="#94a3b8">Completed</text>
+      `;
+    } else {
+      let accumulatedOffset = 0;
+      const paths = domainCounts.map(d => {
+        if (d.count === 0) return '';
+        const sliceLength = (d.count / sumDomainCompleted) * circumference;
+        const offset = -accumulatedOffset;
+        accumulatedOffset += sliceLength;
+        return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${d.color}" stroke-width="16" stroke-dasharray="${sliceLength.toFixed(2)} ${(circumference - sliceLength).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" />`;
+      }).filter(Boolean);
+
+      slicesSvg = `
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="16" />
+        <g transform="rotate(-90 ${cx} ${cy})">
+          ${paths.join('')}
+        </g>
+        <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="900" fill="var(--ink)">${sumDomainCompleted}</text>
+        <text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--muted)">Completed</text>
+      `;
+    }
+
+    const legendHtml = domainCounts.map(d => `
+      <div class="domain-legend-row">
+        <div class="domain-legend-left">
+          <span class="domain-color-dot" style="background:${d.color};"></span>
+          <span>${d.icon} <b>${d.name}</b></span>
+        </div>
+        <div class="domain-legend-count"><b>${d.count}</b> completed</div>
+      </div>
+    `).join('');
+
     container.innerHTML = `
-      <div style="width:100%;">
-        ${domainRowsHtml}
-        ${recentActivityHtml}
+      <div class="donut-chart-box" style="flex-shrink:0;">
+        <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Domain completion chart">
+          ${slicesSvg}
+        </svg>
+      </div>
+      <div class="domain-legend-list">
+        ${legendHtml}
       </div>
     `;
   }
@@ -4805,50 +4773,95 @@ function initLandscapeMode() {
 }
 
 // -----------------------------------------------------------------------------
-// Permanent First-Time Username System
+// Complete Profile & Contact Info System (Name, Mobile & WhatsApp Consent)
 // -----------------------------------------------------------------------------
-function openUsernameModal(userId, userEmail) {
-  const modal = $('usernameSetupModal');
+let currentMobileNumber = null;
+let currentWhatsappConsent = false;
+
+function openProfileSetupModal({ userId, userEmail, existingUsername, existingMobile, whatsappConsent }) {
+  const modal = $('profileSetupModal') || $('usernameSetupModal');
   if (!modal) return;
   modal.hidden = false;
 
-  const emailEl = $('usernameModalEmail');
-  if (emailEl) emailEl.textContent = userEmail || 'your Google account';
+  const gmailDisplay = $('profileSetupGmailDisplay') || $('usernameModalEmail');
+  if (gmailDisplay) gmailDisplay.textContent = userEmail || 'your Google account';
 
-  const input = $('usernameInput');
-  const errorEl = $('usernameInputError');
-  const btn = $('saveUsernameBtn');
+  const modalTitle = $('profileSetupModalTitle');
+  const modalSubtitle = $('profileSetupModalSubtitle');
+  const usernameWrapper = $('profileSetupUsernameWrapper');
+  const usernameInput = $('profileSetupUsernameInput') || $('usernameInput');
+  const usernameStaticWrapper = $('profileSetupUsernameStaticWrapper');
+  const usernameStaticVal = $('profileSetupUsernameStaticVal');
+  const mobileInput = $('profileSetupMobileInput');
+  const whatsappCheckbox = $('profileSetupWhatsappConsent');
+  const errorEl = $('profileSetupError') || $('usernameInputError');
+  const btn = $('profileSetupSaveBtn') || $('saveUsernameBtn');
 
   if (errorEl) {
     errorEl.textContent = '';
     errorEl.style.display = 'none';
   }
-  if (btn) {
-    btn.disabled = false;
-    btn.innerHTML = 'Save Username & Continue';
+
+  const hasUsername = Boolean(existingUsername);
+  if (hasUsername) {
+    if (modalTitle) modalTitle.textContent = 'Complete Your Profile Details';
+    if (modalSubtitle) modalSubtitle.textContent = 'Please enter your mobile number to complete your profile';
+    if (usernameWrapper) usernameWrapper.hidden = true;
+    if (usernameStaticWrapper) usernameStaticWrapper.hidden = false;
+    if (usernameStaticVal) usernameStaticVal.textContent = `@${existingUsername}`;
+  } else {
+    if (modalTitle) modalTitle.textContent = 'Welcome to Crack SQL';
+    if (modalSubtitle) modalSubtitle.textContent = 'Complete your profile details to continue';
+    if (usernameWrapper) usernameWrapper.hidden = false;
+    if (usernameStaticWrapper) usernameStaticWrapper.hidden = true;
+    if (usernameInput) {
+      if (!usernameInput.value && userEmail) {
+        const suggested = userEmail.split('@')[0].replace(/[^A-Za-z]/g, '');
+        usernameInput.value = suggested;
+      }
+    }
   }
 
-  if (input) {
-    if (!input.value && userEmail) {
-      const suggested = userEmail.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 15);
-      input.value = suggested;
-    }
-    setTimeout(() => {
-      try { input.focus(); } catch (e) {}
-    }, 150);
+  if (mobileInput) {
+    mobileInput.value = existingMobile ? existingMobile.replace(/^\+91/, '') : '';
   }
+
+  if (whatsappCheckbox) {
+    whatsappCheckbox.checked = Boolean(whatsappConsent);
+  }
+
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = 'Save Profile &amp; Continue';
+  }
+
+  setTimeout(() => {
+    try {
+      if (!hasUsername && usernameInput) usernameInput.focus();
+      else if (mobileInput) mobileInput.focus();
+    } catch (_) {}
+  }, 150);
+}
+
+function closeProfileSetupModal() {
+  const modal = $('profileSetupModal');
+  if (modal) modal.hidden = true;
+  const legacyModal = $('usernameSetupModal');
+  if (legacyModal) legacyModal.hidden = true;
+}
+
+function openUsernameModal(userId, userEmail) {
+  openProfileSetupModal({ userId, userEmail, existingUsername: currentUsername, existingMobile: currentMobileNumber, whatsappConsent: currentWhatsappConsent });
 }
 
 function closeUsernameModal() {
-  const modal = $('usernameSetupModal');
-  if (modal) modal.hidden = true;
+  closeProfileSetupModal();
 }
 
 function validateUsernameField() {
-  const input = $('usernameInput');
-  const errorEl = $('usernameInputError');
+  const input = $('profileSetupUsernameInput') || $('usernameInput');
+  const errorEl = $('profileSetupError') || $('usernameInputError');
   if (!input) return;
-  // Allow only normal English letters: A-Z, a-z. No numbers, no spaces, no symbols.
   input.value = input.value.replace(/[^A-Za-z]/g, '');
   if (errorEl) errorEl.style.display = 'none';
 }
@@ -4857,235 +4870,307 @@ async function checkAndEnforceUsername(userId, userEmail, prefetchedProfile = nu
   if (!userId || !client) return;
 
   try {
-    // 1. If already known in-memory, ensure UI is synced and modal is closed
-    if (currentUsername) {
-      renderProfileAvatar();
-      renderAuth();
-      closeUsernameModal();
-      return currentUsername;
-    }
-
-    // 2. Check local storage cache for instant rendering
-    const cached = localStorage.getItem(`cracksql_username_${userId}`);
-    if (cached && cached.trim()) {
-      currentUsername = cached.trim();
-      renderProfileAvatar();
-      renderAuth();
-      closeUsernameModal();
-    }
-
-    // 3. Check Supabase auth user metadata (syncs across devices for the same Google account)
-    const metaUsername = user?.user_metadata?.username;
-    if (metaUsername && typeof metaUsername === 'string' && metaUsername.trim()) {
-      currentUsername = metaUsername.trim();
-      try {
-        localStorage.setItem(`cracksql_username_${userId}`, currentUsername);
-      } catch (e) {}
-      renderProfileAvatar();
-      renderAuth();
-      closeUsernameModal();
-    }
-
-    // 4. Query the single source of truth: public.profiles table in Supabase (or reuse prefetched profile)
     let profile = prefetchedProfile || null;
     if (!profile) {
       try {
         const { data, error } = await client
           .from('profiles')
-          .select('id, email, username')
+          .select('id, email, username, mobile_number, whatsapp_consent, whatsapp_consent_at, is_admin, paid_unlocked')
           .eq('id', userId)
           .maybeSingle();
 
-        if (error) {
-          console.warn('[Username] Profile query notice:', error.message || error);
-          if (error.message && error.message.includes("Could not find the 'username' column")) {
-            const { data: fallbackData } = await client
-              .from('profiles')
-              .select('id, email')
-              .eq('id', userId)
-              .maybeSingle();
-            profile = fallbackData;
-          }
-        } else {
+        if (!error && data) {
           profile = data;
+        } else if (error && error.message?.includes("Could not find the 'username' column")) {
+          const { data: fallbackData } = await client
+            .from('profiles')
+            .select('id, email')
+            .eq('id', userId)
+            .maybeSingle();
+          profile = fallbackData;
         }
       } catch (queryErr) {
-        console.warn('[Username] Profile query exception:', queryErr);
+        console.warn('[ProfileContact] Profile query exception:', queryErr);
       }
     }
 
-    // If profile row doesn't exist yet, insert it
+    // If profile row doesn't exist yet, insert missing profile row safely
     if (!profile) {
       try {
         const { data: newProf } = await client
           .from('profiles')
           .upsert({ id: userId, email: userEmail, last_active: new Date().toISOString() }, { onConflict: 'id', ignoreDuplicates: true })
-          .select('id, email')
+          .select('*')
           .maybeSingle();
         if (newProf) profile = newProf;
       } catch (insErr) {
-        console.warn('[Username] Insert profile notice:', insErr);
+        console.warn('[ProfileContact] Insert profile notice:', insErr);
       }
     }
 
-    const dbUsername = (profile?.username || '').trim();
+    const dbUsername = (profile?.username || currentUsername || '').trim();
+    const dbMobile = (profile?.mobile_number || currentMobileNumber || '').trim();
+
     if (dbUsername) {
       currentUsername = dbUsername;
-      try {
-        localStorage.setItem(`cracksql_username_${userId}`, dbUsername);
-      } catch (e) {}
-      renderProfileAvatar();
-      renderAuth();
-      closeUsernameModal();
+      try { localStorage.setItem(`cracksql_username_${userId}`, dbUsername); } catch (_) {}
+    }
+
+    if (dbMobile) {
+      currentMobileNumber = dbMobile;
+    }
+    currentWhatsappConsent = profile?.whatsapp_consent === true;
+
+    renderProfileAvatar();
+    renderAuth();
+
+    // If BOTH username and mobile_number exist -> Do NOT show popup!
+    if (dbUsername && dbMobile) {
+      closeProfileSetupModal();
       return dbUsername;
     }
 
-    // If we have currentUsername from auth metadata/cache, ensure it's saved to profiles table
-    if (currentUsername) {
-      try {
-        const { error: upErr } = await client.from('profiles').update({ username: currentUsername }).eq('id', userId);
-        if (upErr) console.warn('[Username] Background sync error:', upErr.message || upErr);
-      } catch (syncErr) {
-        console.warn('[Username] Background sync to profiles notice:', syncErr);
-      }
-      closeUsernameModal();
-      return currentUsername;
-    }
-
-    // 5. No permanent username exists -> Show simple Create Username box
-    openUsernameModal(userId, userEmail);
+    // Show complete profile popup!
+    openProfileSetupModal({
+      userId,
+      userEmail,
+      existingUsername: dbUsername,
+      existingMobile: dbMobile,
+      whatsappConsent: profile?.whatsapp_consent || false
+    });
+    return dbUsername;
   } catch (err) {
-    console.error('[Username] Error checking username status:', err);
+    console.error('[ProfileContact] Error checking profile status:', err);
   }
 }
 
-async function saveFirstTimeUsername() {
-  const input = $('usernameInput');
-  const errorEl = $('usernameInputError');
-  const btn = $('saveUsernameBtn');
-  if (!input || !client || !user) return;
+async function saveProfileContactDetails() {
+  const errorEl = $('profileSetupError') || $('usernameInputError');
+  const btn = $('profileSetupSaveBtn') || $('saveUsernameBtn');
+  if (!client || !user) return;
 
-  // Allow only normal English letters: A-Z, a-z (preserve case, e.g. Sundar, DataDashboard)
-  const clean = input.value.trim().replace(/[^A-Za-z]/g, '');
+  const usernameInput = $('profileSetupUsernameInput') || $('usernameInput');
+  const mobileInput = $('profileSetupMobileInput');
+  const whatsappCheckbox = $('profileSetupWhatsappConsent');
 
   if (errorEl) errorEl.style.display = 'none';
 
-  if (!clean || !/^[A-Za-z]+$/.test(clean)) {
+  const isUsernameProvided = Boolean(currentUsername);
+  let cleanUsername = currentUsername;
+
+  if (!isUsernameProvided) {
+    cleanUsername = (usernameInput?.value || '').trim().replace(/[^A-Za-z]/g, '');
+    if (!cleanUsername || !/^[A-Za-z]+$/.test(cleanUsername)) {
+      if (errorEl) {
+        errorEl.textContent = 'Please enter a valid name using letters only (A-Z, a-z).';
+        errorEl.style.display = 'block';
+      }
+      usernameInput?.focus();
+      return;
+    }
+  }
+
+  const rawMobile = (mobileInput?.value || '').trim();
+  const mobileVal = validateAndFormatIndianMobile(rawMobile);
+  if (!mobileVal.isValid) {
     if (errorEl) {
-      errorEl.textContent = 'Please enter a username using only letters (A-Z, a-z).';
+      errorEl.textContent = mobileVal.error;
       errorEl.style.display = 'block';
     }
-    input.focus();
+    mobileInput?.focus();
     return;
   }
 
+  const formattedMobile = mobileVal.formatted;
+  const whatsappConsent = Boolean(whatsappCheckbox?.checked);
+  const nowIso = new Date().toISOString();
+
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<span>Saving Username…</span>';
+    btn.innerHTML = '<span>Saving Profile…</span>';
   }
 
   try {
-    // 1. Check if another user has already taken this username (case-insensitive)
-    try {
-      const { data: existing } = await client
-        .from('profiles')
-        .select('id, username')
-        .ilike('username', clean)
-        .neq('id', user.id)
-        .maybeSingle();
+    // 1. Uniqueness check if user enters a new username
+    if (!isUsernameProvided) {
+      try {
+        const { data: existing } = await client
+          .from('profiles')
+          .select('id, username')
+          .ilike('username', cleanUsername)
+          .neq('id', user.id)
+          .maybeSingle();
 
-      if (existing && existing.id && existing.id !== user.id) {
-        if (errorEl) {
-          errorEl.textContent = `The username "${clean}" is already taken. Please choose another.`;
-          errorEl.style.display = 'block';
-        }
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = 'Save Username';
-        }
-        input.focus();
-        return;
-      }
-    } catch (checkErr) {
-      console.warn('[Username] Uniqueness check notice:', checkErr);
-    }
-
-    // 2. Persist to Supabase auth user metadata (guarantees cross-device permanence for Google account)
-    try {
-      await client.auth.updateUser({
-        data: { username: clean }
-      });
-    } catch (metaErr) {
-      console.warn('[Username] Auth user metadata notice:', metaErr);
-    }
-
-    // 3. Save permanently to user's existing Supabase profile linked to User ID
-    try {
-      const { error: saveErr } = await client
-        .from('profiles')
-        .upsert({
-          id: user.id,
-          email: user.email,
-          username: clean,
-          last_active: new Date().toISOString()
-        }, { onConflict: 'id' });
-
-      if (saveErr) {
-        if (saveErr.code === '23505' || (saveErr.message && saveErr.message.includes('unique'))) {
+        if (existing && existing.id && existing.id !== user.id) {
           if (errorEl) {
-            errorEl.textContent = `The username "${clean}" is already taken. Please choose another.`;
+            errorEl.textContent = `The username "${cleanUsername}" is already taken. Please choose another.`;
             errorEl.style.display = 'block';
           }
-          if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = 'Save Username';
-          }
-          input.focus();
+          if (btn) { btn.disabled = false; btn.innerHTML = 'Save Profile & Continue'; }
+          usernameInput?.focus();
           return;
         }
-
-        if (saveErr.message && saveErr.message.includes("Could not find the 'username' column")) {
-          console.warn("[Username] Database schema cache notice: 'username' column not in schema cache. Run `NOTIFY pgrst, 'reload schema';`");
-        } else {
-          throw saveErr;
-        }
-      }
-    } catch (dbErr) {
-      console.warn('[Username] Database save notice:', dbErr);
-      if (!dbErr.message || !dbErr.message.includes("Could not find the 'username' column")) {
-        if (errorEl) {
-          errorEl.textContent = 'Failed to save username: ' + (dbErr.message || 'Please retry.');
-          errorEl.style.display = 'block';
-        }
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = 'Save Username';
-        }
-        return;
-      }
+      } catch (_) {}
     }
 
-    // 4. Cache in localStorage for immediate future page loads on this device
-    try {
-      localStorage.setItem(`cracksql_username_${user.id}`, clean);
-    } catch (e) {}
+    // 2. Targeted UPDATE on public.profiles linked to auth.uid()
+    // Never perform full-row replacement to preserve progress, payment or entitlement info
+    const updatePayload = {
+      mobile_number: formattedMobile,
+      whatsapp_consent: whatsappConsent,
+      whatsapp_consent_at: whatsappConsent ? nowIso : null,
+      last_active: nowIso
+    };
 
-    currentUsername = clean;
+    if (!isUsernameProvided && cleanUsername) {
+      updatePayload.username = cleanUsername;
+    }
 
-    closeUsernameModal();
+    const { error: updateErr } = await client
+      .from('profiles')
+      .update(updatePayload)
+      .eq('id', user.id);
+
+    if (updateErr) {
+      if (updateErr.code === '23505' || updateErr.message?.includes('unique')) {
+        if (errorEl) {
+          errorEl.textContent = `The username "${cleanUsername}" is already taken. Please choose another.`;
+          errorEl.style.display = 'block';
+        }
+        if (btn) { btn.disabled = false; btn.innerHTML = 'Save Profile & Continue'; }
+        return;
+      }
+      throw updateErr;
+    }
+
+    if (cleanUsername) {
+      currentUsername = cleanUsername;
+      try { localStorage.setItem(`cracksql_username_${user.id}`, cleanUsername); } catch (_) {}
+      try { await client.auth.updateUser({ data: { username: cleanUsername } }); } catch (_) {}
+    }
+
+    currentMobileNumber = formattedMobile;
+    currentWhatsappConsent = whatsappConsent;
+
+    closeProfileSetupModal();
     renderProfileAvatar();
     renderAuth();
-    console.log(`[Username] Successfully saved permanent username "${clean}" for user ${user.id}`);
   } catch (err) {
-    console.error('[Username] Error saving username:', err);
+    console.error('[ProfileContact] Save exception:', err);
     if (errorEl) {
-      errorEl.textContent = 'Failed to save username: ' + (err.message || 'Please retry.');
+      errorEl.textContent = 'Failed to save profile details: ' + (err.message || 'Please retry.');
       errorEl.style.display = 'block';
     }
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = 'Save Username';
+      btn.innerHTML = 'Save Profile & Continue';
     }
+  }
+}
+
+async function saveFirstTimeUsername() {
+  return saveProfileContactDetails();
+}
+
+function toggleEditProfileContactForm(show) {
+  const form = $('modalProfileContactEditForm');
+  const view = $('modalProfileContactView');
+  const errEl = $('modalEditContactError');
+  if (!form || !view) return;
+
+  const isHidden = form.hidden;
+  const shouldShow = show !== undefined ? show : isHidden;
+
+  form.hidden = !shouldShow;
+  if (errEl) errEl.style.display = 'none';
+
+  if (shouldShow) {
+    if ($('modalEditUsernameInput')) $('modalEditUsernameInput').value = currentUsername || '';
+    if ($('modalEditMobileInput')) $('modalEditMobileInput').value = currentMobileNumber ? currentMobileNumber.replace(/^\+91/, '') : '';
+    if ($('modalEditWhatsappCheckbox')) $('modalEditWhatsappCheckbox').checked = Boolean(currentWhatsappConsent);
+  }
+}
+
+async function saveProfileModalContactChanges() {
+  const usernameInput = $('modalEditUsernameInput');
+  const mobileInput = $('modalEditMobileInput');
+  const whatsappCheckbox = $('modalEditWhatsappCheckbox');
+  const errEl = $('modalEditContactError');
+  const btn = $('modalEditContactSaveBtn');
+
+  if (!user || !client) return;
+
+  if (errEl) errEl.style.display = 'none';
+
+  const newUsername = (usernameInput?.value || '').trim().replace(/[^A-Za-z]/g, '');
+  if (!newUsername) {
+    if (errEl) { errEl.textContent = 'Username / Name cannot be empty.'; errEl.style.display = 'block'; }
+    usernameInput?.focus();
+    return;
+  }
+
+  const rawMobile = (mobileInput?.value || '').trim();
+  const mobileVal = validateAndFormatIndianMobile(rawMobile);
+  if (!mobileVal.isValid) {
+    if (errEl) { errEl.textContent = mobileVal.error; errEl.style.display = 'block'; }
+    mobileInput?.focus();
+    return;
+  }
+
+  const formattedMobile = mobileVal.formatted;
+  const whatsappConsent = Boolean(whatsappCheckbox?.checked);
+  const nowIso = new Date().toISOString();
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  try {
+    // Uniqueness check if username changed
+    if (newUsername.toLowerCase() !== (currentUsername || '').toLowerCase()) {
+      const { data: existing } = await client
+        .from('profiles')
+        .select('id, username')
+        .ilike('username', newUsername)
+        .neq('id', user.id)
+        .maybeSingle();
+
+      if (existing && existing.id && existing.id !== user.id) {
+        if (errEl) {
+          errEl.textContent = `Username "${newUsername}" is already taken.`;
+          errEl.style.display = 'block';
+        }
+        if (btn) { btn.disabled = false; btn.textContent = 'Save Contact Details'; }
+        return;
+      }
+    }
+
+    const { error: updateErr } = await client
+      .from('profiles')
+      .update({
+        username: newUsername,
+        mobile_number: formattedMobile,
+        whatsapp_consent: whatsappConsent,
+        whatsapp_consent_at: whatsappConsent ? nowIso : null,
+        last_active: nowIso
+      })
+      .eq('id', user.id);
+
+    if (updateErr) throw updateErr;
+
+    currentUsername = newUsername;
+    currentMobileNumber = formattedMobile;
+    currentWhatsappConsent = whatsappConsent;
+
+    try { localStorage.setItem(`cracksql_username_${user.id}`, newUsername); } catch (_) {}
+
+    toggleEditProfileContactForm(false);
+    openProfileModal(); // Refresh modal view
+  } catch (err) {
+    console.error('[ProfileContact] Update exception:', err);
+    if (errEl) {
+      errEl.textContent = 'Failed to update: ' + (err.message || 'Please retry.');
+      errEl.style.display = 'block';
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Contact Details'; }
   }
 }
 
@@ -5211,6 +5296,16 @@ function openProfileModal() {
     $('modalProfileStatus').style.background = info.isLoggedIn ? '#dcfce7' : '#eff6ff';
     $('modalProfileStatus').style.color = info.isLoggedIn ? '#166534' : '#1e40af';
   }
+
+  if ($('modalProfileMobileVal')) {
+    $('modalProfileMobileVal').textContent = currentMobileNumber || 'Not provided';
+  }
+  if ($('modalProfileWhatsappVal')) {
+    const isConsented = currentWhatsappConsent === true;
+    $('modalProfileWhatsappVal').textContent = isConsented ? '✓ Subscribed' : 'Not subscribed';
+    $('modalProfileWhatsappVal').style.color = isConsented ? '#166534' : '#64748b';
+  }
+  toggleEditProfileContactForm(false);
 
   const totalExercises = scenarios.length || 240;
   const verifiedCount = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
@@ -5519,6 +5614,8 @@ Object.assign(window,{
   copySchemaAndOpenFiddle,buildFiddlePracticePackage,isCompleted,isAttempted,
   copyLearnerSql,clearLearnerSql,updateSqlEditorView,resetCurrentSqlSession,
   saveFirstTimeUsername,validateUsernameField,closeUsernameModal,
+  openProfileSetupModal,closeProfileSetupModal,saveProfileContactDetails,
+  toggleEditProfileContactForm,saveProfileModalContactChanges,validateAndFormatIndianMobile,
   checkAdminStatus,retryUserAccessCheck,
   openMotivationPopup,closeMotivationModal,handleMotivationRetry,handleMotivationNext,playThinkingScoreSound,
   openLevelCompletionModal,closeLevelCompletionModal,
@@ -5552,7 +5649,7 @@ try {
   initLandscapeMode();
   initNotificationsState(null);
   renderProfileAvatar();
-  let scenarioDataUrl = './data/Crack_SQL_420_Student_Business_Scenarios.json';
+  let scenarioDataUrl = './data/scenarios-metadata.json';
   let response = await fetch(scenarioDataUrl);
   if (!response.ok) {
     scenarioDataUrl = './data/scenarios.json';
@@ -5560,7 +5657,6 @@ try {
   }
   if (!response.ok) throw Error('Scenario download failed');
   data = await response.json();
-  validateScenariosData(data);
   scenarios = data.scenarios;
   ids = new Set(scenarios.map(s => s.id));
   state = readProgress(storage, null, ids);
@@ -5616,6 +5712,7 @@ try {
   if (solutionHelpEl) {
     solutionHelpEl.addEventListener('toggle',()=>{
       if(solutionHelpEl.open && current && stage(current,entry())==='verified'){
+        if ($('pseudo')) $('pseudo').textContent=current.pseudo;
         if ($('referenceSql')) $('referenceSql').textContent=current.sql;
         changeEntry({answerViewed:true});
       }
