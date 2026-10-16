@@ -722,11 +722,18 @@ function renderScenario() {
   $('home').classList.remove('active');$('progressScreen').classList.remove('active');$('practice').classList.add('active');
   if ($('navHome')) { $('navHome').classList.remove('active'); $('navProgress').classList.remove('active'); $('navPractice').classList.add('active'); }
   $('meta').textContent=effective.domain+' • '+effective.level;
-  $('title').textContent=effective.id;$('question').textContent=effective.question;
+  $('title').textContent = `${effective.domain} — ${effective.level} (Exercise ${effective.questionNo})`;
+  $('question').textContent=effective.question;
   const pool=scenarios.filter(s=>s.domain===effective.domain&&s.level===effective.level);
   $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
-  $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
-  renderSchemaCards(effective.schemaText);
+  $('tags').textContent = 'Read the situation → Explain your thinking → Review feedback';
+  const hasChecked = current && isAttempted(current, entry());
+  if (!hasChecked) {
+    if ($('schema')) $('schema').innerHTML = `<div style="padding:20px; background:#f8fafc; border:1px dashed var(--line); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; font-weight:700;">🔒 Schema Overview &amp; Sample Data unlock after checking your thinking.</div>`;
+    if ($('sampleDataView')) $('sampleDataView').innerHTML = `<div style="padding:20px; background:#f8fafc; border:1px dashed var(--line); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; font-weight:700;">🔒 Schema Overview &amp; Sample Data unlock after checking your thinking.</div>`;
+  } else {
+    renderSchemaCards(effective.schemaText);
+  }
   currentSampleTable = null;
   setSchemaTab('schema');
   $('thinking').value=thinkingText(e.thinking);
@@ -1757,6 +1764,7 @@ function evaluatePlan() {
     skill: effective.skill
   }, true);
   renderAssessment(assessment);
+  renderSchemaCards(effective.schemaText);
   updateGates();
 
   // Handle completion tracking and paywall/eligibility gates
