@@ -315,7 +315,7 @@ function renderAssessment(result) {
         </div>
         <div style="font-size:13px;line-height:1.6;color:var(--ink);">
           <div style="margin-bottom:6px;"><strong>1. Table:</strong> From the <code>${current.tables.join(', ')}</code> table${current.tables.length > 1 ? 's' : ''}, where this data lives.</div>
-          <div style="margin-bottom:6px;"><strong>2. What to do:</strong> ${escapeHtml(current.pseudo || 'Apply the required filter, join, or aggregation logic to isolate the target rows.')}</div>
+          <div style="margin-bottom:6px;"><strong>2. What to do:</strong> ${escapeHtml(current.thinkingExpectations?.find(e => e.includes('Describe') || e.includes('filter') || e.includes('transformation')) || current.skill || 'Apply the required filter, join, or aggregation logic to isolate target rows.')}</div>
           <div><strong>3. Expected result:</strong> Show the requested details in the final output.</div>
         </div>
       </div>
@@ -731,8 +731,10 @@ function renderScenario() {
   if (!hasChecked) {
     if ($('schema')) $('schema').innerHTML = `<div style="padding:20px; background:#f8fafc; border:1px dashed var(--line); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; font-weight:700;">🔒 Schema Overview &amp; Sample Data unlock after checking your thinking.</div>`;
     if ($('sampleDataView')) $('sampleDataView').innerHTML = `<div style="padding:20px; background:#f8fafc; border:1px dashed var(--line); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; font-weight:700;">🔒 Schema Overview &amp; Sample Data unlock after checking your thinking.</div>`;
+    if ($('optionalSqlCard')) $('optionalSqlCard').hidden = true;
   } else {
     renderSchemaCards(effective.schemaText);
+    if ($('optionalSqlCard')) $('optionalSqlCard').hidden = false;
   }
   currentSampleTable = null;
   setSchemaTab('schema');
@@ -1682,6 +1684,21 @@ async function loadScenario() {
   }
 
   const pool = scenarios.filter(s => s.domain === selectedDomain && s.level === selectedLevel);
+  if (!pool || pool.length === 0) {
+    if ($('question')) {
+      $('question').innerHTML = `
+        <div style="padding: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; color: #991b1b; font-size: 14px;">
+          <strong>⚠️ Unable to load questions for ${escapeHtml(selectedDomain || '')} (${escapeHtml(selectedLevel || '')}).</strong><br>
+          <span style="font-size:12.5px; opacity: 0.9;">Please check your connection or retry loading the question bank.</span><br>
+          <button class="action secondary sm" onclick="window.location.reload()" style="margin-top: 10px; padding: 6px 14px; cursor: pointer; font-weight: 700;">
+            🔄 Retry Loading Questions
+          </button>
+        </div>
+      `;
+    }
+    return;
+  }
+
   const next = chooseNext(pool, state, null);
   if (next) {
     const isTargetCompleted = isCompleted(next, state.entries[next.id]);
@@ -1698,7 +1715,7 @@ async function loadScenario() {
     current = await ensureFullScenario(next);
     renderScenario();
   } else {
-    // Case D: 20/20 completed. Do not reset to Question 1! Load last scenario in pool.
+    // Case D: 20/20 completed. Load last scenario in pool.
     if (pool.length > 0) {
       current = await ensureFullScenario(pool[pool.length - 1]);
       renderScenario();
@@ -1765,6 +1782,7 @@ function evaluatePlan() {
   }, true);
   renderAssessment(assessment);
   renderSchemaCards(effective.schemaText);
+  if ($('optionalSqlCard')) $('optionalSqlCard').hidden = false;
   updateGates();
 
   // Handle completion tracking and paywall/eligibility gates
@@ -3376,7 +3394,7 @@ async function openScenario(id) {
 function showSampleThinking() {
   if (!current) return;
   const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
-  $('thinking').value = effective.exampleThinking || effective.pseudo;
+  $('thinking').value = effective.exampleThinking || (Array.isArray(effective.thinkingExpectations) ? effective.thinkingExpectations.join('\n') : `Query the ${effective.tables.join(', ')} table to calculate the required scenario output.`);
   evaluatePlan();
 }
 function improveLogic() {
@@ -3758,11 +3776,49 @@ function renderProgressScreen() {
     `;
   }).join('');
 
+  const recentEntries = Object.entries(state.entries || {})
+    .filter(([_, e]) => e && (e.updatedAt || e.score || e.thinkingScore || e.status))
+    .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0))
+    .slice(0, 5);
+
+  let recentActivityHtml = '';
+  if (recentEntries.length > 0) {
+    const itemsHtml = recentEntries.map(([sId, e]) => {
+      const scenario = scenarios.find(s => s.id === sId) || { id: sId, domain: 'Practice', level: '', questionNo: '' };
+      const score = typeof e.assessment?.score === 'number' ? e.assessment.score : (typeof e.score === 'number' ? e.score : 0);
+      const isDone = isCompleted(scenario, e);
+      const badgeStyle = isDone ? 'background:#dcfce7; color:#166534;' : 'background:#fef3c7; color:#b45309;';
+      const badgeText = isDone ? `Completed (${score}/10)` : (e.status === 'attempted' ? `Attempted (${score}/10)` : 'In Progress');
+      const dateStr = e.updatedAt ? new Date(e.updatedAt).toLocaleDateString() : 'Recently';
+
+      return `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#f8fafc; border:1px solid var(--line); border-radius:10px; margin-bottom:8px;">
+          <div>
+            <div style="font-weight:800; font-size:13.5px; color:var(--ink);">${escapeHtml(scenario.domain || 'SQL Practice')} ${scenario.level ? '• ' + escapeHtml(scenario.level) : ''} ${scenario.questionNo ? '(Ex ' + scenario.questionNo + ')' : ''}</div>
+            <div style="font-size:12px; color:var(--muted);">${escapeHtml(scenario.question ? (scenario.question.length > 65 ? scenario.question.slice(0, 65) + '...' : scenario.question) : scenario.id)}</div>
+          </div>
+          <div style="text-align:right; flex-shrink:0; margin-left:12px;">
+            <span style="font-size:11px; font-weight:800; padding:3px 8px; border-radius:999px; ${badgeStyle}">${badgeText}</span>
+            <div style="font-size:11px; color:var(--muted); margin-top:3px;">${dateStr}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    recentActivityHtml = `
+      <div style="margin-top: 16px; text-align: left; border-top: 1px solid var(--line); padding-top: 14px;">
+        <h3 style="font-size:14px; font-weight:800; margin:0 0 10px; color:var(--ink);">Recent Practice Activity</h3>
+        ${itemsHtml}
+      </div>
+    `;
+  }
+
   const container = $('domainChartContent');
   if (container) {
     container.innerHTML = `
       <div style="width:100%;">
         ${domainRowsHtml}
+        ${recentActivityHtml}
       </div>
     `;
   }
@@ -5560,7 +5616,6 @@ try {
   if (solutionHelpEl) {
     solutionHelpEl.addEventListener('toggle',()=>{
       if(solutionHelpEl.open && current && stage(current,entry())==='verified'){
-        if ($('pseudo')) $('pseudo').textContent=current.pseudo;
         if ($('referenceSql')) $('referenceSql').textContent=current.sql;
         changeEntry({answerViewed:true});
       }

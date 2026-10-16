@@ -96,4 +96,12 @@ describe('Crack SQL 420 Scenarios & Progress System Verification', () => {
     assert.strictEqual(isCompleted(null, merged.entries['BAN_BEG_001']), true, 'Newer completed progress must win over older remote state');
     assert.strictEqual(merged.entries['BAN_BEG_001'].assessment.score, 10);
   });
+
+  it('verifies every scenario record has an explicit non-empty question field and valid sql query', () => {
+    for (const s of data.scenarios) {
+      assert(s.question && typeof s.question === 'string' && s.question.trim().length > 5, `Scenario ${s.id} must have a valid question prompt`);
+      assert(s.sql && typeof s.sql === 'string' && s.sql.trim().length > 5, `Scenario ${s.id} must have a valid SQL statement`);
+      assert(!/pseudo/i.test(s.sql), `Scenario ${s.id} SQL must not contain pseudo text`);
+    }
+  });
 });

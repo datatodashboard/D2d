@@ -304,9 +304,16 @@ h2 {
   line-height:1.2;
 }
 .problem {
-  color:#334155;
-  line-height:1.55;
-  font-size:15px;
+  color:#0f172a;
+  line-height:1.6;
+  font-size:15.5px;
+  font-weight:700;
+  background:#f8fafc;
+  border-left:4px solid var(--primary);
+  border-radius:10px;
+  padding:12px 16px;
+  margin-top:10px;
+  box-shadow:0 1px 3px rgba(15,23,42,0.05);
 }
 .tags { display:flex; gap:7px; flex-wrap:wrap; margin-top:12px; }
 .tag {
@@ -5069,7 +5076,7 @@ body.landscape-layout .practice-container {
     </div>
 
     <!-- Optional SQL Practice Section -->
-    <div class="card optional-sql-card" style="text-align: center; padding: 22px 18px; margin-top: 4px;">
+    <div class="card optional-sql-card" id="optionalSqlCard" style="text-align: center; padding: 22px 18px; margin-top: 4px;">
       <p style="font-size: 14px; color: var(--ink); margin: 0 0 14px; line-height: 1.5;">
         Want to try the SQL yourself? You can copy the scenario setup and practice it in DB Fiddle.
       </p>
