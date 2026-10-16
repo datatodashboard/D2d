@@ -1,6 +1,6 @@
 import {evaluateThinking, thinkingIsReady, thinkingText} from './thinking.js';
 import {EMPTY, readProgress, saveProgress, mergeProgress, sanitize, nextTimestamp, workFingerprint, stage, isCompleted, isAttempted, chooseNext, importLegacy, storageKey} from './progress.js';
-import {getEffectiveScenario, recordSkillAttempt} from './curriculum.js';
+import {getEffectiveScenario, recordSkillAttempt, validateScenariosData} from './curriculum.js';
 import {createCloudSync} from './cloud.js';
 import {renderSchemaCards, buildFiddlePracticePackage} from './schema.js';
 import {escapeHtml, getOAuthRedirectUrl} from './util.js';
@@ -3683,17 +3683,13 @@ function renderScenarioCatalog() {
 
 function renderProgressScreen() {
   if (!scenarios.length) return;
-  const trackScenarios = (currentDomainTrack === 'core')
-    ? scenarios.filter(s => CORE_DOMAINS.includes(s.domain))
-    : scenarios;
-  
-  const totalQuestions = trackScenarios.length;
-  const completedCount = trackScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
-  const inProgressCount = trackScenarios.filter(s => isAttempted(s, state.entries[s.id]) && !isCompleted(s, state.entries[s.id])).length;
+  const totalQuestions = 420;
+  const completedCount = scenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+  const inProgressCount = scenarios.filter(s => isAttempted(s, state.entries[s.id]) && !isCompleted(s, state.entries[s.id])).length;
   const completionPct = totalQuestions > 0 ? Math.round((completedCount / totalQuestions) * 100) : 0;
 
   let totalScore = 0, countWithScore = 0;
-  for (const s of trackScenarios) {
+  for (const s of scenarios) {
     const e = state.entries[s.id];
     if (e?.assessment?.score !== undefined && typeof e.assessment.score === 'number') {
       totalScore += e.assessment.score;
@@ -3703,85 +3699,62 @@ function renderProgressScreen() {
   const avgScore = countWithScore ? (totalScore / countWithScore).toFixed(1) : '0.0';
 
   if ($('progressTrackSubtitle')) {
-    const trackTitle = currentDomainTrack === 'core' 
-      ? '4 Core Domains Track (240 questions)' 
-      : 'All Domains Track (420 questions)';
-    $('progressTrackSubtitle').textContent = `${trackTitle} • ${completedCount} Completed • ${inProgressCount} In Progress`;
+    $('progressTrackSubtitle').textContent = `All Domains Track (420 questions) • ${completedCount} Completed • ${inProgressCount} In Progress`;
   }
   if ($('progressTotalQuestions')) $('progressTotalQuestions').textContent = String(totalQuestions);
-  if ($('progressCompletedQuestions')) $('progressCompletedQuestions').textContent = String(completedCount);
+  if ($('progressCompletedQuestions')) $('progressCompletedQuestions').textContent = `${completedCount} / 420`;
   if ($('progressCompletionPct')) $('progressCompletionPct').textContent = `${completionPct}%`;
   if ($('progressAvgThinkingScore')) $('progressAvgThinkingScore').textContent = `${avgScore} / 10`;
 
-  // Domain-wise completed questions: Banking, Healthcare, Insurance, Retail
-  const targetDomains = [
+  const allDomains = [
     { name: 'Banking', icon: '🏦', color: '#2563eb' },
     { name: 'Healthcare', icon: '🏥', color: '#059669' },
     { name: 'Insurance', icon: '🛡️', color: '#7c3aed' },
+    { name: 'Capital Markets', icon: '📈', color: '#0284c7' },
+    { name: 'Semiconductor', icon: '🔬', color: '#d97706' },
+    { name: 'Education', icon: '🎓', color: '#9333ea' },
     { name: 'Retail', icon: '🛒', color: '#ea580c' }
   ];
 
-  const domainCounts = targetDomains.map(d => {
+  const domainRowsHtml = allDomains.map(d => {
     const dScenarios = scenarios.filter(s => s.domain === d.name);
-    const count = dScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
-    return { ...d, count, total: dScenarios.length };
-  });
+    const dCompleted = dScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    const dPct = Math.round((dCompleted / 60) * 100);
 
-  const sumDomainCompleted = domainCounts.reduce((acc, cur) => acc + cur.count, 0);
+    const begScenarios = dScenarios.filter(s => s.level === 'Beginner');
+    const intScenarios = dScenarios.filter(s => s.level === 'Intermediate');
+    const expScenarios = dScenarios.filter(s => s.level === 'Expert');
+
+    const begCount = begScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    const intCount = intScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+    const expCount = expScenarios.filter(s => isCompleted(s, state.entries[s.id])).length;
+
+    return `
+      <div style="background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:20px;">${d.icon}</span>
+            <span style="font-weight:800; font-size:15px; color:var(--ink);">${d.name}</span>
+          </div>
+          <div style="font-size:13px; font-weight:800; color:var(--primary);">${dCompleted} / 60 (${dPct}%)</div>
+        </div>
+        <div style="background:#e2e8f0; border-radius:999px; height:8px; overflow:hidden; margin-bottom:10px;">
+          <div style="background:${d.color}; height:100%; width:${dPct}%; border-radius:999px; transition:width 0.3s ease;"></div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; font-size:11.5px; color:var(--muted); text-align:center; background:#f8fafc; padding:6px 8px; border-radius:8px;">
+          <div>Beginner: <strong style="color:var(--ink);">${begCount}/20</strong></div>
+          <div>Intermediate: <strong style="color:var(--ink);">${intCount}/20</strong></div>
+          <div>Expert: <strong style="color:var(--ink);">${expCount}/20</strong></div>
+        </div>
+      </div>
+    `;
+  }).join('');
 
   const container = $('domainChartContent');
   if (container) {
-    const size = 140;
-    const r = 50;
-    const cx = size / 2;
-    const cy = size / 2;
-    const circumference = 2 * Math.PI * r;
-
-    let slicesSvg = '';
-    if (sumDomainCompleted === 0) {
-      slicesSvg = `
-        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e2e8f0" stroke-width="16" />
-        <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="20" font-weight="900" fill="#94a3b8">0</text>
-        <text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="11" font-weight="700" fill="#94a3b8">Completed</text>
-      `;
-    } else {
-      let accumulatedOffset = 0;
-      const paths = domainCounts.map(d => {
-        if (d.count === 0) return '';
-        const sliceLength = (d.count / sumDomainCompleted) * circumference;
-        const offset = -accumulatedOffset;
-        accumulatedOffset += sliceLength;
-        return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${d.color}" stroke-width="16" stroke-dasharray="${sliceLength.toFixed(2)} ${(circumference - sliceLength).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" />`;
-      }).filter(Boolean);
-
-      slicesSvg = `
-        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="16" />
-        <g transform="rotate(-90 ${cx} ${cy})">
-          ${paths.join('')}
-        </g>
-        <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="900" fill="var(--ink)">${sumDomainCompleted}</text>
-        <text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--muted)">Completed</text>
-      `;
-    }
-
-    const legendHtml = domainCounts.map(d => `
-      <div class="domain-legend-row">
-        <div class="domain-legend-left">
-          <span class="domain-color-dot" style="background:${d.color};"></span>
-          <span>${d.icon} <b>${d.name}</b></span>
-        </div>
-        <div class="domain-legend-count"><b>${d.count}</b> completed</div>
-      </div>
-    `).join('');
-
     container.innerHTML = `
-      <div class="donut-chart-box" style="flex-shrink:0;">
-        <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Domain completion chart">
-          ${slicesSvg}
-        </svg>
-      </div>
-      <div class="domain-legend-list">
-        ${legendHtml}
+      <div style="width:100%;">
+        ${domainRowsHtml}
       </div>
     `;
   }
@@ -5515,7 +5488,7 @@ try {
   initLandscapeMode();
   initNotificationsState(null);
   renderProfileAvatar();
-  let scenarioDataUrl = './data/scenarios-metadata.json';
+  let scenarioDataUrl = './data/Crack_SQL_420_Student_Business_Scenarios.json';
   let response = await fetch(scenarioDataUrl);
   if (!response.ok) {
     scenarioDataUrl = './data/scenarios.json';
@@ -5523,6 +5496,7 @@ try {
   }
   if (!response.ok) throw Error('Scenario download failed');
   data = await response.json();
+  validateScenariosData(data);
   scenarios = data.scenarios;
   ids = new Set(scenarios.map(s => s.id));
   state = readProgress(storage, null, ids);

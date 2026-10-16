@@ -682,6 +682,6 @@ for(const domain of domains) {
 }
 for(const scenario of scenarios)aliases[scenario.id]=scenario.id;
 
-const output={version:4,requiredDomains:['Banking','Healthcare','Insurance','Capital Markets','Semiconductor','Education'],scenarios,aliases,assets};
+const output={version:4,requiredDomains:['Banking','Healthcare','Insurance','Capital Markets','Semiconductor','Education','Retail'],scenarios,aliases,assets};
 fs.writeFileSync(new URL('../data/scenarios.json',import.meta.url),JSON.stringify(output,null,2)+'\n');
 console.log(`Wrote ${scenarios.length} scenarios across ${domains.length} domains with metadata and variants.`);

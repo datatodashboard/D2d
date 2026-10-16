@@ -8,10 +8,10 @@ const data = JSON.parse(fs.readFileSync('./data/scenarios.json', 'utf8'));
 const scenarios = data.scenarios;
 
 describe('Domain Experience & Curriculum Regression Tests', () => {
-  const targetDomains = ['Healthcare', 'Banking', 'Insurance', 'Capital Markets', 'Semiconductor', 'Education'];
+  const targetDomains = ['Banking', 'Healthcare', 'Insurance', 'Capital Markets', 'Semiconductor', 'Education', 'Retail'];
 
   describe('TEST 5 – Domain Experience (Distinct & Schema-Valid)', () => {
-    it('verifies all 6 domains have 20 Beginner questions aligned to realistic business concepts', () => {
+    it('verifies all 7 domains have 20 Beginner questions aligned to realistic business concepts', () => {
       for (const domain of targetDomains) {
         const domainBeg = scenarios.filter(s => s.domain === domain && s.level === 'Beginner');
         assert.strictEqual(domainBeg.length, 20, `${domain} must have exactly 20 Beginner scenarios`);

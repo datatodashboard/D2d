@@ -1,4 +1,5 @@
 import {thinkingIsReady} from './thinking.js';
+import {resolveCanonicalScenarioId} from './curriculum.js';
 export const EMPTY = () => ({version:2, resetAt:0, entries:{}});
 export const storageKey = userId => 'crackSqlProgress:v2:' + (userId ? 'user:' + userId : 'guest');
 export function sanitize(value, ids) {
@@ -6,7 +7,8 @@ export function sanitize(value, ids) {
   if (!value || typeof value !== 'object' || typeof value.entries !== 'object' || !value.entries || Array.isArray(value.entries)) return result;
   result.version = 2;
   result.resetAt = Number.isFinite(value.resetAt) ? Math.max(0,value.resetAt) : 0;
-  for (const [id,entry] of Object.entries(value.entries)) {
+  for (const [rawId,entry] of Object.entries(value.entries)) {
+    const id = resolveCanonicalScenarioId(rawId);
     if ((ids && ids.size > 0 && !ids.has(id)) || !entry || typeof entry !== 'object' || !Number.isFinite(entry.updatedAt) || entry.updatedAt <= result.resetAt) continue;
     const thinking = {response:String(entry.thinking?.response||'').slice(0,8000)};
     // Keep earlier four-box answers readable after upgrading to the single-box UI.
@@ -39,8 +41,9 @@ export function sanitize(value, ids) {
     const status = typeof entry.status === 'string' && entry.status
       ? (completed ? 'completed' : entry.status)
       : (completed ? 'completed' : (attempts > 0 || score !== null) ? 'attempted' : 'in_progress');
-    result.entries[id] = {thinking, sql:String(entry.sql || '').slice(0,20000),
+    const newEntry = {thinking, sql:String(entry.sql || '').slice(0,20000),
       variantIndex: Number.isFinite(entry.variantIndex) ? entry.variantIndex : null,
+      variantId: entry.variantId || (rawId !== id ? rawId : null),
       skill: typeof entry.skill === 'string' ? entry.skill : null,
       score,
       thinkingScore,
@@ -58,6 +61,27 @@ export function sanitize(value, ids) {
       validationNotes:String(entry.validationNotes || '').slice(0,4000),
       answerViewed:!!entry.answerViewed, legacyViewed:!!entry.legacyViewed,
       updatedAt:entry.updatedAt};
+
+    const existing = result.entries[id];
+    if (existing) {
+      const isExistingCompleted = isCompleted(null, existing);
+      const isNewCompleted = isCompleted(null, newEntry);
+      if (isExistingCompleted && !isNewCompleted) {
+        // Keep existing completed status, merge any newer non-destructive fields
+        result.entries[id] = { ...newEntry, ...existing, attempts: Math.max(existing.attempts || 0, newEntry.attempts || 0), completed: true, status: 'completed' };
+      } else if (!isExistingCompleted && isNewCompleted) {
+        result.entries[id] = newEntry;
+      } else {
+        // Both completed or both incomplete: keep the one with higher score or newer timestamp
+        const existScore = existing.score ?? existing.thinkingScore ?? 0;
+        const newScore = newEntry.score ?? newEntry.thinkingScore ?? 0;
+        if (newScore > existScore || (newScore === existScore && newEntry.updatedAt >= existing.updatedAt)) {
+          result.entries[id] = newEntry;
+        }
+      }
+    } else {
+      result.entries[id] = newEntry;
+    }
   }
   if (value.skills && typeof value.skills === 'object') {
     result.skills = value.skills;
