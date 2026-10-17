@@ -719,6 +719,7 @@ function renderScenario() {
   $('home').classList.remove('active');$('progressScreen').classList.remove('active');$('practice').classList.add('active');
   if ($('navHome')) { $('navHome').classList.remove('active'); $('navProgress').classList.remove('active'); $('navPractice').classList.add('active'); }
   $('meta').textContent=effective.domain+' • '+effective.level;
+  $('title').textContent = 'Business Scenario • ' + effective.canonicalId;
   const qText = effective?.question || current?.question;
   const qEl = $('question');
   if (qEl) {
