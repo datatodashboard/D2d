@@ -684,6 +684,20 @@ async function resetCurrentSqlSession() {
   }
 }
 
+// Presentation only: do not change the scenario used for evaluation or progress.
+function getPracticeQuestionPresentation(scenario, selectedVariant = null) {
+  const question = selectedVariant ? selectedVariant.question : scenario.question;
+  const text = typeof question === 'string' ? question : '';
+  // Split only a recognizable trailing instruction, retaining its original wording.
+  // Unknown wording stays intact in the business card.
+  const instruction = /(?:How would you (?:prepare|produce|obtain|organize|present) [^?\n]+\?\s*)?(?:Explain|Describe) your (?:approach|reasoning|method) in your own words\.\s*(?:You do not need to write SQL|No SQL is required)\.[ \t\r\n]*$/i.exec(text);
+  if (instruction && instruction.index > 0 && /[.!?\s]/.test(text[instruction.index - 1])) {
+    const business = text.slice(0, instruction.index);
+    if (business.trim()) return { business, instruction: instruction[0] };
+  }
+  return { business: text, instruction: '' };
+}
+
 function renderScenario() {
   if (!current) return;
   const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
@@ -719,8 +733,14 @@ function renderScenario() {
   $('home').classList.remove('active');$('progressScreen').classList.remove('active');$('practice').classList.add('active');
   if ($('navHome')) { $('navHome').classList.remove('active'); $('navProgress').classList.remove('active'); $('navPractice').classList.add('active'); }
   $('meta').textContent=effective.domain+' • '+effective.level;
-  $('title').textContent = 'Business Scenario • ' + effective.canonicalId;
-  const qText = effective?.question || current?.question;
+  $('title').textContent = `${effective.domain} ${effective.level} Question ${effective.questionNo}`;
+  $('scenarioId').textContent = `(${current.id})`;
+  const presentation = getPracticeQuestionPresentation(
+    { question: current.question ?? effective.question }, current.selectedVariant ?? null
+  );
+  const qText = presentation.business;
+  $('thinkingInstruction').textContent = presentation.instruction;
+  $('thinkingInstructionCard').hidden = !presentation.instruction;
   const qEl = $('question');
   if (qEl) {
     if (!qText || typeof qText !== 'string' || !qText.trim()) {
