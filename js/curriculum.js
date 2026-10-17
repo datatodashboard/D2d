@@ -49,9 +49,24 @@ export function getVariantIndex(scenario, userId = 'guest_user') {
  */
 export function getEffectiveScenario(scenario, userId = 'guest_user', state = null) {
   if (!scenario) return null;
+  const question = String(scenario.business_scenario || scenario.question || '').trim();
+  const schemaText = String(scenario.schema || scenario.schemaText || '').trim();
+  const pseudo = String(scenario.solution_approach || scenario.pseudo || '').trim();
+  const sql = String(scenario.answer_sql || scenario.sql || '').trim();
+  let tables = Array.isArray(scenario.tables) && scenario.tables.length > 0 ? scenario.tables : [];
+  if (tables.length === 0 && schemaText) {
+    tables = schemaText.split(';').map(t => t.trim().split('(')[0].trim()).filter(Boolean);
+  }
   return {
     ...scenario,
-    canonicalId: scenario.id
+    canonicalId: scenario.id,
+    question,
+    schemaText,
+    pseudo,
+    sql,
+    tables,
+    requiredTables: scenario.requiredTables || tables,
+    relevantColumns: scenario.relevantColumns || []
   };
 }
 
@@ -108,21 +123,22 @@ export function resolveCanonicalScenarioId(id, aliasesMap = null) {
  */
 export function validateScenariosData(data) {
   if (!data || typeof data !== 'object') {
-    throw new Error('Scenario validation failed: root must be a valid JSON object.');
+    throw new Error('Scenario validation failed: root must be a valid JSON object or array.');
   }
 
-  if (!Array.isArray(data.scenarios)) {
-    throw new Error('Scenario validation failed: missing "scenarios" array.');
+  const list = Array.isArray(data) ? data : (Array.isArray(data.scenarios) ? data.scenarios : null);
+  if (!list) {
+    throw new Error('Scenario validation failed: missing scenario array.');
   }
 
-  if (data.scenarios.length !== 420) {
-    throw new Error(`Scenario validation failed: expected 420 canonical scenarios, found ${data.scenarios.length}.`);
+  if (list.length !== 420) {
+    throw new Error(`Scenario validation failed: expected 420 canonical scenarios, found ${list.length}.`);
   }
 
   const seenIds = new Set();
   const domainLevelCounts = {};
 
-  for (const [idx, s] of data.scenarios.entries()) {
+  for (const [idx, s] of list.entries()) {
     if (!s || typeof s !== 'object') {
       throw new Error(`Scenario validation failed at index ${idx}: scenario must be an object.`);
     }
@@ -140,14 +156,23 @@ export function validateScenariosData(data) {
     if (!s.level || !CANONICAL_LEVELS.includes(s.level)) {
       throw new Error(`Scenario validation failed for ${s.id}: unrecognized level "${s.level}".`);
     }
-    if (typeof s.questionNo !== 'number' || s.questionNo < 1 || s.questionNo > 20) {
-      throw new Error(`Scenario validation failed for ${s.id}: questionNo must be an integer between 1 and 20.`);
+
+    const question = String(s.business_scenario || s.question || '').trim();
+    const sql = String(s.answer_sql || s.sql || '').trim();
+    const schemaText = String(s.schema || s.schemaText || '').trim();
+    const pseudo = String(s.solution_approach || s.pseudo || '').trim();
+
+    if (question.length === 0) {
+      throw new Error(`Scenario validation failed for ${s.id}: missing question/business_scenario text.`);
     }
-    if (!s.question || typeof s.question !== 'string' || s.question.trim().length === 0) {
-      throw new Error(`Scenario validation failed for ${s.id}: missing question text.`);
+    if (sql.length === 0) {
+      throw new Error(`Scenario validation failed for ${s.id}: missing reference sql/answer_sql.`);
     }
-    if (!s.sql || typeof s.sql !== 'string' || s.sql.trim().length === 0) {
-      throw new Error(`Scenario validation failed for ${s.id}: missing reference sql.`);
+    if (schemaText.length === 0) {
+      throw new Error(`Scenario validation failed for ${s.id}: missing schema/schemaText.`);
+    }
+    if (pseudo.length === 0) {
+      throw new Error(`Scenario validation failed for ${s.id}: missing pseudo/solution_approach.`);
     }
 
     const key = `${s.domain}_${s.level}`;
@@ -165,8 +190,7 @@ export function validateScenariosData(data) {
     }
   }
 
-  // Ensure requiredDomains safely includes Retail if present
-  if (Array.isArray(data.requiredDomains) && !data.requiredDomains.includes('Retail')) {
+  if (typeof data === 'object' && !Array.isArray(data) && Array.isArray(data.requiredDomains) && !data.requiredDomains.includes('Retail')) {
     data.requiredDomains.push('Retail');
   }
 

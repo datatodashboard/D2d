@@ -15,14 +15,42 @@ const HOST = '0.0.0.0';
 app.use(express.json());
 
 // Load authoritative scenario catalog
-const scenariosPath = path.join(__dirname, 'data', 'scenarios.json');
+const scenariosPathSimple = path.join(__dirname, 'data', 'Crack_SQL_420_Simple.json');
+const scenariosPathDefault = path.join(__dirname, 'data', 'scenarios.json');
 let scenariosMap = new Map();
 try {
+  const scenariosPath = fs.existsSync(scenariosPathSimple) ? scenariosPathSimple : scenariosPathDefault;
   const scenariosRaw = JSON.parse(fs.readFileSync(scenariosPath, 'utf8'));
-  scenariosMap = new Map((scenariosRaw.scenarios || []).map(s => [s.id, s]));
-  console.log(`[Backend Catalog] Loaded ${scenariosMap.size} trusted scenarios.`);
+  const rawList = Array.isArray(scenariosRaw) ? scenariosRaw : (scenariosRaw.scenarios || []);
+  scenariosMap = new Map(rawList.map(s => {
+    if (!s) return null;
+    const question = String(s.business_scenario || s.question || '').trim();
+    const schemaText = String(s.schema || s.schemaText || '').trim();
+    const pseudo = String(s.solution_approach || s.pseudo || '').trim();
+    const sql = String(s.answer_sql || s.sql || '').trim();
+    let tables = Array.isArray(s.tables) && s.tables.length > 0 ? s.tables : [];
+    if (tables.length === 0 && schemaText) {
+      tables = schemaText.split(';').map(t => t.trim().split('(')[0].trim()).filter(Boolean);
+    }
+    const norm = {
+      ...s,
+      id: s.id,
+      domain: s.domain,
+      level: s.level,
+      questionNo: typeof s.questionNo === 'number' ? s.questionNo : (parseInt(String(s.id).slice(-3) || '1', 10)),
+      question,
+      schemaText,
+      pseudo,
+      sql,
+      tables,
+      requiredTables: s.requiredTables || tables,
+      relevantColumns: s.relevantColumns || []
+    };
+    return [norm.id, norm];
+  }).filter(Boolean));
+  console.log(`[Backend Catalog] Loaded ${scenariosMap.size} trusted scenarios from ${path.basename(scenariosPath)}.`);
 } catch (loadErr) {
-  console.error('[Backend Catalog] Error loading scenarios.json:', loadErr);
+  console.error('[Backend Catalog] Error loading scenario catalog file:', loadErr);
 }
 
 // Health check endpoints for Cloud Run, load balancers, and monitoring

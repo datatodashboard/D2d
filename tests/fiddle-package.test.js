@@ -41,30 +41,24 @@ describe('DB Fiddle Practice Package Preparation & Verification', () => {
     assert.notStrictEqual(healthcareScenario.sql, retailScenario.sql, 'Answers should not be generic identical queries');
   });
 
-  it('3. handles variants with variant-specific question and matching reference SQL', () => {
-    const scenarioWithVariants = data.scenarios.find(s => s.variants && s.variants.length > 1);
-    assert(scenarioWithVariants, 'Should find a scenario with variants');
+  it('3. packages scenarios with scenario question and matching reference SQL', () => {
+    const s1 = data.scenarios[0];
+    const s2 = data.scenarios[1];
 
-    const v1 = scenarioWithVariants.variants[0];
-    const v2 = scenarioWithVariants.variants[1];
+    const pkg1 = buildFiddlePracticePackage(s1, data.assets[s1.domain]);
+    const pkg2 = buildFiddlePracticePackage(s2, data.assets[s2.domain]);
 
-    const effectiveV1 = { ...scenarioWithVariants, ...v1 };
-    const effectiveV2 = { ...scenarioWithVariants, ...v2 };
-
-    const pkgV1 = buildFiddlePracticePackage(effectiveV1, data.assets[effectiveV1.domain]);
-    const pkgV2 = buildFiddlePracticePackage(effectiveV2, data.assets[effectiveV2.domain]);
-
-    assert(pkgV1.includes(v1.sql), 'Package for variant 1 must include variant 1 SQL');
-    assert(pkgV2.includes(v2.sql), 'Package for variant 2 must include variant 2 SQL');
-    assert(pkgV1.includes(v1.question), 'Package for variant 1 must include variant 1 question');
-    assert(pkgV2.includes(v2.question), 'Package for variant 2 must include variant 2 question');
+    assert(pkg1.includes(s1.sql || s1.answer_sql), 'Package 1 must include reference SQL');
+    assert(pkg2.includes(s2.sql || s2.answer_sql), 'Package 2 must include reference SQL');
+    assert(pkg1.includes(s1.question || s1.business_scenario), 'Package 1 must include question text');
+    assert(pkg2.includes(s2.question || s2.business_scenario), 'Package 2 must include question text');
   });
 
   it('4. packages execute successfully in PostgreSQL (PGlite) engine matching DB Fiddle', async () => {
     const sampleScenarios = [
       data.scenarios.find(s => s.domain === 'Banking' && s.level === 'Beginner'),
       data.scenarios.find(s => s.domain === 'Healthcare' && s.level === 'Intermediate'),
-      data.scenarios.find(s => s.domain === 'Insurance' && s.level === 'Advanced'),
+      data.scenarios.find(s => s.domain === 'Insurance' && (s.level === 'Expert' || s.level === 'Advanced')),
       data.scenarios.find(s => s.domain === 'Capital Markets' && s.level === 'Beginner'),
       data.scenarios.find(s => s.domain === 'Education' && s.level === 'Intermediate')
     ].filter(Boolean);
@@ -85,26 +79,20 @@ describe('DB Fiddle Practice Package Preparation & Verification', () => {
     }
   });
 
-  it('5. validates all 420 scenarios and all variants have non-empty reference answers', () => {
+  it('5. validates all 420 scenarios have non-empty reference answers', () => {
     const missingAnswers = [];
 
     for (const s of data.scenarios) {
-      if (!s.sql || typeof s.sql !== 'string' || !s.sql.trim()) {
+      const sql = s.answer_sql || s.sql;
+      if (!sql || typeof sql !== 'string' || !sql.trim()) {
         missingAnswers.push({ id: s.id, reason: 'missing scenario.sql' });
-      }
-      if (s.variants) {
-        for (const v of s.variants) {
-          if (!v.sql || typeof v.sql !== 'string' || !v.sql.trim()) {
-            missingAnswers.push({ id: s.id, variantId: v.variantId, reason: 'missing variant.sql' });
-          }
-        }
       }
     }
 
     assert.strictEqual(
       missingAnswers.length,
       0,
-      `All scenarios and variants must have validated reference SQL answers. Missing: ${JSON.stringify(missingAnswers)}`
+      `All scenarios must have validated reference SQL answers. Missing: ${JSON.stringify(missingAnswers)}`
     );
   });
 });

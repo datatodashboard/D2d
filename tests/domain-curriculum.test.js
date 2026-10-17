@@ -70,10 +70,9 @@ describe('Domain Experience & Curriculum Regression Tests', () => {
     });
   });
 
-  describe('TEST 6 – User Variation & Core Skill Blueprint Coverage', () => {
-    it('provides scenario variants for different users while covering identical skills', () => {
+  describe('TEST 6 – Single Scenario Consistency & Content Normalization', () => {
+    it('verifies different users receive identical content for the same scenario ID', () => {
       const heaBeg = scenarios.filter(s => s.domain === 'Healthcare' && s.level === 'Beginner');
-
       const userA = 'user_alice_123';
       const userB = 'user_bob_456';
 
@@ -83,74 +82,88 @@ describe('Domain Experience & Curriculum Regression Tests', () => {
       assert.strictEqual(userASession.length, 20);
       assert.strictEqual(userBSession.length, 20);
 
-      // Verify both sessions cover the exact same sequence of skills and difficulty
       for (let i = 0; i < 20; i++) {
-        assert.strictEqual(userASession[i].skill, userBSession[i].skill,
-          `Skill at index ${i} must match between users (${userASession[i].skill})`);
-        assert.strictEqual(userASession[i].difficulty, userBSession[i].difficulty,
-          `Difficulty at index ${i} must match`);
-
-        // Both variants must be schema-valid
-        assert(userASession[i].tables.length > 0);
-        assert(userBSession[i].tables.length > 0);
+        assert.strictEqual(userASession[i].question, userBSession[i].question, `Question ${i} must match between users`);
+        assert.strictEqual(userASession[i].sql, userBSession[i].sql, `SQL ${i} must match between users`);
+        assert.strictEqual(userASession[i].schemaText, userBSession[i].schemaText, `Schema ${i} must match between users`);
       }
+    });
 
-      // Verify that across the 20 questions, at least some variants differ between the two users
-      const differentQuestions = userASession.filter((sA, idx) => sA.question !== userBSession[idx].question);
-      assert(differentQuestions.length > 0,
-        `Different users should receive distinct scenario variants (found ${differentQuestions.length} variations)`);
+    it('verifies all 420 scenarios have unique IDs and non-empty normalized content', () => {
+      assert.strictEqual(scenarios.length, 420, 'Must have exactly 420 scenarios');
+      const seenIds = new Set();
+
+      for (const s of scenarios) {
+        const effective = getEffectiveScenario(s);
+        assert(effective.id, 'Scenario must have an id');
+        assert(!seenIds.has(effective.id), `Duplicate scenario ID "${effective.id}"`);
+        seenIds.add(effective.id);
+
+        assert(effective.question && effective.question.length > 0, `Scenario ${effective.id} question must be non-empty`);
+        assert(effective.schemaText && effective.schemaText.length > 0, `Scenario ${effective.id} schemaText must be non-empty`);
+        assert(effective.pseudo && effective.pseudo.length > 0, `Scenario ${effective.id} pseudo must be non-empty`);
+        assert(effective.sql && effective.sql.length > 0, `Scenario ${effective.id} sql must be non-empty`);
+      }
+    });
+
+    it('verifies each of the 7 domains has 20 questions per level (420 total)', () => {
+      const domains = ['Banking', 'Healthcare', 'Insurance', 'Capital Markets', 'Semiconductor', 'Education', 'Retail'];
+      const levels = ['Beginner', 'Intermediate', 'Expert'];
+
+      for (const d of domains) {
+        for (const l of levels) {
+          const matching = scenarios.filter(s => s.domain === d && s.level === l);
+          assert.strictEqual(matching.length, 20, `${d} ${l} must have exactly 20 scenarios`);
+        }
+      }
     });
   });
 
-  describe('TEST 7 – Refresh Stability & Progress Persistence', () => {
-    it('preserves the exact variant when a learner refreshes or reloads their session', () => {
+  describe('TEST 7 – Legacy State Tolerance & Progress Preservation', () => {
+    it('ensures legacy variantIndex does not affect selection or cause an error', () => {
       const hea1 = scenarios.find(s => s.id === 'HEA_BEG_001');
       assert(hea1, 'HEA_BEG_001 must exist');
 
-      const userId = 'persisted_user_789';
-      // First load (initial selection)
-      const initialEffective = getEffectiveScenario(hea1, userId, null);
+      const stateWithLegacyVariant = {
+        version: 2,
+        resetAt: 0,
+        entries: {
+          'HEA_BEG_001': {
+            variantIndex: 3,
+            updatedAt: Date.now()
+          }
+        }
+      };
 
-      // Simulate state where learner has drafted thinking/sql for this variant
+      const reloadEffective = getEffectiveScenario(hea1, 'persisted_user_789', stateWithLegacyVariant);
+      assert.strictEqual(reloadEffective.id, 'HEA_BEG_001');
+      assert.strictEqual(reloadEffective.question, getEffectiveScenario(hea1).question);
+      assert.strictEqual(reloadEffective.sql, getEffectiveScenario(hea1).sql);
+    });
+
+    it('restores progress, selecting the correct scenario and preserving completion', () => {
+      const ban1 = scenarios.find(s => s.id === 'BAN_BEG_001');
+      assert(ban1, 'BAN_BEG_001 must exist');
+
       const state = {
         version: 2,
         resetAt: 0,
         entries: {
-          'HEA_BEG_001': {
-            variantIndex: initialEffective.variantIndex,
-            thinking: { response: 'My draft thinking' },
-            sql: 'SELECT * FROM appointments;',
+          'BAN_BEG_001': {
+            status: 'completed',
+            completed: true,
+            score: 9,
+            thinking: { response: 'Identify active customer accounts' },
+            sql: "SELECT * FROM accounts WHERE status = 'Active';",
             updatedAt: Date.now()
           }
         }
       };
 
-      // Second load (simulating page reload / browser refresh)
-      const reloadEffective = getEffectiveScenario(hea1, userId, state);
-
-      assert.strictEqual(reloadEffective.variantIndex, initialEffective.variantIndex,
-        'Reloaded variantIndex must match initial variantIndex');
-      assert.strictEqual(reloadEffective.question, initialEffective.question,
-        'Reloaded question must be identical');
-      assert.strictEqual(reloadEffective.sql, initialEffective.sql,
-        'Reloaded reference SQL must be identical');
-    });
-
-    it('respects explicitly saved variantIndex even if user ID changes or is guest', () => {
-      const hea1 = scenarios.find(s => s.id === 'HEA_BEG_001');
-      const stateWithExplicitVariant = {
-        version: 2,
-        resetAt: 0,
-        entries: {
-          'HEA_BEG_001': {
-            variantIndex: 1, // Explicitly assigned variant 1
-            updatedAt: Date.now()
-          }
-        }
-      };
-
-      const effective = getEffectiveScenario(hea1, 'different_user', stateWithExplicitVariant);
-      assert.strictEqual(effective.variantIndex, 1, 'Must strictly respect saved state variantIndex');
+      const restored = getEffectiveScenario(ban1, 'user123', state);
+      assert.strictEqual(restored.id, 'BAN_BEG_001');
+      assert.strictEqual(state.entries[restored.id].completed, true);
+      assert.strictEqual(state.entries[restored.id].score, 9);
     });
   });
 

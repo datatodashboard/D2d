@@ -1568,36 +1568,59 @@ async function loadFullScenariosInBackground() {
   if (fullScenariosPromise) return fullScenariosPromise;
   fullScenariosPromise = (async () => {
     try {
-        const resp = await fetch('./data/Crack_SQL_420_Student_Business_Scenarios.json');
-        if (resp.ok) {
-          const fullScenarios = await resp.json();
-          // Map new JSON structure to the one expected by the app
-          const mappedScenarios = fullScenarios.map(s => ({
-            ...s,
-            question: s.business_scenario,
-            sql: s.answer_sql,
-            schemaText: s.schema,
-            tables: s.schema.split(';').map(t => t.trim().split('(')[0]).filter(t => t)
-          }));
-          
-          const fullMap = new Map(mappedScenarios.map(s => [s.id, s]));
-          for (let i = 0; i < scenarios.length; i++) {
-            const fullItem = fullMap.get(scenarios[i].id);
-            if (fullItem) {
-              scenarios[i] = Object.assign(scenarios[i], fullItem);
-            }
+      let resp = await fetch('./data/Crack_SQL_420_Simple.json');
+      if (!resp.ok) {
+        resp = await fetch('./data/Crack_SQL_420_Student_Business_Scenarios.json');
+      }
+      if (!resp.ok) {
+        resp = await fetch('./data/scenarios.json');
+      }
+      if (resp.ok) {
+        const fullData = await resp.json();
+        const rawList = Array.isArray(fullData) ? fullData : (fullData.scenarios || []);
+        const mappedScenarios = rawList.map(s => {
+          if (!s) return null;
+          const question = String(s.business_scenario || s.question || '').trim();
+          const schemaText = String(s.schema || s.schemaText || '').trim();
+          const pseudo = String(s.solution_approach || s.pseudo || '').trim();
+          const sql = String(s.answer_sql || s.sql || '').trim();
+          let tables = Array.isArray(s.tables) && s.tables.length > 0 ? s.tables : [];
+          if (tables.length === 0 && schemaText) {
+            tables = schemaText.split(';').map(t => t.trim().split('(')[0].trim()).filter(Boolean);
           }
-          // Update data object while preserving assets
-          data = { ...data, scenarios: mappedScenarios }; 
-          fullScenariosLoaded = true;
-          if (current && !current.tables) {
-            const enriched = fullMap.get(current.id);
-            if (enriched) current = Object.assign(current, enriched);
+          return {
+            ...s,
+            id: s.id,
+            domain: s.domain,
+            level: s.level,
+            questionNo: typeof s.questionNo === 'number' ? s.questionNo : (parseInt(String(s.id).slice(-3) || '1', 10)),
+            question,
+            schemaText,
+            pseudo,
+            sql,
+            tables,
+            requiredTables: s.requiredTables || tables,
+            relevantColumns: s.relevantColumns || []
+          };
+        }).filter(Boolean);
+        
+        const fullMap = new Map(mappedScenarios.map(s => [s.id, s]));
+        for (let i = 0; i < scenarios.length; i++) {
+          const fullItem = fullMap.get(scenarios[i].id);
+          if (fullItem) {
+            scenarios[i] = Object.assign(scenarios[i], fullItem);
           }
         }
-      } catch (e) {
-        console.warn('Background full scenarios load notice:', e);
+        data = { ...data, scenarios: mappedScenarios }; 
+        fullScenariosLoaded = true;
+        if (current) {
+          const enriched = fullMap.get(current.id);
+          if (enriched) current = Object.assign(current, enriched);
+        }
       }
+    } catch (e) {
+      console.warn('Background full scenarios load notice:', e);
+    }
     return scenarios;
   })();
   return fullScenariosPromise;
@@ -5586,27 +5609,44 @@ try {
   initLandscapeMode();
   initNotificationsState(null);
   renderProfileAvatar();
-  let scenarioDataUrl = './data/scenarios-metadata.json';
+  let scenarioDataUrl = './data/Crack_SQL_420_Simple.json';
   let response = await fetch(scenarioDataUrl);
+  if (!response.ok) {
+    scenarioDataUrl = './data/Crack_SQL_420_Student_Business_Scenarios.json';
+    response = await fetch(scenarioDataUrl);
+  }
   if (!response.ok) {
     scenarioDataUrl = './data/scenarios.json';
     response = await fetch(scenarioDataUrl);
   }
   if (!response.ok) throw Error('Scenario download failed');
   data = await response.json();
-  // New JSON is a flat array, wrap it and normalize field names
-  const rawScenarios = Array.isArray(data) ? data : data.scenarios;
-  scenarios = rawScenarios.map(s => ({
-    ...s,
-    question: s.business_scenario,
-    pseudo: s.solution_approach,
-    schemaText: s.schema,
-    sql: s.answer_sql,
-    // Extract table names from schemaText (rough approximation)
-    tables: (s.schema || '').split(';').map(t => t.trim().split('(')[0].trim()).filter(Boolean),
-    requiredTables: s.requiredTables || s.tables || (s.schema || '').split(';').map(t => t.trim().split('(')[0].trim()).filter(Boolean),
-    relevantColumns: s.relevantColumns || []
-  }));
+  const rawScenarios = Array.isArray(data) ? data : (data.scenarios || []);
+  scenarios = rawScenarios.map(s => {
+    if (!s) return null;
+    const question = String(s.business_scenario || s.question || '').trim();
+    const schemaText = String(s.schema || s.schemaText || '').trim();
+    const pseudo = String(s.solution_approach || s.pseudo || '').trim();
+    const sql = String(s.answer_sql || s.sql || '').trim();
+    let tables = Array.isArray(s.tables) && s.tables.length > 0 ? s.tables : [];
+    if (tables.length === 0 && schemaText) {
+      tables = schemaText.split(';').map(t => t.trim().split('(')[0].trim()).filter(Boolean);
+    }
+    return {
+      ...s,
+      id: s.id,
+      domain: s.domain,
+      level: s.level,
+      questionNo: typeof s.questionNo === 'number' ? s.questionNo : (parseInt(String(s.id).slice(-3) || '1', 10)),
+      question,
+      schemaText,
+      pseudo,
+      sql,
+      tables,
+      requiredTables: s.requiredTables || tables,
+      relevantColumns: s.relevantColumns || []
+    };
+  }).filter(Boolean);
   ids = new Set(scenarios.map(s => s.id));
   state = readProgress(storage, null, ids);
   // Preload full scenario execution data in background without blocking initial rendering
