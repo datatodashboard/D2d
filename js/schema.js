@@ -94,11 +94,6 @@ export function buildFiddlePracticePackage(scenario, asset) {
   const questionText = scenario.question || '';
   let referenceSql = (scenario.sql || '').trim();
 
-  // If referenceSql is missing on the scenario object, check variants
-  if (!referenceSql && scenario.variants && scenario.variants.length > 0) {
-    referenceSql = (scenario.variants[0].sql || '').trim();
-  }
-
   const schemaRaw = String(asset.schema || '').trim();
   const sampleRaw = String(asset.sample || '').trim();
 

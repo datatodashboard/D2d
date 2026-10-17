@@ -340,7 +340,7 @@ async function copySchemaAndOpenFiddle() {
   }
 
   // Ensure full scenario data (including reference SQL and variants) is loaded
-  if (!current.sql || !current.variants) {
+  if (!current.sql) {
     try {
       const full = await ensureFullScenario(current);
       if (full) current = full;
@@ -369,8 +369,8 @@ async function copySchemaAndOpenFiddle() {
     const fromBank = scenarios.find(s => s.id === (effective.id || current.id));
     if (fromBank) {
       effective.sql = fromBank.sql;
-      if (!effective.sql && fromBank.variants?.[0]?.sql) {
-        effective.sql = fromBank.variants[0].sql;
+      if (!effective.sql) {
+        effective.sql = fromBank.sql;
       }
     }
   }
@@ -696,7 +696,6 @@ function renderScenario() {
       status: 'in_progress',
       attempts: 0,
       completed: false,
-      variantIndex: effective.variantIndex,
       skill: effective.skill,
       updatedAt: nextTimestamp(state)
     };
@@ -708,9 +707,7 @@ function renderScenario() {
   }
 
   const e = entry();
-  if (typeof e.variantIndex !== 'number' && typeof effective.variantIndex === 'number') {
-    e.variantIndex = effective.variantIndex;
-  }
+  // No variants, so we just use the scenario directly
   if (!e.skill && effective.skill) {
     e.skill = effective.skill;
   }
@@ -1571,28 +1568,36 @@ async function loadFullScenariosInBackground() {
   if (fullScenariosPromise) return fullScenariosPromise;
   fullScenariosPromise = (async () => {
     try {
-      const resp = await fetch('./data/scenarios.json');
-      if (resp.ok) {
-        const fullData = await resp.json();
-        if (Array.isArray(fullData.scenarios)) {
-          const fullMap = new Map(fullData.scenarios.map(s => [s.id, s]));
+        const resp = await fetch('./data/Crack_SQL_420_Student_Business_Scenarios.json');
+        if (resp.ok) {
+          const fullScenarios = await resp.json();
+          // Map new JSON structure to the one expected by the app
+          const mappedScenarios = fullScenarios.map(s => ({
+            ...s,
+            question: s.business_scenario,
+            sql: s.answer_sql,
+            schemaText: s.schema,
+            tables: s.schema.split(';').map(t => t.trim().split('(')[0]).filter(t => t)
+          }));
+          
+          const fullMap = new Map(mappedScenarios.map(s => [s.id, s]));
           for (let i = 0; i < scenarios.length; i++) {
             const fullItem = fullMap.get(scenarios[i].id);
             if (fullItem) {
               scenarios[i] = Object.assign(scenarios[i], fullItem);
             }
           }
-          data = fullData;
+          // Update data object while preserving assets
+          data = { ...data, scenarios: mappedScenarios }; 
           fullScenariosLoaded = true;
-          if (current && (!current.tables || !current.variants)) {
+          if (current && !current.tables) {
             const enriched = fullMap.get(current.id);
             if (enriched) current = Object.assign(current, enriched);
           }
         }
+      } catch (e) {
+        console.warn('Background full scenarios load notice:', e);
       }
-    } catch (e) {
-      console.warn('Background full scenarios load notice:', e);
-    }
     return scenarios;
   })();
   return fullScenariosPromise;
@@ -1600,7 +1605,7 @@ async function loadFullScenariosInBackground() {
 
 async function ensureFullScenario(targetScenario) {
   if (!targetScenario) return null;
-  if (targetScenario.tables && targetScenario.variants) return targetScenario;
+  if (targetScenario.tables) return targetScenario;
   await loadFullScenariosInBackground();
   return scenarios.find(s => s.id === targetScenario.id) || targetScenario;
 }
@@ -3373,7 +3378,7 @@ function generateSql() {
   const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
   const sql = effective.sql;
   $('learnerSql').value = sql;
-  changeEntry({ sql, fiddleFingerprint: null, evaluationFingerprint: null, evaluationResult: null, variantIndex: effective.variantIndex, skill: effective.skill });
+  changeEntry({ sql, fiddleFingerprint: null, evaluationFingerprint: null, evaluationResult: null, skill: effective.skill });
   renderSqlEvaluation(null);
   updateSqlEditorView();
   updateGates();
@@ -3399,7 +3404,7 @@ function useStarterSql() {
     starter = `-- Starter Query Template\nSELECT \n  -- specify required columns\nFROM ${focusTable}\n${effective.tables.length > 1 ? effective.tables.slice(1).map(t => 'JOIN ' + t + ' ON ...').join('\n') + '\n' : ''}-- WHERE condition\n;\n`;
   }
   $('learnerSql').value = starter;
-  changeEntry({ sql: starter, fiddleFingerprint: null, evaluationFingerprint: null, evaluationResult: null, variantIndex: effective.variantIndex, skill: effective.skill });
+  changeEntry({ sql: starter, fiddleFingerprint: null, evaluationFingerprint: null, evaluationResult: null, skill: effective.skill });
   renderSqlEvaluation(null);
   updateSqlEditorView();
   updateGates();
@@ -4136,7 +4141,6 @@ async function evaluateSql() {
       evaluationResult: result,
       evaluationAt: Date.now(),
       attempts: (entry().attempts || 0) + 1,
-      variantIndex: effective.variantIndex,
       skill: effective.skill
     });
     recordSkillAttempt(state, effective, !!result.passed);
@@ -5590,7 +5594,19 @@ try {
   }
   if (!response.ok) throw Error('Scenario download failed');
   data = await response.json();
-  scenarios = data.scenarios;
+  // New JSON is a flat array, wrap it and normalize field names
+  const rawScenarios = Array.isArray(data) ? data : data.scenarios;
+  scenarios = rawScenarios.map(s => ({
+    ...s,
+    question: s.business_scenario,
+    pseudo: s.solution_approach,
+    schemaText: s.schema,
+    sql: s.answer_sql,
+    // Extract table names from schemaText (rough approximation)
+    tables: (s.schema || '').split(';').map(t => t.trim().split('(')[0].trim()).filter(Boolean),
+    requiredTables: s.requiredTables || s.tables || (s.schema || '').split(';').map(t => t.trim().split('(')[0].trim()).filter(Boolean),
+    relevantColumns: s.relevantColumns || []
+  }));
   ids = new Set(scenarios.map(s => s.id));
   state = readProgress(storage, null, ids);
   // Preload full scenario execution data in background without blocking initial rendering

@@ -45,38 +45,13 @@ export function getVariantIndex(scenario, userId = 'guest_user') {
 }
 
 /**
- * Returns the effective scenario for the current user and state.
- * If the user has already started this scenario, the variant chosen in state.entries is preserved.
- * Otherwise, a deterministic variant is assigned based on userId/sessionId.
+ * Returns the effective scenario. Variants are no longer used.
  */
 export function getEffectiveScenario(scenario, userId = 'guest_user', state = null) {
   if (!scenario) return null;
-  if (!scenario.variants || scenario.variants.length <= 1) {
-    return {
-      ...scenario,
-      canonicalId: scenario.id,
-      variantIndex: 0
-    };
-  }
-
-  const entry = state?.entries?.[scenario.id];
-  let vIndex = (entry && typeof entry.variantIndex === 'number')
-    ? entry.variantIndex
-    : getVariantIndex(scenario, userId);
-
-  if (vIndex < 0 || vIndex >= scenario.variants.length) vIndex = 0;
-
-  const variant = scenario.variants[vIndex];
   return {
     ...scenario,
-    ...variant,
-    id: scenario.id,
-    canonicalId: scenario.id,
-    variantIndex: vIndex,
-    requiredTables: variant.requiredTables || variant.tables || scenario.requiredTables || scenario.tables,
-    relevantColumns: variant.relevantColumns || scenario.relevantColumns || [],
-    concepts: variant.concepts || scenario.concepts || [],
-    thinkingExpectations: variant.thinkingExpectations || scenario.thinkingExpectations || []
+    canonicalId: scenario.id
   };
 }
 
