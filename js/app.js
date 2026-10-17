@@ -4288,6 +4288,19 @@ async function loadAndRestoreUserProgress(userId, prefetchedLp = null, prefetche
 
       if (userId !== user?.id) return;
 
+      try {
+        const { data: syncRes, error: syncErr } = await client.rpc('sync_user_progress');
+        if (!syncErr && syncRes) {
+          if (typeof syncRes.completed_count === 'number') {
+            authoritativeCompletedCount = syncRes.completed_count;
+          }
+        }
+      } catch (syncEx) {
+        console.warn('[D2D Progress] sync_user_progress exception:', syncEx);
+      }
+
+      if (userId !== user?.id) return;
+
       // Reconcile level feedback from prefetched feedback or question_feedback table in Supabase
       try {
         let qfRows = null;
