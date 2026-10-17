@@ -297,6 +297,21 @@ h1 { margin:0; font-size:31px; letter-spacing:-.9px; }
   font-weight:900;
   white-space:nowrap;
 }
+#practice .scenario-head > div:first-child { min-width:0; }
+#practice #title { font-size:clamp(20px, 2.4vw, 28px); line-height:1.3; overflow-wrap:anywhere; }
+#practice .scenario-id { color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+#practice .question-panel { margin-top:20px; padding:20px 22px; border:1px solid #dbeafe; border-radius:16px; background:#eff6ff; }
+#practice .question-panel h3 { margin:0 0 10px; font-size:13px; font-weight:800; color:#1e40af; }
+#practice .question-panel .problem { margin:0; color:#253858; font-size:16px; line-height:1.75; overflow-wrap:anywhere; }
+#practice .instruction-panel { margin-top:14px; background:#fffbeb; border-color:#fde68a; }
+#practice .instruction-panel h3 { color:#854d0e; }
+#practice .instruction-panel .problem { color:#713f12; }
+#practice .instruction-panel[hidden] { display:none; }
+@media (max-width:600px) {
+  #practice .scenario-head { flex-wrap:wrap; }
+  #practice .question-panel { padding:16px; margin-top:16px; }
+  #practice .question-panel .problem { font-size:15px; }
+}
 h2 {
   margin:0 0 9px;
   font-size:22px;
@@ -5134,13 +5149,21 @@ body.landscape-layout .practice-container {
       <div class="scenario-head">
         <div>
           <h2 id="title"></h2>
-          <div class="problem" id="question"></div>
+          <div class="scenario-id" id="scenarioId"></div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
           <div class="qno" id="qno"></div>
           <div class="done-tag" id="doneTag"></div>
         </div>
       </div>
+      <section class="question-panel" aria-labelledby="businessScenarioLabel">
+        <h3 id="businessScenarioLabel">Business Scenario</h3>
+        <div class="problem" id="question"></div>
+      </section>
+      <section class="question-panel instruction-panel" id="thinkingInstructionCard" aria-labelledby="thinkingInstructionLabel" hidden>
+        <h3 id="thinkingInstructionLabel">Think &amp; Explain</h3>
+        <div class="problem" id="thinkingInstruction"></div>
+      </section>
       <div class="tags" id="tags"></div><p id="learningStage" class="small"></p>
     </div>
 
