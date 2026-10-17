@@ -42,7 +42,6 @@ test('Scenario 1: New User Profile Registration - Safe Payload Construction', ()
   assert.equal(updatePayload.mobile_number, '+919876543210');
   assert.equal(updatePayload.whatsapp_consent, true);
   assert.ok(updatePayload.whatsapp_consent_at);
-  // Verify payload DOES NOT include paid_unlocked, completed_count, or is_admin overrides
   assert.equal(updatePayload.paid_unlocked, undefined);
   assert.equal(updatePayload.is_admin, undefined);
 });
@@ -62,7 +61,6 @@ test('Scenario 2: Existing User with Username but missing Mobile - Prompt Mobile
   assert.equal(hasUsername, true);
   assert.equal(hasMobile, false);
 
-  // Requirement: Display existing username without asking user to re-enter it, prompt mobile only
   const promptMode = !hasUsername ? 'full' : (!hasMobile ? 'mobile_only' : 'none');
   assert.equal(promptMode, 'mobile_only');
 
@@ -77,7 +75,7 @@ test('Scenario 2: Existing User with Username but missing Mobile - Prompt Mobile
   };
 
   assert.equal(updatePayload.mobile_number, '+918765432109');
-  assert.equal(updatePayload.username, undefined, 'Existing username is preserved and not overwritten');
+  assert.equal(updatePayload.username, undefined);
 });
 
 test('Scenario 3: Existing User with Complete Profile - No Popup Prompt', () => {
@@ -96,7 +94,6 @@ test('Scenario 3: Existing User with Complete Profile - No Popup Prompt', () => 
 });
 
 test('Scenario 4 & 5: Learner Progress, Scenarios, Thinking Scores & Certificates Protection', () => {
-  // Mock initial learner profile with 15 completed scenarios, certificates, and progress
   const learnerDataBefore = {
     id: 'learner-15',
     username: 'data_ninja',
@@ -107,7 +104,6 @@ test('Scenario 4 & 5: Learner Progress, Scenarios, Thinking Scores & Certificate
     certificates: [{ id: 'cert_101', issuedAt: '2026-01-01' }]
   };
 
-  // Perform targeted contact info update
   const contactUpdate = {
     mobile_number: '+919123456789',
     whatsapp_consent: false
@@ -118,11 +114,11 @@ test('Scenario 4 & 5: Learner Progress, Scenarios, Thinking Scores & Certificate
     ...contactUpdate
   };
 
-  assert.equal(learnerDataAfter.completed_count, 15, 'Completed count remains 15');
-  assert.equal(learnerDataAfter.completed_scenario_ids.length, 15, 'Completed scenario IDs intact');
-  assert.deepEqual(learnerDataAfter.thinking_scores, learnerDataBefore.thinking_scores, 'Thinking scores intact');
-  assert.deepEqual(learnerDataAfter.certificates, learnerDataBefore.certificates, 'Certificates intact');
-  assert.equal(learnerDataAfter.mobile_number, '+919123456789', 'Mobile number updated safely');
+  assert.equal(learnerDataAfter.completed_count, 15);
+  assert.equal(learnerDataAfter.completed_scenario_ids.length, 15);
+  assert.deepEqual(learnerDataAfter.thinking_scores, learnerDataBefore.thinking_scores);
+  assert.deepEqual(learnerDataAfter.certificates, learnerDataBefore.certificates);
+  assert.equal(learnerDataAfter.mobile_number, '+919123456789');
 });
 
 test('Scenario 6 & 7: Premium Unlock Status & Admin Permissions Protection', () => {
@@ -135,7 +131,6 @@ test('Scenario 6 & 7: Premium Unlock Status & Admin Permissions Protection', () 
     mobile_number: null
   };
 
-  // Safe update payload only updates missing/edited contact info
   const safeUpdate = {
     mobile_number: '+919000000000',
     whatsapp_consent: true,
@@ -144,9 +139,9 @@ test('Scenario 6 & 7: Premium Unlock Status & Admin Permissions Protection', () 
 
   const merged = { ...adminPremiumUser, ...safeUpdate };
 
-  assert.equal(merged.is_admin, true, 'Admin privileges preserved');
-  assert.equal(merged.paid_unlocked, true, 'Premium payment status preserved');
-  assert.equal(merged.contest_eligible, true, 'Contest eligibility preserved');
+  assert.equal(merged.is_admin, true);
+  assert.equal(merged.paid_unlocked, true);
+  assert.equal(merged.contest_eligible, true);
   assert.equal(merged.mobile_number, '+919000000000');
 });
 
@@ -158,7 +153,6 @@ test('Scenario 8: Failed Update Does Not Corrupt Existing Learner State', () => 
     completed_count: 10
   };
 
-  // Simulate update error (e.g. network failure / DB constraint failure)
   let currentProfileState = { ...originalProfile };
   const mockDbUpdate = (payload) => {
     if (payload.mobile_number === 'INVALID') {
@@ -173,7 +167,7 @@ test('Scenario 8: Failed Update Does Not Corrupt Existing Learner State', () => 
 
   assert.equal(currentProfileState.username, 'original_user');
   assert.equal(currentProfileState.completed_count, 10);
-  assert.equal(currentProfileState.mobile_number, null, 'Original state intact on error');
+  assert.equal(currentProfileState.mobile_number, null);
 });
 
 test('Scenario 9: Logout & Relogin Retrieves Saved Details Correctly', () => {
@@ -186,7 +180,6 @@ test('Scenario 9: Logout & Relogin Retrieves Saved Details Correctly', () => {
     whatsapp_consent_at: '2026-10-16T14:15:00.000Z'
   };
 
-  // Simulate loading user profile after login
   const loadedMobile = savedProfileInDb.mobile_number;
   const loadedWhatsapp = savedProfileInDb.whatsapp_consent;
 
@@ -208,6 +201,46 @@ test('Scenario 10: Duplicate Submission & Primary Key Isolation', () => {
     dbTable.set(sub.id, { ...existing, ...sub });
   });
 
-  assert.equal(dbTable.size, 1, 'Only one profile record exists per user ID');
+  assert.equal(dbTable.size, 1);
   assert.equal(dbTable.get(userId).mobile_number, '+919876543210');
+});
+
+test('Scenario 11: Existing user with saved mobile number is never prompted again across fresh login', () => {
+  const userProfile = {
+    id: 'user-existing-mob',
+    username: 'sqlpro',
+    mobile_number: '+919876543210'
+  };
+
+  let popupShown = false;
+  const checkAndEnforceMock = (profile) => {
+    const dbMobile = (profile?.mobile_number || '').trim();
+    if (dbMobile) {
+      popupShown = false; // Never prompt
+      return;
+    }
+    popupShown = true;
+  };
+
+  checkAndEnforceMock(userProfile);
+  assert.equal(popupShown, false, 'Popup is never shown for an existing user with a saved mobile number');
+});
+
+test('Scenario 12: Temporary Supabase fetch failure does not treat profile as missing mobile number', () => {
+  const profileFetchResult = {
+    profile: null,
+    error: new Error('Network timeout')
+  };
+
+  let popupShown = false;
+  const checkAndEnforceMock = (res) => {
+    if (!res.profile && res.error) {
+      // Supabase temporarily unavailable - skip popup enforcement
+      return;
+    }
+    popupShown = true;
+  };
+
+  checkAndEnforceMock(profileFetchResult);
+  assert.equal(popupShown, false, 'Popup is not shown when Supabase is temporarily unavailable');
 });

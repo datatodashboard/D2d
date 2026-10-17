@@ -722,7 +722,15 @@ function renderScenario() {
   $('home').classList.remove('active');$('progressScreen').classList.remove('active');$('practice').classList.add('active');
   if ($('navHome')) { $('navHome').classList.remove('active'); $('navProgress').classList.remove('active'); $('navPractice').classList.add('active'); }
   $('meta').textContent=effective.domain+' • '+effective.level;
-  $('title').textContent=effective.id;$('question').textContent=effective.question;
+  const qText = effective?.question || current?.question;
+  const qEl = $('question');
+  if (qEl) {
+    if (!qText || typeof qText !== 'string' || !qText.trim()) {
+      qEl.innerHTML = '<span style="color:#dc2626; font-weight:700;">Content Error: Business scenario question is missing.</span>';
+    } else {
+      qEl.textContent = qText;
+    }
+  }
   const pool=scenarios.filter(s=>s.domain===effective.domain&&s.level===effective.level);
   $('qno').textContent='Exercise '+effective.questionNo+' / '+pool.length;
   $('tags').textContent = (effective.skill ? `${effective.skill} • ` : '') + 'Think → Write → Validate';
@@ -803,79 +811,65 @@ async function retryUserAccessCheck() {
 
 async function checkUserAccessStatus(userId) {
   const uid = userId || user?.id;
-  if (!uid || !client) return;
+  if (!uid || !client) return { profile: null, error: null };
 
   try {
     const activeUser = (user && user.id === uid) ? user : (await client.auth.getUser())?.data?.user;
     const userEmail = activeUser?.email || '';
 
-    // Helper to query the profile row from public.profiles using the current authenticated user ID
-    // Premium entitlement is authoritatively determined from profiles.paid_unlocked === true
     async function fetchProfile() {
       try {
         const { data, error } = await client
           .from('profiles')
-          .select('id, email, username, is_admin, paid_unlocked')
+          .select('id, email, username, mobile_number, whatsapp_consent, whatsapp_consent_at, is_admin, paid_unlocked')
           .eq('id', uid)
           .maybeSingle();
 
         if (!error && data) return { profile: data, error: null };
         if (!error && !data) return { profile: null, error: null };
         console.warn('[Access] Profiles select notice:', error?.message || error);
+        return { profile: null, error };
       } catch (ex) {
         console.warn('[Access] Profiles select exception:', ex);
-      }
-
-      // Fallback: minimal columns (id, email, paid_unlocked)
-      try {
-        const { data: minData, error: minErr } = await client
-          .from('profiles')
-          .select('id, email, paid_unlocked')
-          .eq('id', uid)
-          .maybeSingle();
-
-        if (!minErr) return { profile: minData, error: null };
-        return { profile: null, error: minErr };
-      } catch (ex2) {
-        return { profile: null, error: ex2 };
+        return { profile: null, error: ex };
       }
     }
 
     let { profile, error: profErr } = await fetchProfile();
 
-    // If profile does not exist: create profile using existing profile system (authenticated user ID and email)
     if (!profile && !profErr) {
       console.log('[Access] No profile row found for user; creating profile row for', uid);
       try {
-        const { error: insErr } = await client
+        const { data: newProf, error: insErr } = await client
           .from('profiles')
-          .insert({
+          .upsert({
             id: uid,
             email: userEmail,
             last_active: new Date().toISOString()
-          });
+          }, { onConflict: 'id', ignoreDuplicates: true })
+          .select('*')
+          .maybeSingle();
+
         if (insErr) {
           console.warn('[Access] Insert profile error:', insErr.message || insErr);
+          profErr = insErr;
+        } else if (newProf) {
+          profile = newProf;
         }
       } catch (insEx) {
         console.warn('[Access] Insert profile exception:', insEx);
+        profErr = insEx;
       }
 
-      // Then load the profile again
-      const recheck = await fetchProfile();
-      profile = recheck.profile;
-      profErr = recheck.error;
+      if (!profile && !profErr) {
+        const recheck = await fetchProfile();
+        profile = recheck.profile;
+        profErr = recheck.error;
+      }
     }
 
-    // If the profile exists:
-    // - Load username.
-    // - Load is_admin.
-    // - Continue into the app normally.
-    // - Do not show the profile verification error.
     if (profile) {
       hideAccessError();
-
-      // Load username (do not overwrite existing username with empty value)
       const dbUsername = (profile.username || '').trim();
       if (dbUsername) {
         currentUsername = dbUsername;
@@ -896,20 +890,18 @@ async function checkUserAccessStatus(userId) {
       }
       currentWhatsappConsent = profile.whatsapp_consent === true;
 
-      // Load is_admin normally
       if (profile.is_admin === true) {
         isCurrentUserAdmin = true;
         updateAdminPortalVisibility();
       }
     } else if (isCurrentUserAdmin) {
-      // If user is already verified admin (e.g. from admin_users table), never block them with an error
       hideAccessError();
     } else if (profErr) {
       console.warn('[Access] Could not verify account profile:', profErr.message || profErr);
       showAccessCheckError('Could not verify account profile. Click Retry to check again.');
+      return { profile: null, error: profErr };
     }
 
-    // 1. Authoritative Premium Entitlement: determined strictly from profiles.paid_unlocked === true
     if (profile && profile.paid_unlocked === true) {
       isPaidUnlocked = true;
       userPendingPayment = null;
@@ -917,66 +909,14 @@ async function checkUserAccessStatus(userId) {
       isPaidUnlocked = false;
     }
 
-    // 2. Check for pending payment submissions (for user feedback/status notice only)
-    if (!isPaidUnlocked) {
-      try {
-        const { data: payments } = await client
-          .from('payments')
-          .select('*')
-          .eq('user_id', uid)
-          .order('submitted_at', { ascending: false })
-          .limit(1);
-
-        if (payments && payments.length > 0) {
-          const latestPay = payments[0];
-          const s = String(latestPay.status || '').toUpperCase();
-          if (s === 'PENDING') {
-            userPendingPayment = latestPay;
-          }
-        }
-      } catch (payEx) {
-        console.warn('[Access] Payments check notice:', payEx);
-      }
-    }
-
-    // After login or refresh: if paid_unlocked === true -> premium access unlocked automatically
-    // and the user must not see the ₹49 payment popup again.
-    if (isPaidUnlocked) {
-      closePaywallModal();
-      updateGates();
-      updateProgress();
-      renderScenarioCatalog();
-      renderAuth();
-    }
-
-    const currentCompleted = getCompletedCount();
-
-    // Authoritatively sync profile last_active / background sync safely
-    try {
-      const { data: syncRes, error: syncErr } = await client.rpc('sync_user_progress');
-      if (!syncErr && syncRes && typeof syncRes.completed_count === 'number') {
-        authoritativeCompletedCount = syncRes.completed_count;
-      }
-    } catch (e) {
-      try {
-        await client.from('profiles').update({
-          last_active: new Date().toISOString()
-        }).eq('id', uid);
-      } catch (updErr) {
-        // Safe ignore
-      }
-    }
-
-    void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
-    return { profile, isCurrentUserAdmin, isPaidUnlocked };
+    return { profile, error: profErr };
   } catch (err) {
-    console.warn('checkUserAccessStatus warning:', err);
-    if (!isCurrentUserAdmin && !currentUsername && !isPaidUnlocked) {
-      showAccessCheckError('Could not verify account profile. Click Retry to check again.');
-    }
-    return { profile: null, isCurrentUserAdmin, isPaidUnlocked };
+    console.warn('[Access] checkUserAccessStatus exception:', err);
+    showAccessCheckError('Could not verify account profile. Click Retry to check again.');
+    return { profile: null, error: err };
   }
 }
+
 
 let paymentPollingTimer = null;
 
@@ -4601,8 +4541,10 @@ async function setSession(session) {
         if (currentAuthToken !== authSessionCounter || user?.id !== lastInitializedUserId) return;
 
         // Step 3: Username setup reusing already-resolved profile to eliminate duplicate queries
-        const profile = accessResult.status === 'fulfilled' ? accessResult.value?.profile : null;
-        await checkAndEnforceUsername(user.id, user.email, profile);
+        const accessVal = accessResult.status === 'fulfilled' ? accessResult.value : null;
+        const profile = accessVal?.profile || null;
+        const profErr = accessVal?.error || null;
+        await checkAndEnforceUsername(user.id, user.email, profile, profErr);
         if (currentAuthToken !== authSessionCounter || user?.id !== lastInitializedUserId) return;
 
         // Step 4: Coordinated dashboard render with authoritative state
@@ -4866,46 +4808,24 @@ function validateUsernameField() {
   if (errorEl) errorEl.style.display = 'none';
 }
 
-async function checkAndEnforceUsername(userId, userEmail, prefetchedProfile = null) {
+async function checkAndEnforceUsername(userId, userEmail, prefetchedProfile = null, prefetchedError = null) {
   if (!userId || !client) return;
 
   try {
     let profile = prefetchedProfile || null;
-    if (!profile) {
-      try {
-        const { data, error } = await client
-          .from('profiles')
-          .select('id, email, username, mobile_number, whatsapp_consent, whatsapp_consent_at, is_admin, paid_unlocked')
-          .eq('id', userId)
-          .maybeSingle();
+    let profErr = prefetchedError || null;
 
-        if (!error && data) {
-          profile = data;
-        } else if (error && error.message?.includes("Could not find the 'username' column")) {
-          const { data: fallbackData } = await client
-            .from('profiles')
-            .select('id, email')
-            .eq('id', userId)
-            .maybeSingle();
-          profile = fallbackData;
-        }
-      } catch (queryErr) {
-        console.warn('[ProfileContact] Profile query exception:', queryErr);
-      }
+    if (!profile && !profErr) {
+      const res = await checkUserAccessStatus(userId);
+      profile = res.profile;
+      profErr = res.error;
     }
 
-    // If profile row doesn't exist yet, insert missing profile row safely
-    if (!profile) {
-      try {
-        const { data: newProf } = await client
-          .from('profiles')
-          .upsert({ id: userId, email: userEmail, last_active: new Date().toISOString() }, { onConflict: 'id', ignoreDuplicates: true })
-          .select('*')
-          .maybeSingle();
-        if (newProf) profile = newProf;
-      } catch (insErr) {
-        console.warn('[ProfileContact] Insert profile notice:', insErr);
-      }
+    // If Supabase fetch failed or is unavailable, do NOT treat as missing mobile number (Requirement 8)
+    if (!profile && profErr) {
+      console.warn('[ProfileContact] Profile fetch unavailable; skipping popup enforcement until Supabase reconnects.');
+      closeProfileSetupModal();
+      return;
     }
 
     const dbUsername = (profile?.username || currentUsername || '').trim();
@@ -4924,13 +4844,13 @@ async function checkAndEnforceUsername(userId, userEmail, prefetchedProfile = nu
     renderProfileAvatar();
     renderAuth();
 
-    // If BOTH username and mobile_number exist -> Do NOT show popup!
-    if (dbUsername && dbMobile) {
+    // If a valid mobile number already exists in the user's Supabase profile -> NEVER show the mobile number popup again! (Requirement 3)
+    if (dbMobile) {
       closeProfileSetupModal();
       return dbUsername;
     }
 
-    // Show complete profile popup!
+    // Otherwise, mobile number is missing -> Display the profile completion popup (Requirement 4)
     openProfileSetupModal({
       userId,
       userEmail,
