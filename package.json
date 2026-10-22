@@ -6,11 +6,13 @@
     "dev": "node server.js",
     "build": "node copy-vendor.js",
     "start": "node server.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "canvas-confetti": "^1.9.4",
+    "express": "^5.1.0",
     "lucide-react": "^1.61.0",
     "motion": "^14.6.0",
     "next": "15.2.1",
