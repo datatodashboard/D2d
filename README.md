@@ -1,32 +1,20 @@
-# Think and Crack SQL
+# Crack SQL — Data2Dashboard (D2D)
 
-Think independently before asking AI for SQL.
+**Think Like a Data Engineer, Not Just a SQL Developer.**
 
-**Business problem → understand schema → explain thinking → improve the plan → write SQL → validate in DB Fiddle → record practice.**
+Crack SQL is a Next.js application designed to teach structured business reasoning and query execution across 420 real-world PostgreSQL challenges in 7 industry domains.
 
-## Learning flow
+## Learning Architecture
 
-1. Pick a domain and difficulty. The first unfinished exercise opens automatically.
-2. Explain the business result, data sources, reasoning steps and expected output/checks.
-3. Check thinking. The rubric scores goal (2), sources (2), scenario-specific steps (4) and output checks (2), normalized to 10.
-4. All core goal/source/step checks and at least 8/10 unlock SQL writing. There are no marks for length or unrelated SQL keywords.
-5. Write your own PostgreSQL query. Copy schema/data and query separately into DB Fiddle and run there.
-6. Record the observed result and confirm you checked it. Progress is **self-reported practice**, not independently validated success.
-7. Next opens unfinished work. Suggested reasoning and reference SQL are available only after practice confirmation.
+1. **Business Problem Analysis**: Review real-world operational challenges in Banking, Healthcare, Insurance, Capital Markets, Semiconductor, Education, and Retail.
+2. **Schema & Data Inspection**: Explore table definitions, primary keys, foreign key relationships, and live sample records.
+3. **Thinking Engine 2.0 Evaluation**: Explain your business reasoning plan in plain English (Data Sources → Filtering/Join Logic → Expected Output). Scored on a human-like 10-point rubric with actionable feedback (Score ≥ 7 required to pass).
+4. **Interactive PostgreSQL Workspace**: Write and test queries directly in the browser with real-time result verification, row-by-row comparisons, error highlighting, and DB Fiddle practice package export.
+5. **Progress & Certifications**: Track curriculum progress across Beginner, Intermediate, and Expert levels, submit checkpoint feedback, and generate verified Certificates of Mastery (PNG, PDF, and Instagram/LinkedIn shareables).
 
-Editing reasoning invalidates its assessment and subsequent stages. Editing SQL invalidates DB Fiddle/confirmation status. Drafts survive reloads.
+## Curriculum & Scenarios
 
-## Thinking evaluator: scope and limits
-
-The evaluator is a deterministic English-language, scenario-specific rubric, not an LLM or proof of understanding. It checks explanations against expected sources, comparisons, relationships, grouping, calculations and boundaries, and gives missing-point feedback without revealing reference SQL.
-
-Natural phrases such as “keep only”, “sum”, “total”, “average” and “link” are accepted. A valid unfamiliar paraphrase can still be missed, and deliberately crafted prose can satisfy rules without real understanding. Do not use this score to certify competence. Future semantic coaching needs independently evaluated model behavior, privacy choices and a server-side integration; no API keys are required for this release.
-
-SQL correctness is checked by the learner in external DB Fiddle. The app receives no execution results and does not claim automatic validation.
-
-## Scenario bank
-
-The curriculum contains **420 exercises across 7 domains** (Banking, Healthcare, Insurance, Capital Markets, Semiconductor, Education, Retail), with 20 exercises per domain-level.
+420 exercises structured across 7 domains (20 exercises per level):
 
 | Domain | Beginner | Intermediate | Expert | Total |
 |---|---:|---:|---:|---:|
@@ -39,65 +27,9 @@ The curriculum contains **420 exercises across 7 domains** (Banking, Healthcare,
 | Retail | 20 | 20 | 20 | 60 |
 | **Total** | **140** | **140** | **140** | **420** |
 
-Corrections include Banking status ownership; Healthcare specialization/city ownership; explicit thresholds, sorting, ranges and classification bands; deterministic first-five and previous-row ordering; separate product IDs when names repeat; and explicit inclusion/exclusion rules for aggregates. Fixtures include boundary values, missing activity and tied dates.
+## Technology Stack
 
-[data/scenarios.json](data/scenarios.json) contains scenarios, migration aliases, schema/sample data and authored reasoning rubrics. Every reference query is executed in PostgreSQL tests. Execution tests are not an exhaustive proof of every business interpretation.
-
-## Progress and accounts
-
-- Guest and signed-in accounts have separate local-storage keys.
-- Thinking, SQL draft, DB Fiddle opened, answer viewed and practiced are distinct states.
-- Guest imports and legacy imports require explicit learner action.
-- Legacy “completed” entries import only as **answer viewed**, since the old app awarded completion when revealing SQL.
-- Local drafts are saved immediately. Cloud updates are debounced and serialized.
-- Cloud merges happen atomically per exercise; reset timestamps prevent old offline work restoring cleared progress.
-- Account checks on both client and server reject writes/late responses from a previous account.
-- Offline simultaneous edits to the same exercise use last-edit timestamps. Device clock differences can affect conflict resolution.
-
-## Supabase setup and rollout
-
-For a new project, run [supabase_setup.sql](supabase_setup.sql) first. For both existing and new projects, run:
-
-**[migrations/002_learning_progress.sql](migrations/002_learning_progress.sql)**
-
-The migration is repeatable. It creates a separate RLS-protected learning_progress table and an authenticated merge function. Existing profiles and legacy progress are preserved. The function checks the expected user ID, locks the user's row and merges edits/reset timestamps.
-
-Apply this migration before publishing the app. Without it, local practice works and the UI reports unavailable cloud sync, with a retry button. Existing magic-link redirect settings still need to allow the deployed site origin.
-
-The browser uses a Supabase publishable key, never a service-role key. Progress remains user-editable practice data; it must not be treated as a trusted certificate record.
-
-## Local development and tests
-
-No build step is required. Serve the repository root over HTTP, for example with Python's http.server on port 8080. Opening index.html directly as a file will not work with JavaScript modules and JSON loading.
-
-Use Node 24 and pnpm:
-
-~~~sh
-pnpm install --frozen-lockfile
-pnpm exec playwright install chromium
-pnpm test
-~~~
-
-If using a preinstalled browser instead, set PLAYWRIGHT_CHANNEL to msedge or chrome before running tests.
-
-Tests cover all 420 reference queries using PGlite/PostgreSQL, rubric examples and negative inputs, account/guest isolation, reset merging, migration/RLS behavior, late cloud responses, and the mobile/browser/offline learning flow. Browser auth is mocked; production magic links and the deployed Supabase project are not exercised.
-
-## Offline releases
-
-The service worker precaches application modules and data together. Missing assets fail installation instead of silently producing partial caches. Bump its cache version whenever publishing changed app/data files. A waiting update activates after existing app tabs close, avoiding mixed-version modules. The Supabase CDN and DB Fiddle require internet; offline guest practice remains available.
-
-## Files
-
-- index.html: responsive UI and styles
-- js/app.js: learning flow and account integration
-- js/thinking.js: scenario-specific reasoning checks
-- js/progress.js: local storage, migration, stages and merging
-- js/cloud.js: serialized cloud sync with session guards
-- js/schema.js: schema visualization
-- data/scenarios.json: 420 exercises across 7 domains and legacy aliases
-- migrations/002_learning_progress.sql: cloud progress model
-- tests/: regression, PostgreSQL and browser tests
-
-Certificates are not implemented by this change. The existing approved certificate design is not modified.
-
-© Ramgokul Jeyakumar. All rights reserved.
+- **Framework**: Next.js 15 (App Router)
+- **UI & Styling**: React 19, Tailwind CSS, Lucide Icons, Motion
+- **Database Engine**: In-browser PostgreSQL (PGlite) & Result Comparator
+- **API Routes**: Next.js Serverless Routes for scenario catalog, thinking evaluation, and admin notifications

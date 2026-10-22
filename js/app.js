@@ -1530,7 +1530,7 @@ function onLockedLevelClick(domain, level) {
   selectedLevel = level;
   renderDomainAndLevelPickers();
   renderScenarioCatalog();
-  void loadScenario();
+  updateGoToPracticeBtnState();
 }
 
 function renderDomainAndLevelPickers() {
@@ -1579,6 +1579,8 @@ function renderDomainAndLevelPickers() {
       return `<div role="button" tabindex="0" class="level ${isCurrent ? 'active' : ''}" onclick="selectLevel('${lvl}', this)">${lvl}</div>`;
     }).join('');
   }
+
+  updateGoToPracticeBtnState();
 }
 
 let fullScenariosLoaded = false;
@@ -1704,11 +1706,7 @@ function selectDomain(domain, el) {
   }
   renderDomainAndLevelPickers();
   renderScenarioCatalog();
-  if (selectedDomain && selectedLevel) {
-    void loadScenario().then(() => {
-      showScreen('practice');
-    });
-  }
+  updateGoToPracticeBtnState();
 }
 
 function selectLevel(level, el) {
@@ -1719,10 +1717,64 @@ function selectLevel(level, el) {
   selectedLevel = level;
   renderDomainAndLevelPickers();
   renderScenarioCatalog();
-  if (selectedDomain && selectedLevel) {
-    void loadScenario().then(() => {
-      showScreen('practice');
-    });
+  updateGoToPracticeBtnState();
+}
+
+function updateGoToPracticeBtnState() {
+  const btn = $('goToPracticeBtn');
+  const hint = $('goToPracticeHint');
+  const isReady = Boolean(selectedDomain && selectedLevel);
+
+  if (btn) {
+    btn.disabled = !isReady;
+    if (isReady) {
+      btn.removeAttribute('disabled');
+      btn.innerHTML = `<span>Go to Practice (${escapeHtml(selectedDomain)} • ${escapeHtml(selectedLevel)}) →</span>`;
+    } else {
+      btn.setAttribute('disabled', 'disabled');
+      btn.innerHTML = `<span>Go to Practice →</span>`;
+    }
+  }
+
+  if (hint) {
+    if (!selectedDomain && !selectedLevel) {
+      hint.textContent = 'Select a domain and level above to enable practice.';
+    } else if (selectedDomain && !selectedLevel) {
+      hint.textContent = `Domain "${selectedDomain}" selected. Choose a level above.`;
+    } else if (!selectedDomain && selectedLevel) {
+      hint.textContent = `Level "${selectedLevel}" selected. Choose a domain above.`;
+    } else {
+      hint.textContent = `Ready! Click "Go to Practice" to begin your ${selectedDomain} (${selectedLevel}) session.`;
+    }
+  }
+}
+
+async function handleGoToPractice() {
+  if (!selectedDomain || !selectedLevel) {
+    return;
+  }
+
+  if (user) {
+    // Already authenticated: directly open the selected Practice session
+    await loadScenario();
+    showScreen('practice');
+  } else {
+    // Not authenticated: preserve selected Domain & Level across Google OAuth
+    try {
+      localStorage.setItem('cracksql_pending_practice', JSON.stringify({
+        domain: selectedDomain,
+        level: selectedLevel,
+        timestamp: Date.now()
+      }));
+    } catch (_) {}
+
+    const btn = $('goToPracticeBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span>Connecting to Google…</span>`;
+    }
+
+    await signInWithGoogle();
   }
 }
 function evaluatePlan() {
@@ -4565,6 +4617,8 @@ async function setSession(session) {
     if ($('loginScreen')) $('loginScreen').hidden = true;
     if ($('appMain')) $('appMain').hidden = false;
     if ($('bottomNav')) $('bottomNav').hidden = false;
+    const exploreCard = $('exploreGoogleLoginCard');
+    if (exploreCard) exploreCard.style.display = 'none';
 
     // Immediately activate dashboard shell so user never sees a blank screen
     $('home').classList.add('active');
@@ -4612,10 +4666,37 @@ async function setSession(session) {
         selectedDomain = null;
         selectedLevel = null;
         current = null;
+
+        // Check for pending practice selection from pre-login intent
+        let pendingPractice = null;
+        try {
+          const rawPending = localStorage.getItem('cracksql_pending_practice');
+          if (rawPending) {
+            pendingPractice = JSON.parse(rawPending);
+          }
+        } catch (_) {}
+
+        if (pendingPractice && pendingPractice.domain && pendingPractice.level) {
+          selectedDomain = pendingPractice.domain;
+          selectedLevel = pendingPractice.level;
+        }
+
         renderAuth();
         updateProgress();
         renderDomainAndLevelPickers();
         renderScenarioCatalog();
+        updateGoToPracticeBtnState();
+
+        // If profile setup modal is open (waiting for mobile number), postpone practice navigation until saved
+        const profileSetupOpen = $('profileSetupModal') && !$('profileSetupModal').hidden;
+        if (profileSetupOpen && pendingPractice) {
+          window.pendingPracticeNavigation = pendingPractice;
+        } else if (pendingPractice && pendingPractice.domain && pendingPractice.level) {
+          try { localStorage.removeItem('cracksql_pending_practice'); } catch (_) {}
+          void loadScenario().then(() => {
+            showScreen('practice');
+          });
+        }
 
         // Step 5: Initialize contest ONCE with authoritative completion count and admin status
         void initContest(client, user, getCompletedCount(), isCurrentUserAdmin);
@@ -4628,7 +4709,7 @@ async function setSession(session) {
 
     await activeSessionInitPromise;
   } else {
-    // Signed out: reset in-memory active state and return to login gate
+    // Signed out / Guest: allow access to Explore page and show Continue with Google card
     lastInitializedUserId = null;
     activeSessionInitPromise = null;
     stopPaymentPolling();
@@ -4641,9 +4722,21 @@ async function setSession(session) {
     closePaywallModal();
     updateAdminPortalVisibility();
     hideAccessError();
-    if ($('loginScreen')) $('loginScreen').hidden = false;
-    if ($('appMain')) $('appMain').hidden = true;
-    if ($('bottomNav')) $('bottomNav').hidden = true;
+    if ($('loginScreen')) $('loginScreen').hidden = true;
+    if ($('appMain')) $('appMain').hidden = false;
+    if ($('bottomNav')) $('bottomNav').hidden = false;
+    const exploreCard = $('exploreGoogleLoginCard');
+    if (exploreCard) exploreCard.style.display = '';
+
+    // Immediately activate Explore so guests can browse domains & levels
+    $('home').classList.add('active');
+    $('practice').classList.remove('active');
+    $('progressScreen').classList.remove('active');
+    if ($('navHome')) $('navHome').classList.add('active');
+    if ($('navPractice')) $('navPractice').classList.remove('active');
+    if ($('navProgress')) $('navProgress').classList.remove('active');
+    currentActiveScreen = 'home';
+
     closeProfileDropdown();
     closeProfileModal();
     closeContestModal();
@@ -4652,9 +4745,26 @@ async function setSession(session) {
     cloud.changeSession();
     state = EMPTY();
     current = null;
-    selectedDomain = null;
-    selectedLevel = null;
+
+    // Check if there was pending practice to restore on Explore screen
+    let pendingPractice = null;
+    try {
+      const rawPending = localStorage.getItem('cracksql_pending_practice');
+      if (rawPending) pendingPractice = JSON.parse(rawPending);
+    } catch (_) {}
+
+    if (pendingPractice && pendingPractice.domain && pendingPractice.level) {
+      selectedDomain = pendingPractice.domain;
+      selectedLevel = pendingPractice.level;
+    } else {
+      selectedDomain = null;
+      selectedLevel = null;
+    }
+
     renderAuth();
+    renderDomainAndLevelPickers();
+    renderScenarioCatalog();
+    updateGoToPracticeBtnState();
     void initContest(null, null, 0, false);
   }
 }
@@ -4670,12 +4780,15 @@ window.addEventListener('focus', () => {
     void checkPaymentStatusSilently(false);
   }
 });
-async function signInWithGoogle() {
-  const button=$('googleSignIn');
-  const message=$('loginErrorMessage') || $('authMessage');
-  if(!client || !button || button.disabled)return;
-  button.disabled=true;
-  button.innerHTML=`<span>Connecting to Google…</span>`;
+async function signInWithGoogle(customBtn) {
+  const button = customBtn || $('exploreGoogleSignInBtn') || $('googleSignIn');
+  const message = $('loginErrorMessage') || $('authMessage');
+  if(!client) return;
+  if(button && button.disabled) return;
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = `<span>Connecting to Google…</span>`;
+  }
   authNotice='';if(message)message.textContent='';
   try {
     const redirectUrl = getOAuthRedirectUrl();
@@ -4687,9 +4800,8 @@ async function signInWithGoogle() {
       }
     });
     if(error)throw error;
-  } catch {
-    button.disabled=false;
-    button.innerHTML=`
+  } catch (err) {
+    const defaultGoogleHtml = `
       <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
         <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
         <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -4698,12 +4810,23 @@ async function signInWithGoogle() {
       </svg>
       <span>Continue with Google</span>
     `;
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = defaultGoogleHtml;
+    }
+    const exploreBtn = $('exploreGoogleSignInBtn');
+    if (exploreBtn && exploreBtn !== button) {
+      exploreBtn.disabled = false;
+      exploreBtn.innerHTML = defaultGoogleHtml;
+    }
+    updateGoToPracticeBtnState();
     authNotice='Google sign-in could not start. Please retry. If it keeps failing, check the connection or allowed redirect URLs in Supabase.';
     if(message)message.textContent=authNotice;
   }
 }
 async function signOut() {
   try {
+    try { localStorage.removeItem('cracksql_pending_practice'); } catch (_) {}
     if (user?.id) {
       persist(false);
     }
@@ -5036,6 +5159,17 @@ async function saveProfileContactDetails() {
     closeProfileSetupModal();
     renderProfileAvatar();
     renderAuth();
+
+    if (window.pendingPracticeNavigation) {
+      const target = window.pendingPracticeNavigation;
+      window.pendingPracticeNavigation = null;
+      try { localStorage.removeItem('cracksql_pending_practice'); } catch (_) {}
+      selectedDomain = target.domain;
+      selectedLevel = target.level;
+      void loadScenario().then(() => {
+        showScreen('practice');
+      });
+    }
   } catch (err) {
     console.error('[ProfileContact] Save exception:', err);
     if (errorEl) {
@@ -5734,10 +5868,13 @@ try {
   updateProgress();
   renderDomainAndLevelPickers();
   renderScenarioCatalog();
+  updateGoToPracticeBtnState();
   initAppChrome();
   window.selectFeedbackEmoji = selectFeedbackEmoji;
   window.fetchUserFeedbackFromSupabase = fetchUserFeedbackFromSupabase;
   window.saveSubmittedFeedback = saveSubmittedFeedback;
+  window.handleGoToPractice = handleGoToPractice;
+  window.updateGoToPracticeBtnState = updateGoToPracticeBtnState;
   void initAuth();
   if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 } catch(error) {
