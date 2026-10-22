@@ -273,11 +273,13 @@ function renderAssessment(result) {
   const num = $('scoreNum');
   const headline = $('scoreHeadline');
   const howToThinkBox = $('howToThinkBox');
+  const scoreEl = $('score');
   
   if (!result) {
     if (ring) ring.style.background = 'conic-gradient(var(--line) 0deg, var(--line) 360deg)';
     if (num) num.textContent = '0';
     if (headline) headline.textContent = 'Explain your plan to calculate score (Goal, Sources, Logic)';
+    if (scoreEl) scoreEl.textContent = 'Thinking Score: Not evaluated yet';
     if (howToThinkBox) { howToThinkBox.hidden = true; howToThinkBox.innerHTML = ''; }
     ['Goal', 'Sources', 'Steps', 'Check'].forEach(k => {
       const chip = $('chip' + k);
@@ -350,13 +352,26 @@ async function copySchemaAndOpenFiddle() {
   }
 
   const domain = current.domain || selectedDomain || 'Banking';
-  const asset = data?.assets?.[domain];
+  let asset = data?.assets?.[domain];
   if (!asset) {
-    if (confirmEl) {
-      confirmEl.style.color = '#dc2626';
-      confirmEl.textContent = 'Scenario database setup is unavailable. Please reload the exercise.';
+    try {
+      const resp = await fetch('./data/scenarios.json');
+      if (resp.ok) {
+        const fullData = await resp.json();
+        if (fullData.assets) {
+          data = { ...(data || {}), assets: fullData.assets };
+          asset = data.assets[domain];
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load scenarios.json assets for fiddle package:', e);
     }
-    return;
+  }
+  if (!asset) {
+    asset = {
+      schema: current.schemaText || '',
+      sample: ''
+    };
   }
 
   // Retrieve effective scenario variant and specific reference SQL answer
@@ -658,7 +673,7 @@ function renderSqlEvaluation(result) {
 }
 
 async function resetCurrentSqlSession() {
-  if (!current || !data?.assets?.[current.domain]) return;
+  if (!current) return;
   if (sqlEngineManager.isBusy()) return;
 
   try {
@@ -668,7 +683,23 @@ async function resetCurrentSqlSession() {
       $('sqlGate').style.color = 'var(--muted)';
     }
     const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
-    await sqlEngineManager.resetScenario(effective, data.assets[effective.domain]);
+    let asset = data?.assets?.[effective.domain];
+    if (!asset) {
+      try {
+        const resp = await fetch('./data/scenarios.json');
+        if (resp.ok) {
+          const fullData = await resp.json();
+          if (fullData.assets) {
+            data = { ...(data || {}), assets: fullData.assets };
+            asset = data.assets[effective.domain];
+          }
+        }
+      } catch (e) {}
+    }
+    if (!asset) {
+      asset = { schema: effective.schemaText || '', sample: '' };
+    }
+    await sqlEngineManager.resetScenario(effective, asset);
     if ($('sqlGate')) {
       $('sqlGate').textContent = '✓ Scenario database session reset to clean state.';
       $('sqlGate').style.color = '#166534';
@@ -4193,7 +4224,8 @@ function copyQuery() {
 
 function copyAllScripts() {
   if (!current) return;
-  const setup = (data.assets[current.domain]?.schema || '') + '\n\n' + (data.assets[current.domain]?.sample || '');
+  const asset = data?.assets?.[current.domain] || { schema: current.schemaText || '', sample: '' };
+  const setup = (asset.schema || '') + '\n\n' + (asset.sample || '');
   const sql = ($('learnerSql')?.value || entry().sql || current.sql || '').trim();
   const all = `-- =========================================\n-- POSTGRESQL SCHEMA + SAMPLE DATA\n-- =========================================\n${setup}\n\n-- =========================================\n-- YOUR SQL QUERY\n-- =========================================\n${sql || current.sql};\n`;
   void copy(all, 'All scripts (Schema + Sample data + SQL)');
@@ -4226,7 +4258,23 @@ async function evaluateSql() {
   try {
     const targetScenarioId = current.id;
     const effective = getEffectiveScenario(current, user?.id || 'guest_user', state);
-    const result = await sqlEngineManager.evaluate(effective, data.assets[effective.domain], sql);
+    let asset = data?.assets?.[effective.domain];
+    if (!asset) {
+      try {
+        const resp = await fetch('./data/scenarios.json');
+        if (resp.ok) {
+          const fullData = await resp.json();
+          if (fullData.assets) {
+            data = { ...(data || {}), assets: fullData.assets };
+            asset = data.assets[effective.domain];
+          }
+        }
+      } catch (e) {}
+    }
+    if (!asset) {
+      asset = { schema: effective.schemaText || '', sample: '' };
+    }
+    const result = await sqlEngineManager.evaluate(effective, asset, sql);
 
     // If scenario changed while awaiting, don't update entry of old scenario
     if (!current || current.id !== targetScenarioId) return;
